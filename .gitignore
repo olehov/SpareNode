@@ -43,6 +43,7 @@
 build/
 Build/
 build-*/
+out/
 
 # CMake generated files
 CMakeFiles/
@@ -57,6 +58,15 @@ compile_commands.json
 *.log
 *.bak
 *.swp
+
+# IDE and editor files
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
 
 # vcpkg
 vcpkg_installed/
