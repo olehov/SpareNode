@@ -7,12 +7,17 @@ project(
     LANGUAGES CXX
 )
 
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
+include(SpareNodeBuildSettings)
+include(SpareNodeCompilerWarnings)
+
 add_executable(sparenode
     apps/sparenode/main.cpp
 )
 
-target_compile_features(sparenode PRIVATE cxx_std_23)
-
 target_include_directories(sparenode PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
 )
+
+sparenode_enable_compiler_warnings(sparenode)

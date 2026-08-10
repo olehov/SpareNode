@@ -28,6 +28,74 @@ SpareNode/
 - A C++23-compatible compiler
 - CMake 3.25 or newer
 
+Supported toolchains:
+
+- Windows: MSVC
+- Linux: GCC or Clang
+
+## Build
+
+### Windows (MSVC)
+
+Run these commands from a Visual Studio Developer PowerShell:
+
+```powershell
+cmake -S . -B build/msvc -A x64
+cmake --build build/msvc --config Debug --parallel
+.\build\msvc\bin\Debug\sparenode.exe
+```
+
+Replace `Debug` with `Release` for an optimised build.
+
+### Linux (GCC)
+
+```bash
+cmake -S . -B build/gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/gcc --parallel
+./build/gcc/bin/Debug/sparenode
+```
+
+### Linux (Clang)
+
+```bash
+cmake -S . -B build/clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/clang --parallel
+./build/clang/bin/Debug/sparenode
+```
+
+For a release build on Linux, configure with `-DCMAKE_BUILD_TYPE=Release`.
+All generators place executables in `bin/<configuration>` and libraries in
+`lib/<configuration>` inside the selected build directory.
+
+## Clean
+
+Remove compiled files while keeping the CMake configuration:
+
+Windows (MSVC):
+
+```powershell
+cmake --build build/msvc --config Debug --target clean
+```
+
+Linux (GCC or Clang):
+
+```bash
+cmake --build build/gcc --target clean
+cmake --build build/clang --target clean
+```
+
+For a completely clean reconfiguration, remove the selected build directory:
+
+```powershell
+# Windows
+Remove-Item -Recurse -Force build/msvc
+```
+
+```bash
+# Linux
+rm -rf build/gcc build/clang
+```
+
 ## License
 
 SpareNode is available under the [MIT License](LICENSE).
