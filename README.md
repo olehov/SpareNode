@@ -67,6 +67,35 @@ For a release build on Linux, configure with `-DCMAKE_BUILD_TYPE=Release`.
 All generators place executables in `bin/<configuration>` and libraries in
 `lib/<configuration>` inside the selected build directory.
 
+## Test
+
+SpareNode uses Catch2 for tests and CTest for test discovery and execution.
+Testing is enabled by default through CMake's standard `BUILD_TESTING` option.
+
+Windows (MSVC):
+
+```powershell
+cmake --build build/msvc --config Debug --parallel
+ctest --test-dir build/msvc -C Debug --output-on-failure
+```
+
+Linux (GCC or Clang):
+
+```bash
+cmake --build build/gcc --parallel
+ctest --test-dir build/gcc --output-on-failure
+
+cmake --build build/clang --parallel
+ctest --test-dir build/clang --output-on-failure
+```
+
+To configure an application-only build without downloading or building the
+test dependency, pass `-DBUILD_TESTING=OFF` when configuring CMake.
+
+The advanced `SPARENODE_ENABLE_FAILURE_PROBE` option registers a deliberately
+failing test. It is disabled by default and exists only to verify that CTest
+returns a failing status when a test fails.
+
 ## Clean
 
 Remove compiled files while keeping the CMake configuration:
