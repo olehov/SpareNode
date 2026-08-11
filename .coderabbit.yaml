@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+    ignore_title_keywords:
+      - WIP
+      - DO NOT MERGE
+    ignore_usernames:
+      - dependabot[bot]
+      - github-actions[bot]
+
+  path_filters:
+    - "!build/**"
+    - "!build-*/**"
+
+  tools:
+    clang:
+      enabled: true
+    cppcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 900000
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Review for correctness, clear error handling, maintainability, and
+        test coverage gaps. Treat automated review as advisory: do not approve
+        a pull request or suggest bypassing CI or human review.
+
+    - path: "**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx}"
+      instructions: |
+        This is a C++23 codebase built with MSVC, GCC, and Clang on Windows and
+        Linux. Check ownership and lifetime semantics, RAII, undefined
+        behaviour, bounds and integer conversions, exception safety, resource
+        leaks, dangling views or spans, and cross-platform assumptions.
+        Prefer standard C++23 facilities where they make ownership and failure
+        handling clearer, including std::expected, std::span, std::string_view,
+        std::jthread, and std::stop_token. Do not request modern constructs when
+        they would weaken correctness or clarity.
+
+    - path: "{apps,include,src}/**"
+      instructions: |
+        Treat file paths, network data, and concurrent state as untrusted.
+        Check path traversal, symlink or junction escape, TOCTOU races,
+        filesystem sandbox boundaries, buffer limits, input validation,
+        connection and cancellation lifetime, resource exhaustion, data races,
+        deadlocks, and shutdown behaviour.
+
+    - path: "tests/**"
+      instructions: |
+        Check that tests cover success, failure, boundary, security, and
+        Windows/Linux-specific behaviour introduced by the change. Flag tests
+        that rely on timing, machine-specific paths, or shared mutable state.
+
+    - path: "{CMakeLists.txt,cmake/**}"
+      instructions: |
+        Check CMake changes with both single-config and multi-config generators
+        in mind. Preserve MSVC, GCC, and Clang support; Debug and Release
+        behaviour; install rules; generated files; and first-party-only static
+        analysis settings.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Review triggers, permissions, untrusted pull-request data, secret
+        exposure, artifact integrity, dependency pinning, and shell differences.
+        Require least-privilege permissions and full commit SHAs for third-party
+        actions. Release publication must remain restricted to trusted tag
+        events and must depend on successful builds and tests.
+
+chat:
+  auto_reply: true
