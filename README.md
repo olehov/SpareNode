@@ -137,6 +137,17 @@ The GitHub Actions CI workflow runs for pushes and pull requests targeting
 The workflow has read-only repository permissions and does not publish or
 deploy artifacts.
 
+## Automated pull request review
+
+CodeRabbit provides advisory review feedback for new pull requests and updates
+its review after subsequent pushes. Repository-specific guidance covers C++23,
+resource ownership, filesystem and network security, concurrency, portability,
+tests, CMake, and GitHub Actions.
+
+Automated review does not replace human review or the required CI `Quality gate`.
+See [Automated pull request review](docs/automated-code-review.md) for the App
+installation, branch-protection, configuration, and verification steps.
+
 ## Releases
 
 Releases are created from semantic version tags in the form
