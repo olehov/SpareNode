@@ -1,0 +1,39 @@
+include(FetchContent)
+
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.15.3
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(Catch2)
+
+list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+include(Catch)
+
+add_executable(sparenode_tests
+    smoke_test.cpp
+)
+
+target_link_libraries(sparenode_tests PRIVATE
+    Catch2::Catch2WithMain
+)
+
+sparenode_enable_compiler_warnings(sparenode_tests)
+
+catch_discover_tests(sparenode_tests)
+
+option(
+    SPARENODE_ENABLE_FAILURE_PROBE
+    "Register a deliberately failing test to verify CTest failure propagation"
+    OFF
+)
+mark_as_advanced(SPARENODE_ENABLE_FAILURE_PROBE)
+
+if(SPARENODE_ENABLE_FAILURE_PROBE)
+    add_test(
+        NAME sparenode_failure_probe
+        COMMAND "${CMAKE_COMMAND}" -E false
+    )
+endif()

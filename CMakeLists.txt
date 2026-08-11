@@ -21,3 +21,8 @@ target_include_directories(sparenode PRIVATE
 )
 
 sparenode_enable_compiler_warnings(sparenode)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
