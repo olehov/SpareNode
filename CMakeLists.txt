@@ -33,12 +33,30 @@ configure_file(
     @ONLY
 )
 
+add_library(sparenode_core
+    src/network/tcp_socket.cpp
+)
+
+target_include_directories(sparenode_core PUBLIC
+    "${PROJECT_SOURCE_DIR}/include"
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_core PUBLIC ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_core)
+sparenode_enable_static_analysis(sparenode_core)
+
 add_executable(sparenode
     apps/sparenode/main.cpp
 )
 
+target_link_libraries(sparenode PRIVATE
+    sparenode_core
+)
+
 target_include_directories(sparenode PRIVATE
-    "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_BINARY_DIR}/generated"
 )
 
