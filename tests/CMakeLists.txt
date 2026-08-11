@@ -5,6 +5,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
     GIT_TAG v3.15.3
     GIT_SHALLOW TRUE
+    SYSTEM
 )
 
 FetchContent_MakeAvailable(Catch2)
@@ -21,6 +22,7 @@ target_link_libraries(sparenode_tests PRIVATE
 )
 
 sparenode_enable_compiler_warnings(sparenode_tests)
+sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
 

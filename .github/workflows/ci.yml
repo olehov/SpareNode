@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build and test (Windows MSVC)
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: cmake -S . -B build/ci-msvc -G "Visual Studio 18 2026" -A x64
+
+      - name: Build
+        run: cmake --build build/ci-msvc --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build/ci-msvc -C Debug --output-on-failure
+
+  build-linux:
+    name: Build and test (Linux ${{ matrix.name }})
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC
+            compiler: g++
+            build-directory: build/ci-gcc
+          - name: Clang
+            compiler: clang++
+            build-directory: build/ci-clang
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: >-
+          cmake -S . -B "${{ matrix.build-directory }}"
+          -DCMAKE_CXX_COMPILER="${{ matrix.compiler }}"
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build "${{ matrix.build-directory }}" --parallel
+
+      - name: Test
+        run: ctest --test-dir "${{ matrix.build-directory }}" --output-on-failure
+
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-format-18
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          mapfile -d '' sources < <(git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp')
+          if (( ${#sources[@]} == 0 )); then
+            echo "No C or C++ source files found."
+            exit 0
+          fi
+          clang-format-18 --dry-run --Werror "${sources[@]}"
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Clang tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 clang-tidy-18
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/ci-analysis
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPARENODE_ENABLE_CLANG_TIDY=ON
+
+      - name: Run clang-tidy
+        run: cmake --build build/ci-analysis --parallel
+
+  quality-gate:
+    name: Quality gate
+    if: ${{ always() }}
+    needs:
+      - build-windows
+      - build-linux
+      - formatting
+      - static-analysis
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Verify required jobs
+        env:
+          WINDOWS_RESULT: ${{ needs.build-windows.result }}
+          LINUX_RESULT: ${{ needs.build-linux.result }}
+          FORMATTING_RESULT: ${{ needs.formatting.result }}
+          STATIC_ANALYSIS_RESULT: ${{ needs.static-analysis.result }}
+        run: |
+          results=(
+            "$WINDOWS_RESULT"
+            "$LINUX_RESULT"
+            "$FORMATTING_RESULT"
+            "$STATIC_ANALYSIS_RESULT"
+          )
+
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "A required CI job did not succeed: $result"
+              exit 1
+            fi
+          done

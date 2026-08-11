@@ -96,6 +96,47 @@ The advanced `SPARENODE_ENABLE_FAILURE_PROBE` option registers a deliberately
 failing test. It is disabled by default and exists only to verify that CTest
 returns a failing status when a test fails.
 
+## Code quality
+
+The repository contains project-wide `.clang-format` and `.clang-tidy`
+configurations. CI treats formatting violations and configured static-analysis
+findings as errors.
+
+Check formatting locally without modifying files:
+
+```bash
+git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' \
+    | xargs -0 clang-format-18 --dry-run --Werror
+```
+
+Run static analysis through the build system:
+
+```bash
+cmake -S . -B build/analysis \
+    -DCMAKE_CXX_COMPILER=clang++-18 \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DSPARENODE_ENABLE_CLANG_TIDY=ON
+cmake --build build/analysis --parallel
+```
+
+Generated and third-party targets are not assigned the clang-tidy integration;
+analysis is enabled only for first-party SpareNode targets.
+
+## Continuous integration
+
+The GitHub Actions CI workflow runs for pushes and pull requests targeting
+`main`, and can also be started manually. It provides these checks:
+
+- Windows MSVC build and CTest execution
+- Linux GCC build and CTest execution
+- Linux Clang build and CTest execution
+- clang-format validation
+- clang-tidy static analysis
+- an aggregate `Quality gate` suitable for branch protection
+
+The workflow has read-only repository permissions and does not publish or
+deploy artifacts.
+
 ## Clean
 
 Remove compiled files while keeping the CMake configuration:

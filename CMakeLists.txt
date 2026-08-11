@@ -11,6 +11,7 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(SpareNodeBuildSettings)
 include(SpareNodeCompilerWarnings)
+include(SpareNodeStaticAnalysis)
 
 add_executable(sparenode
     apps/sparenode/main.cpp
@@ -21,6 +22,7 @@ target_include_directories(sparenode PRIVATE
 )
 
 sparenode_enable_compiler_warnings(sparenode)
+sparenode_enable_static_analysis(sparenode)
 
 include(CTest)
 if(BUILD_TESTING)
