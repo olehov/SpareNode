@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: Validate version tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Validate semantic version
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $GITHUB_REF_NAME"
+            echo "Expected vMAJOR.MINOR.PATCH, for example v0.1.0."
+            exit 1
+          fi
+
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    name: Build release (Windows x64)
+    needs: validate-tag
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/release
+          -G "Visual Studio 18 2026"
+          -A x64
+          "-DSPARENODE_VERSION=${{ needs.validate-tag.outputs.version }}"
+
+      - name: Build
+        run: cmake --build build/release --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build/release -C Release --output-on-failure
+
+      - name: Verify embedded version
+        shell: pwsh
+        run: |
+          $expected = "SpareNode ${{ needs.validate-tag.outputs.version }}"
+          $actual = & ./build/release/bin/Release/sparenode.exe
+          if ($actual -ne $expected) {
+            throw "Version mismatch: expected '$expected', received '$actual'."
+          }
+
+      - name: Create archive
+        shell: pwsh
+        run: |
+          $packageName = "SpareNode-${{ needs.validate-tag.outputs.version }}-windows-x64"
+          $packagePath = Join-Path "dist" $packageName
+          cmake --install build/release --config Release --prefix $packagePath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $timestamp = [DateTimeOffset]::FromUnixTimeSeconds(
+            [int64](git show -s --format=%ct)
+          ).UtcDateTime
+          Get-ChildItem -LiteralPath $packagePath -Recurse | ForEach-Object {
+            $_.LastWriteTimeUtc = $timestamp
+          }
+
+          Push-Location dist
+          cmake -E tar cfv "$packageName.zip" --format=zip $packageName
+          $archiveResult = $LASTEXITCODE
+          Pop-Location
+          exit $archiveResult
+
+      - name: Upload Windows archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release
+          path: dist/SpareNode-${{ needs.validate-tag.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    name: Build release (Linux x64)
+    needs: validate-tag
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_BUILD_TYPE=Release
+          -DSPARENODE_VERSION=${{ needs.validate-tag.outputs.version }}
+
+      - name: Build
+        run: cmake --build build/release --parallel
+
+      - name: Test
+        run: ctest --test-dir build/release --output-on-failure
+
+      - name: Verify embedded version
+        run: |
+          expected="SpareNode ${{ needs.validate-tag.outputs.version }}"
+          actual="$(./build/release/bin/Release/sparenode)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Version mismatch: expected '$expected', received '$actual'."
+            exit 1
+          fi
+
+      - name: Create archive
+        run: |
+          package_name="SpareNode-${{ needs.validate-tag.outputs.version }}-linux-x64"
+          package_path="dist/$package_name"
+          cmake --install build/release --prefix "$package_path"
+          source_date_epoch="$(git show -s --format=%ct)"
+          tar \
+            --sort=name \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --mtime="@$source_date_epoch" \
+            -czf "dist/$package_name.tar.gz" \
+            -C dist \
+            "$package_name"
+
+      - name: Upload Linux archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-release
+          path: dist/SpareNode-${{ needs.validate-tag.outputs.version }}-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - validate-tag
+      - build-windows
+      - build-linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "*-release"
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          dist/*
+          --verify-tag
+          --generate-notes
+          --title "SpareNode $GITHUB_REF_NAME"

@@ -21,6 +21,10 @@ target_link_libraries(sparenode_tests PRIVATE
     Catch2::Catch2WithMain
 )
 
+target_include_directories(sparenode_tests PRIVATE
+    "${PROJECT_BINARY_DIR}/generated"
+)
+
 sparenode_enable_compiler_warnings(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 

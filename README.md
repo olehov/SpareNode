@@ -137,6 +137,31 @@ The GitHub Actions CI workflow runs for pushes and pull requests targeting
 The workflow has read-only repository permissions and does not publish or
 deploy artifacts.
 
+## Releases
+
+Releases are created from semantic version tags in the form
+`vMAJOR.MINOR.PATCH`. The release workflow builds and tests tagged source on
+Windows and Linux, verifies the embedded version, creates archives, and only
+then publishes a GitHub Release.
+
+Create a release after the target commit has passed CI on `main`:
+
+```bash
+git switch main
+git pull --ff-only
+git tag -a v0.1.0 -m "SpareNode v0.1.0"
+git push origin v0.1.0
+```
+
+Each release contains:
+
+- `SpareNode-<version>-windows-x64.zip`
+- `SpareNode-<version>-linux-x64.tar.gz`
+
+Both archives contain the executable, `README.md`, `LICENSE`, and a `VERSION`
+file. Passing `-DSPARENODE_VERSION=MAJOR.MINOR.PATCH` to CMake reproduces the
+version embedded in a tagged release build.
+
 ## Clean
 
 Remove compiled files while keeping the CMake configuration:
