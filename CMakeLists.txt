@@ -33,8 +33,12 @@ configure_file(
     @ONLY
 )
 
-add_library(sparenode_core
+add_library(sparenode_core STATIC
     src/network/tcp_socket.cpp
+)
+
+target_compile_features(sparenode_core PUBLIC
+    cxx_std_23
 )
 
 target_include_directories(sparenode_core PUBLIC
@@ -42,7 +46,7 @@ target_include_directories(sparenode_core PUBLIC
 )
 
 if(WIN32)
-    target_link_libraries(sparenode_core PUBLIC ws2_32)
+    target_link_libraries(sparenode_core PRIVATE ws2_32)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)

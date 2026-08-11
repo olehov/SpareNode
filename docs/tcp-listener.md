@@ -29,7 +29,15 @@ void accept_one()
 names such as `localhost` are rejected, preventing an implicit wildcard bind.
 Use `0.0.0.0` or `::` only when exposure on every matching interface is
 intentional. Port `0` requests an available system-selected port; call
-`local_endpoint()` to obtain the effective address and port.
+`local_endpoint()` to obtain the effective address and port. The default backlog
+is `128` pending connections and can be overridden with the second `bind`
+argument.
+
+`accept()` blocks indefinitely until a client connects or the operating system
+reports an error. `TcpListener` is not thread-safe: do not call its methods
+concurrently and do not move or destroy it while `accept()` is running. The
+current shutdown sequence is to let active operations finish and then destroy
+the listener. Cooperative cancellation will be introduced by a separate change.
 
 Operations return `sparenode::Result<Value, NetworkError>`. Errors identify the
 failed operation, error domain, and native numeric code without embedding paths,

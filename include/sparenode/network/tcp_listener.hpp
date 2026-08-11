@@ -11,6 +11,9 @@ namespace sparenode::network
 {
 
 /// Owns a listening TCP socket without exposing platform-specific handle types.
+///
+/// Instances are not thread-safe. Do not call methods concurrently on the same
+/// listener or destroy it while an operation is in progress.
 class TcpListener final
 {
   public:
@@ -35,7 +38,8 @@ class TcpListener final
     [[nodiscard]] static Result<TcpListener, NetworkError> bind(const TcpEndpoint &endpoint,
                                                                 int backlog = 128);
 
-    /// Blocks until a connection is accepted or the operating system reports an error.
+    /// Blocks indefinitely until a connection is accepted or the operating system
+    /// reports an error. This initial API does not provide cancellation.
     [[nodiscard]] Result<TcpConnection, NetworkError> accept();
 
     /// Returns the bound address and the effective port selected by the system.

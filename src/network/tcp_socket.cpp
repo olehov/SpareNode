@@ -17,6 +17,7 @@
 #else
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -53,6 +54,13 @@ void close_socket(const NativeSocket socket) noexcept
     {
         static_cast<void>(closesocket(socket));
     }
+}
+
+// Winsock cancellation is not part of the current listener contract.
+[[nodiscard]] bool should_retry_accept(const int error_code) noexcept
+{
+    static_cast<void>(error_code);
+    return false;
 }
 
 class WinsockRuntime final
@@ -158,6 +166,12 @@ void close_socket(const NativeSocket socket) noexcept
     }
 }
 
+// A signal can interrupt POSIX accept without representing a socket failure.
+[[nodiscard]] bool should_retry_accept(const int error_code) noexcept
+{
+    return error_code == EINTR;
+}
+
 // Keeps the cross-platform call site uniform; POSIX needs no socket runtime startup.
 [[nodiscard]] Result<void, NetworkError> ensure_socket_runtime()
 {
@@ -168,6 +182,16 @@ void close_socket(const NativeSocket socket) noexcept
 // Restricts IPv6 sockets to IPv6 so listening interfaces remain explicit.
 [[nodiscard]] bool configure_socket_security(const SocketConfiguration configuration)
 {
+    // Allow a restarted server to bind while connections from its previous run
+    // remain in TIME_WAIT. Unlike Windows SO_REUSEADDR, this does not allow a
+    // second live TCP listener to take over the same address and port.
+    const int reuse_address = 1;
+    if (setsockopt(configuration.socket, SOL_SOCKET, SO_REUSEADDR, &reuse_address,
+                   sizeof(reuse_address)) != 0)
+    {
+        return false;
+    }
+
     if (configuration.family != AF_INET6)
     {
         return true;
@@ -428,17 +452,26 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
     }
 
     sockaddr_storage peer_address{};
-    SocketLength peer_address_length = sizeof(peer_address);
+    SocketLength peer_address_length{};
     // accept blocks until a client arrives or the operating system reports an error.
-    const NativeSocket accepted_socket =
-        ::accept(impl_->socket, reinterpret_cast<sockaddr *>(&peer_address), &peer_address_length);
-    if (accepted_socket == invalid_socket)
+    NativeSocket accepted_socket = invalid_socket;
+    while (accepted_socket == invalid_socket)
     {
-        return unexpected(NetworkError{
-            NetworkOperation::accept,
-            NetworkErrorDomain::socket,
-            last_socket_error(),
-        });
+        peer_address_length = static_cast<SocketLength>(sizeof(peer_address));
+        accepted_socket = ::accept(impl_->socket, reinterpret_cast<sockaddr *>(&peer_address),
+                                   &peer_address_length);
+        if (accepted_socket == invalid_socket)
+        {
+            const int error_code = last_socket_error();
+            if (!should_retry_accept(error_code))
+            {
+                return unexpected(NetworkError{
+                    NetworkOperation::accept,
+                    NetworkErrorDomain::socket,
+                    error_code,
+                });
+            }
+        }
     }
 
     auto endpoint = endpoint_from_address(reinterpret_cast<const sockaddr *>(&peer_address),

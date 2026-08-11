@@ -23,6 +23,11 @@ target_link_libraries(sparenode_tests PRIVATE
     sparenode_core
 )
 
+if(WIN32)
+    # The integration tests call Winsock directly to create their client socket.
+    target_link_libraries(sparenode_tests PRIVATE ws2_32)
+endif()
+
 target_include_directories(sparenode_tests PRIVATE
     "${PROJECT_BINARY_DIR}/generated"
 )

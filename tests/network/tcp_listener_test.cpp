@@ -15,6 +15,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -123,6 +124,30 @@ TEST_CASE("TCP listener rejects non-numeric interfaces", "[network][tcp]")
     CHECK(listener.error().domain == sparenode::network::NetworkErrorDomain::address_resolution);
 }
 
+TEST_CASE("TCP listener rejects invalid configuration", "[network][tcp]")
+{
+    const auto empty_address = sparenode::network::TcpListener::bind({"", 0});
+    REQUIRE_FALSE(empty_address.has_value());
+    CHECK(empty_address.error().operation == sparenode::network::NetworkOperation::bind);
+    CHECK(empty_address.error().domain == sparenode::network::NetworkErrorDomain::validation);
+
+    const auto invalid_backlog = sparenode::network::TcpListener::bind({"127.0.0.1", 0}, 0);
+    REQUIRE_FALSE(invalid_backlog.has_value());
+    CHECK(invalid_backlog.error().operation == sparenode::network::NetworkOperation::bind);
+    CHECK(invalid_backlog.error().domain == sparenode::network::NetworkErrorDomain::validation);
+}
+
+TEST_CASE("TCP listener binds an IPv6 loopback interface", "[network][tcp]")
+{
+    auto listener = sparenode::network::TcpListener::bind({"::1", 0});
+    REQUIRE(listener.has_value());
+
+    const auto endpoint = listener->local_endpoint();
+    REQUIRE(endpoint.has_value());
+    CHECK(endpoint->address == "::1");
+    CHECK(endpoint->port != 0);
+}
+
 TEST_CASE("TCP listener accepts a loopback connection", "[network][tcp]")
 {
     // Port zero avoids races with a hard-coded port already used on the test machine.
@@ -133,6 +158,17 @@ TEST_CASE("TCP listener accepts a loopback connection", "[network][tcp]")
     auto listener = std::move(listener_result.value());
     REQUIRE(listener.is_open());
     CHECK_FALSE(listener_result->is_open());
+
+    const auto moved_from_endpoint = listener_result->local_endpoint();
+    REQUIRE_FALSE(moved_from_endpoint.has_value());
+    CHECK(moved_from_endpoint.error().operation ==
+          sparenode::network::NetworkOperation::query_local_endpoint);
+    CHECK(moved_from_endpoint.error().domain == sparenode::network::NetworkErrorDomain::state);
+
+    const auto moved_from_accept = listener_result->accept();
+    REQUIRE_FALSE(moved_from_accept.has_value());
+    CHECK(moved_from_accept.error().operation == sparenode::network::NetworkOperation::accept);
+    CHECK(moved_from_accept.error().domain == sparenode::network::NetworkErrorDomain::state);
 
     const auto local_endpoint = listener.local_endpoint();
     REQUIRE(local_endpoint.has_value());
@@ -168,6 +204,11 @@ TEST_CASE("TCP listener releases its port on destruction", "[network][tcp]")
         const auto endpoint = first_listener->local_endpoint();
         REQUIRE(endpoint.has_value());
         released_port = endpoint->port;
+
+        // A second listener cannot take the address while the first still owns it.
+        const auto conflicting_listener =
+            sparenode::network::TcpListener::bind({"127.0.0.1", released_port});
+        CHECK_FALSE(conflicting_listener.has_value());
     }
 
     // A successful second bind proves that RAII released the original port.
