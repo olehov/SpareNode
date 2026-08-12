@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "sparenode/network/detail/retry_interrupted_operation.hpp"
+#include "sparenode/network/detail/socket_address.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "sparenode/network/tcp_listener.hpp"
@@ -188,6 +189,23 @@ TEST_CASE("TCP listener binds an IPv6 loopback interface", "[network][tcp]")
     REQUIRE(endpoint.has_value());
     CHECK(endpoint->address == "::1");
     CHECK(endpoint->port != 0);
+}
+
+TEST_CASE("IPv6 endpoint conversion preserves its numeric scope", "[network][tcp][ipv6]")
+{
+    sockaddr_in6 scoped_address{};
+    scoped_address.sin6_family = AF_INET6;
+    scoped_address.sin6_port = htons(4242);
+    scoped_address.sin6_scope_id = 7;
+    REQUIRE(inet_pton(AF_INET6, "fe80::1", &scoped_address.sin6_addr) == 1);
+
+    const auto endpoint = sparenode::network::detail::endpoint_from_address(
+        reinterpret_cast<const sockaddr *>(&scoped_address),
+        sparenode::network::NetworkOperation::query_local_endpoint);
+
+    REQUIRE(endpoint.has_value());
+    CHECK(endpoint->address == "fe80::1%7");
+    CHECK(endpoint->port == 4242);
 }
 
 #ifndef _WIN32

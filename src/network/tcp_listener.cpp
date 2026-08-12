@@ -174,7 +174,7 @@ Result<TcpEndpoint, NetworkError> TcpListener::local_endpoint() const
     }
 
     sockaddr_storage local_address{};
-    detail::SocketLength local_address_length = sizeof(local_address);
+    auto local_address_length = static_cast<detail::SocketLength>(sizeof(local_address));
     if (getsockname(impl_->socket, reinterpret_cast<sockaddr *>(&local_address),
                     &local_address_length) != 0)
     {

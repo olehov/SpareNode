@@ -11,6 +11,7 @@
 #include <ws2tcpip.h>
 #else
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #endif
 

@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <utility>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -38,6 +40,7 @@ Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
     std::array<char, INET6_ADDRSTRLEN> buffer{};
     const void *raw_address = nullptr;
     std::uint16_t port = 0;
+    std::uint32_t scope_id = 0;
 
     if (address->sa_family == AF_INET)
     {
@@ -50,6 +53,7 @@ Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
         const auto *ipv6 = reinterpret_cast<const sockaddr_in6 *>(address);
         raw_address = &ipv6->sin6_addr;
         port = ntohs(ipv6->sin6_port);
+        scope_id = ipv6->sin6_scope_id;
     }
     else
     {
@@ -61,7 +65,16 @@ Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
 
-    return TcpEndpoint{buffer.data(), port};
+    std::string textual_address(buffer.data());
+    if (scope_id != 0)
+    {
+        // A numeric zone identifier is portable across the bind and query paths
+        // and avoids depending on platform-specific interface-name lookups.
+        textual_address += '%';
+        textual_address += std::to_string(scope_id);
+    }
+
+    return TcpEndpoint{std::move(textual_address), port};
 }
 
 } // namespace sparenode::network::detail

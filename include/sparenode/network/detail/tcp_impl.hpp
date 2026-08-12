@@ -23,6 +23,11 @@ struct TcpConnection::Impl
         detail::close_socket(socket);
     }
 
+    Impl(const Impl &) = delete;
+    Impl &operator=(const Impl &) = delete;
+    Impl(Impl &&) = delete;
+    Impl &operator=(Impl &&) = delete;
+
     detail::NativeSocket socket{detail::invalid_socket};
     TcpEndpoint peer_endpoint;
 };
@@ -39,6 +44,11 @@ struct TcpListener::Impl
     {
         detail::close_socket(socket);
     }
+
+    Impl(const Impl &) = delete;
+    Impl &operator=(const Impl &) = delete;
+    Impl(Impl &&) = delete;
+    Impl &operator=(Impl &&) = delete;
 
     detail::NativeSocket socket{detail::invalid_socket};
 };
