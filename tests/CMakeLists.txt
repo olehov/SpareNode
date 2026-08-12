@@ -26,10 +26,6 @@ target_link_libraries(sparenode_tests PRIVATE
 if(WIN32)
     # The integration tests call Winsock directly to create their client socket.
     target_link_libraries(sparenode_tests PRIVATE ws2_32)
-else()
-    # The EINTR regression test targets the thread blocked inside accept().
-    find_package(Threads REQUIRED)
-    target_link_libraries(sparenode_tests PRIVATE Threads::Threads)
 endif()
 
 target_include_directories(sparenode_tests PRIVATE

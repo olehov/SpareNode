@@ -1,14 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cerrno>
-#include <chrono>
-#include <csignal>
 #include <cstdint>
-#include <future>
-#include <optional>
-#include <thread>
 #include <utility>
 
+#include "sparenode/network/detail/retry_interrupted_operation.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "sparenode/network/tcp_listener.hpp"
@@ -23,7 +19,6 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -92,53 +87,6 @@ void close_test_socket(const NativeTestSocket socket) noexcept
             error.code == ENOPROTOOPT || error.code == EADDRNOTAVAIL);
 }
 
-volatile std::sig_atomic_t signal_observed = 0;
-
-// Records delivery while deliberately doing no work in signal context.
-void observe_test_signal(int) noexcept
-{
-    signal_observed = 1;
-}
-
-class ScopedSignalHandler final
-{
-  public:
-    // Installs a handler without SA_RESTART so a blocked accept returns EINTR.
-    explicit ScopedSignalHandler(const int signal_number) noexcept : signal_number_(signal_number)
-    {
-        struct sigaction action
-        {
-        };
-        action.sa_handler = observe_test_signal;
-        static_cast<void>(sigemptyset(&action.sa_mask));
-        action.sa_flags = 0;
-        installed_ = sigaction(signal_number_, &action, &previous_) == 0;
-    }
-
-    // Restores the process signal action even if a test assertion fails.
-    ~ScopedSignalHandler()
-    {
-        if (installed_)
-        {
-            static_cast<void>(sigaction(signal_number_, &previous_, nullptr));
-        }
-    }
-
-    ScopedSignalHandler(const ScopedSignalHandler &) = delete;
-    ScopedSignalHandler &operator=(const ScopedSignalHandler &) = delete;
-
-    [[nodiscard]] bool is_installed() const noexcept
-    {
-        return installed_;
-    }
-
-  private:
-    int signal_number_{};
-    struct sigaction previous_
-    {
-    };
-    bool installed_{};
-};
 #endif
 
 class TestSocket final
@@ -243,53 +191,21 @@ TEST_CASE("TCP listener binds an IPv6 loopback interface", "[network][tcp]")
 }
 
 #ifndef _WIN32
-TEST_CASE("TCP listener retries accept after EINTR", "[network][tcp][posix]")
+TEST_CASE("Interrupted accept operation is retried deterministically", "[network][tcp][posix]")
 {
-    using namespace std::chrono_literals;
-
-    auto listener_result = sparenode::network::TcpListener::bind({"127.0.0.1", 0});
-    REQUIRE(listener_result.has_value());
-    auto listener = std::move(listener_result.value());
-
-    const auto local_endpoint = listener.local_endpoint();
-    REQUIRE(local_endpoint.has_value());
-
-    signal_observed = 0;
-    const ScopedSignalHandler signal_handler(SIGUSR1);
-    REQUIRE(signal_handler.is_installed());
-
-    std::promise<void> accept_started;
-    auto accept_started_future = accept_started.get_future();
-    std::optional<
-        sparenode::Result<sparenode::network::TcpConnection, sparenode::network::NetworkError>>
-        accept_result;
-
-    std::thread accept_thread(
-        [&listener, &accept_started, &accept_result]
+    int operation_calls = 0;
+    const auto result = sparenode::network::detail::retry_interrupted_operation(
+        invalid_test_socket,
+        [&operation_calls]
         {
-            accept_started.set_value();
-            accept_result.emplace(listener.accept());
-        });
+            ++operation_calls;
+            return operation_calls == 1 ? invalid_test_socket : NativeTestSocket{42};
+        },
+        [] { return EINTR; }, sparenode::network::detail::should_retry_accept);
 
-    accept_started_future.wait();
-    std::this_thread::sleep_for(20ms);
-    const int interrupt_result = pthread_kill(accept_thread.native_handle(), SIGUSR1);
-    std::this_thread::sleep_for(20ms);
-
-    auto client = connect_to(local_endpoint.value());
-    accept_thread.join();
-
-    REQUIRE(interrupt_result == 0);
-    REQUIRE(signal_observed == 1);
-    if (!accept_result)
-    {
-        FAIL("accept thread did not publish a result");
-        return;
-    }
-    auto accepted = std::move(accept_result).value();
-    REQUIRE(accepted.has_value());
-    CHECK(accepted->is_open());
-    CHECK(client.is_open());
+    CHECK(operation_calls == 2);
+    CHECK(result.value == 42);
+    CHECK(result.error_code == 0);
 }
 #endif
 
