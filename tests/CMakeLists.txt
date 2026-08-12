@@ -14,12 +14,19 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
 add_executable(sparenode_tests
+    network/tcp_listener_test.cpp
     smoke_test.cpp
 )
 
 target_link_libraries(sparenode_tests PRIVATE
     Catch2::Catch2WithMain
+    sparenode_core
 )
+
+if(WIN32)
+    # The integration tests call Winsock directly to create their client socket.
+    target_link_libraries(sparenode_tests PRIVATE ws2_32)
+endif()
 
 target_include_directories(sparenode_tests PRIVATE
     "${PROJECT_BINARY_DIR}/generated"

@@ -96,6 +96,13 @@ The advanced `SPARENODE_ENABLE_FAILURE_PROBE` option registers a deliberately
 failing test. It is disabled by default and exists only to verify that CTest
 returns a failing status when a test fails.
 
+## Networking
+
+The cross-platform TCP listener exposes move-only, RAII-managed listener and
+connection objects with structured errors. Binding requires an explicit numeric
+IPv4 or IPv6 interface address. See the [TCP listener documentation](docs/tcp-listener.md)
+for the API, ownership rules, and security constraints.
+
 ## Code quality
 
 The repository contains project-wide `.clang-format` and `.clang-tidy`
