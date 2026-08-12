@@ -34,6 +34,7 @@ configure_file(
 )
 
 add_library(sparenode_core STATIC
+    src/network/accept_wait.cpp
     src/network/native_socket.cpp
     src/network/socket_address.cpp
     src/network/tcp_connection.cpp

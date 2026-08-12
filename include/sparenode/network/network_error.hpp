@@ -26,6 +26,7 @@ enum class NetworkErrorDomain : std::uint8_t
     address_resolution,
     socket,
     state,
+    cancellation,
 };
 
 /// A structured network failure that does not expose sensitive diagnostic text.

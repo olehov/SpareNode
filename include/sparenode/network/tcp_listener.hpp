@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <stop_token>
 
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
@@ -39,8 +40,16 @@ class TcpListener final
                                                                 int backlog = 128);
 
     /// Blocks indefinitely until a connection is accepted or the operating system
-    /// reports an error. This initial API does not provide cancellation.
+    /// reports an error.
     [[nodiscard]] Result<TcpConnection, NetworkError> accept();
+
+    /// Waits for a connection while allowing another thread to request cancellation.
+    ///
+    /// Cancellation wakes an already-blocked wait and returns an `accept` error in
+    /// the `cancellation` domain. The listener remains open and can accept again.
+    /// Requesting stop before this call begins cancels it immediately. Do not run
+    /// more than one accept operation or other listener methods concurrently.
+    [[nodiscard]] Result<TcpConnection, NetworkError> accept(const std::stop_token &stop_token);
 
     /// Returns the bound address and the effective port selected by the system.
     [[nodiscard]] Result<TcpEndpoint, NetworkError> local_endpoint() const;

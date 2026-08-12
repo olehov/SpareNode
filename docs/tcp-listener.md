@@ -5,6 +5,7 @@ move-only `TcpListener` and `TcpConnection` types so native socket ownership is
 released automatically on every return path.
 
 ```cpp
+#include <stop_token>
 #include <utility>
 
 #include "sparenode/network/tcp_listener.hpp"
@@ -21,7 +22,8 @@ void accept_one()
     }
 
     auto listener = std::move(listener_result.value());
-    auto connection_result = listener.accept(); // Blocks until a client connects.
+    std::stop_source stop_source;
+    auto connection_result = listener.accept(stop_source.get_token());
 }
 ```
 
@@ -34,10 +36,30 @@ is `128` pending connections and can be overridden with the second `bind`
 argument.
 
 `accept()` blocks indefinitely until a client connects or the operating system
-reports an error. `TcpListener` is not thread-safe: do not call its methods
-concurrently and do not move or destroy it while `accept()` is running. The
-current shutdown sequence is to let active operations finish and then destroy
-the listener. Cooperative cancellation will be introduced by a separate change.
+reports an error. The `accept(std::stop_token)` overload adds cooperative
+cancellation. A stop request wakes an accept operation that is already blocked;
+it does not wait for another client to connect. Cancellation returns an error
+whose operation is `accept`, whose domain is `cancellation`, and whose code is
+zero, so callers do not need to interpret platform-specific socket codes.
+
+Cancellation does not close the listener. After the cancelled call has returned,
+the same listener can accept another connection. A stop requested before the call
+cancels it immediately, and a token remains stopped for subsequent calls. If a
+stop request races with connection arrival, either the connection completes
+before the request is observed or cancellation wins and any connection accepted
+during that cancellation window is released.
+
+`TcpListener` is not thread-safe: never run more than one accept operation at a
+time, and do not invoke other listener methods, move it, or destroy it until the
+accept operation has returned. The supported shutdown order is:
+
+1. Request stop through the `std::stop_source` owned by the server.
+2. Wait for the thread or task running `accept(stop_token)` to finish.
+3. Destroy the listener only after that operation has returned.
+
+Internally, cancellation uses a private loopback wake channel monitored together
+with the listening socket. It does not rely on unsafely closing the listener from
+another thread and does not use periodic polling or a busy-wait loop.
 
 Operations return `sparenode::Result<Value, NetworkError>`. Errors identify the
 failed operation, error domain, and native numeric code without embedding paths,

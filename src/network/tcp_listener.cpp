@@ -1,10 +1,13 @@
 #include "sparenode/network/tcp_listener.hpp"
 
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <utility>
 
+#include "sparenode/network/detail/accept_wait.hpp"
 #include "sparenode/network/detail/native_socket.hpp"
+#include "sparenode/network/detail/native_socket_owner.hpp"
 #include "sparenode/network/detail/retry_interrupted_operation.hpp"
 #include "sparenode/network/detail/socket_address.hpp"
 #include "sparenode/network/detail/tcp_impl.hpp"
@@ -68,9 +71,9 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
 
     for (auto *current = addresses.get(); current != nullptr; current = current->ai_next)
     {
-        const detail::NativeSocket socket_handle =
-            ::socket(current->ai_family, current->ai_socktype, current->ai_protocol);
-        if (socket_handle == detail::invalid_socket)
+        detail::NativeSocketOwner socket_owner(
+            ::socket(current->ai_family, current->ai_socktype, current->ai_protocol));
+        if (socket_owner.get() == detail::invalid_socket)
         {
             last_error = NetworkError{
                 NetworkOperation::create_socket,
@@ -80,18 +83,17 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
             continue;
         }
 
-        if (!detail::configure_socket_security({socket_handle, current->ai_family}))
+        if (!detail::configure_socket_security({socket_owner.get(), current->ai_family}))
         {
             last_error = NetworkError{
                 NetworkOperation::configure_socket,
                 NetworkErrorDomain::socket,
                 detail::last_socket_error(),
             };
-            detail::close_socket(socket_handle);
             continue;
         }
 
-        if (::bind(socket_handle, current->ai_addr,
+        if (::bind(socket_owner.get(), current->ai_addr,
                    static_cast<detail::SocketLength>(current->ai_addrlen)) != 0)
         {
             last_error = NetworkError{
@@ -99,22 +101,22 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
                 NetworkErrorDomain::socket,
                 detail::last_socket_error(),
             };
-            detail::close_socket(socket_handle);
             continue;
         }
 
-        if (::listen(socket_handle, backlog) != 0)
+        if (::listen(socket_owner.get(), backlog) != 0)
         {
             last_error = NetworkError{
                 NetworkOperation::listen,
                 NetworkErrorDomain::socket,
                 detail::last_socket_error(),
             };
-            detail::close_socket(socket_handle);
             continue;
         }
 
-        return TcpListener(std::make_unique<Impl>(socket_handle));
+        auto impl = std::make_unique<Impl>(socket_owner.get());
+        static_cast<void>(socket_owner.release());
+        return TcpListener(std::move(impl));
     }
 
     return unexpected(last_error);
@@ -148,17 +150,50 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
         });
     }
 
-    const detail::NativeSocket accepted_socket = accept_result.value;
+    detail::NativeSocketOwner accepted_socket(accept_result.value);
     auto endpoint = detail::endpoint_from_address(reinterpret_cast<const sockaddr *>(&peer_address),
                                                   NetworkOperation::query_peer_endpoint);
     if (!endpoint)
     {
-        detail::close_socket(accepted_socket);
         return unexpected(endpoint.error());
     }
 
-    return TcpConnection(
-        std::make_unique<TcpConnection::Impl>(accepted_socket, std::move(endpoint.value())));
+    auto impl =
+        std::make_unique<TcpConnection::Impl>(accepted_socket.get(), std::move(endpoint.value()));
+    static_cast<void>(accepted_socket.release());
+    return TcpConnection(std::move(impl));
+}
+
+/// Waits for either an incoming connection or a cooperative stop request.
+Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &stop_token)
+{
+    if (!is_open())
+    {
+        return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::state, 1});
+    }
+
+    const auto wait_result = detail::wait_for_accept(impl_->socket, stop_token);
+    if (!wait_result)
+    {
+        return unexpected(wait_result.error());
+    }
+
+    if (wait_result.value() == detail::AcceptWaitStatus::cancelled)
+    {
+        return unexpected(
+            NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
+    }
+
+    auto connection_result = accept();
+    if (stop_token.stop_requested())
+    {
+        // If cancellation races with connection arrival, discard any connection
+        // accepted after the stop request and leave the listener reusable.
+        return unexpected(
+            NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
+    }
+
+    return connection_result;
 }
 
 /// Queries the effective bound address, including an OS-selected ephemeral port.
