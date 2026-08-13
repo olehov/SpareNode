@@ -6,11 +6,6 @@
 
 #include "sparenode/network/detail/native_socket_owner.hpp"
 
-#ifndef _WIN32
-#include <cerrno>
-#include <poll.h>
-#endif
-
 namespace sparenode::network::detail
 {
 namespace
@@ -60,12 +55,12 @@ class WakeChannel final
         });
     }
 
-    sockaddr_in loopback{};
-    loopback.sin_family = AF_INET;
-    loopback.sin_port = 0;
-    loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (::bind(reader.get(), reinterpret_cast<const sockaddr *>(&loopback),
-               static_cast<SocketLength>(sizeof(loopback))) != 0)
+    sockaddr_in reader_endpoint{};
+    reader_endpoint.sin_family = AF_INET;
+    reader_endpoint.sin_port = 0;
+    reader_endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::bind(reader.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
+               static_cast<SocketLength>(sizeof(reader_endpoint))) != 0)
     {
         return unexpected(NetworkError{
             NetworkOperation::accept,
@@ -74,8 +69,9 @@ class WakeChannel final
         });
     }
 
-    auto loopback_length = static_cast<SocketLength>(sizeof(loopback));
-    if (::getsockname(reader.get(), reinterpret_cast<sockaddr *>(&loopback), &loopback_length) != 0)
+    auto reader_endpoint_length = static_cast<SocketLength>(sizeof(reader_endpoint));
+    if (::getsockname(reader.get(), reinterpret_cast<sockaddr *>(&reader_endpoint),
+                      &reader_endpoint_length) != 0)
     {
         return unexpected(NetworkError{
             NetworkOperation::accept,
@@ -94,8 +90,45 @@ class WakeChannel final
         });
     }
 
-    if (::connect(writer.get(), reinterpret_cast<const sockaddr *>(&loopback),
-                  static_cast<SocketLength>(sizeof(loopback))) != 0)
+    sockaddr_in writer_endpoint{};
+    writer_endpoint.sin_family = AF_INET;
+    writer_endpoint.sin_port = 0;
+    writer_endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::bind(writer.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
+               static_cast<SocketLength>(sizeof(writer_endpoint))) != 0)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::accept,
+            NetworkErrorDomain::socket,
+            last_socket_error(),
+        });
+    }
+
+    auto writer_endpoint_length = static_cast<SocketLength>(sizeof(writer_endpoint));
+    if (::getsockname(writer.get(), reinterpret_cast<sockaddr *>(&writer_endpoint),
+                      &writer_endpoint_length) != 0)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::accept,
+            NetworkErrorDomain::socket,
+            last_socket_error(),
+        });
+    }
+
+    // Connecting both endpoints makes the kernel discard datagrams from any
+    // unrelated local process before they can make the wake reader readable.
+    if (::connect(reader.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
+                  static_cast<SocketLength>(sizeof(writer_endpoint))) != 0)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::accept,
+            NetworkErrorDomain::socket,
+            last_socket_error(),
+        });
+    }
+
+    if (::connect(writer.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
+                  static_cast<SocketLength>(sizeof(reader_endpoint))) != 0)
     {
         return unexpected(NetworkError{
             NetworkOperation::accept,
@@ -107,38 +140,11 @@ class WakeChannel final
     return WakeChannel(std::move(reader), std::move(writer));
 }
 
-#ifdef _WIN32
-using PollDescriptor = WSAPOLLFD;
-inline constexpr short readable_event = POLLRDNORM;
-
-[[nodiscard]] int poll_descriptors(PollDescriptor *descriptors) noexcept
-{
-    return WSAPoll(descriptors, 2, -1);
-}
-
-[[nodiscard]] bool poll_was_interrupted(const int error_code) noexcept
-{
-    return error_code == WSAEINTR;
-}
-#else
-using PollDescriptor = pollfd;
-inline constexpr short readable_event = POLLIN;
-
-[[nodiscard]] int poll_descriptors(PollDescriptor *descriptors) noexcept
-{
-    return ::poll(descriptors, 2, -1);
-}
-
-[[nodiscard]] bool poll_was_interrupted(const int error_code) noexcept
-{
-    return error_code == EINTR;
-}
-#endif
-
 } // namespace
 
 Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listener_socket,
-                                                       const std::stop_token &stop_token)
+                                                       const std::stop_token &stop_token,
+                                                       SocketPoller &poller)
 {
     if (stop_token.stop_requested())
     {
@@ -154,36 +160,40 @@ Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listen
     auto &channel = channel_result.value();
     const std::stop_callback wake_on_stop(stop_token, [&channel] { channel.notify(); });
 
-    std::array<PollDescriptor, 2> descriptors{{
-        {listener_socket, readable_event, 0},
-        {channel.reader(), readable_event, 0},
+    std::array<SocketPollEntry, 2> descriptors{{
+        {.socket = listener_socket, .watch_readable = true},
+        {.socket = channel.reader(), .watch_readable = true},
     }};
 
     while (true)
     {
-        const int poll_result = poll_descriptors(descriptors.data());
-        if (poll_result < 0)
+        const auto poll_result = poller.wait(descriptors, NetworkOperation::accept);
+        if (!poll_result)
         {
-            const int error_code = last_socket_error();
-            if (poll_was_interrupted(error_code))
-            {
-                continue;
-            }
+            return unexpected(poll_result.error());
+        }
 
-            return unexpected(NetworkError{
-                NetworkOperation::accept,
-                NetworkErrorDomain::socket,
-                error_code,
-            });
+        if (descriptors[1].readable)
+        {
+            // Always drain the authenticated wake before leaving the wait. This
+            // also lets an in-flight stop callback finish before its channel closes.
+            char wake_byte{};
+            static_cast<void>(::recv(channel.reader(), &wake_byte, 1, 0));
         }
 
         // Cancellation wins when it races with an incoming connection.
-        if (stop_token.stop_requested() || (descriptors[1].revents & readable_event) != 0)
+        if (stop_token.stop_requested())
         {
             return AcceptWaitStatus::cancelled;
         }
 
-        if ((descriptors[0].revents & readable_event) != 0)
+        if (descriptors[1].readable)
+        {
+            // Socket readability without a stop request is not cancellation.
+            continue;
+        }
+
+        if (descriptors[0].readable)
         {
             return AcceptWaitStatus::socket_ready;
         }

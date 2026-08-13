@@ -114,6 +114,16 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
             continue;
         }
 
+        if (!detail::configure_socket_nonblocking(socket_owner.get()))
+        {
+            last_error = NetworkError{
+                NetworkOperation::configure_socket,
+                NetworkErrorDomain::socket,
+                detail::last_socket_error(),
+            };
+            continue;
+        }
+
         auto impl = std::make_unique<Impl>(socket_owner.get());
         static_cast<void>(socket_owner.release());
         return TcpListener(std::move(impl));
@@ -130,6 +140,71 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
         return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::state, 1});
     }
 
+    const std::stop_token never_stop;
+    while (true)
+    {
+        const auto wait_result = detail::wait_for_accept(impl_->socket, never_stop, impl_->poller);
+        if (!wait_result)
+        {
+            return unexpected(wait_result.error());
+        }
+
+        auto connection_result = accept_ready_connection();
+        if (!connection_result && connection_result.error().domain == NetworkErrorDomain::socket &&
+            detail::socket_error_would_block(connection_result.error().code))
+        {
+            continue;
+        }
+
+        return connection_result;
+    }
+}
+
+/// Waits for either an incoming connection or a cooperative stop request.
+Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &stop_token)
+{
+    if (!is_open())
+    {
+        return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::state, 1});
+    }
+
+    while (true)
+    {
+        const auto wait_result = detail::wait_for_accept(impl_->socket, stop_token, impl_->poller);
+        if (!wait_result)
+        {
+            return unexpected(wait_result.error());
+        }
+
+        if (wait_result.value() == detail::AcceptWaitStatus::cancelled ||
+            stop_token.stop_requested())
+        {
+            return unexpected(
+                NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
+        }
+
+        auto connection_result = accept_ready_connection();
+        if (!connection_result && connection_result.error().domain == NetworkErrorDomain::socket &&
+            detail::socket_error_would_block(connection_result.error().code))
+        {
+            continue;
+        }
+
+        if (stop_token.stop_requested())
+        {
+            // If cancellation races with connection arrival, discard any connection
+            // accepted after the stop request and leave the listener reusable.
+            return unexpected(
+                NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
+        }
+
+        return connection_result;
+    }
+}
+
+/// Performs one nonblocking accept and adopts the connection on success.
+Result<TcpConnection, NetworkError> TcpListener::accept_ready_connection()
+{
     sockaddr_storage peer_address{};
     detail::SocketLength peer_address_length{};
     const auto accept_result = detail::retry_interrupted_operation(
@@ -151,6 +226,15 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
     }
 
     detail::NativeSocketOwner accepted_socket(accept_result.value);
+    if (!detail::configure_socket_blocking(accepted_socket.get()))
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::configure_socket,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
     auto endpoint = detail::endpoint_from_address(reinterpret_cast<const sockaddr *>(&peer_address),
                                                   NetworkOperation::query_peer_endpoint);
     if (!endpoint)
@@ -162,38 +246,6 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
         std::make_unique<TcpConnection::Impl>(accepted_socket.get(), std::move(endpoint.value()));
     static_cast<void>(accepted_socket.release());
     return TcpConnection(std::move(impl));
-}
-
-/// Waits for either an incoming connection or a cooperative stop request.
-Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &stop_token)
-{
-    if (!is_open())
-    {
-        return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::state, 1});
-    }
-
-    const auto wait_result = detail::wait_for_accept(impl_->socket, stop_token);
-    if (!wait_result)
-    {
-        return unexpected(wait_result.error());
-    }
-
-    if (wait_result.value() == detail::AcceptWaitStatus::cancelled)
-    {
-        return unexpected(
-            NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
-    }
-
-    auto connection_result = accept();
-    if (stop_token.stop_requested())
-    {
-        // If cancellation races with connection arrival, discard any connection
-        // accepted after the stop request and leave the listener reusable.
-        return unexpected(
-            NetworkError{NetworkOperation::accept, NetworkErrorDomain::cancellation, 0});
-    }
-
-    return connection_result;
 }
 
 /// Queries the effective bound address, including an OS-selected ephemeral port.

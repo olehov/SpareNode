@@ -64,6 +64,9 @@ class TcpListener final
     /// Creates a public listener around an implementation that already owns a socket.
     explicit TcpListener(std::unique_ptr<Impl> impl) noexcept;
 
+    /// Attempts one nonblocking native accept after the listener reports readiness.
+    [[nodiscard]] Result<TcpConnection, NetworkError> accept_ready_connection();
+
     std::unique_ptr<Impl> impl_;
 };
 

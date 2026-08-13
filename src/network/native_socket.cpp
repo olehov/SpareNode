@@ -3,6 +3,7 @@
 #include <cerrno>
 
 #ifndef _WIN32
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #endif
@@ -106,6 +107,26 @@ bool configure_socket_security(const SocketConfiguration configuration)
     return true;
 }
 
+/// Enables nonblocking operations without changing any other socket setting.
+bool configure_socket_nonblocking(const NativeSocket socket) noexcept
+{
+    u_long enabled = 1;
+    return ioctlsocket(socket, FIONBIO, &enabled) == 0;
+}
+
+/// Restores blocking operations on a socket accepted from a nonblocking listener.
+bool configure_socket_blocking(const NativeSocket socket) noexcept
+{
+    u_long enabled = 0;
+    return ioctlsocket(socket, FIONBIO, &enabled) == 0;
+}
+
+/// Recognizes the Winsock result for a nonblocking operation with no available work.
+bool socket_error_would_block(const int error_code) noexcept
+{
+    return error_code == WSAEWOULDBLOCK;
+}
+
 #else
 
 /// Reads errno immediately after a failed POSIX socket operation.
@@ -150,6 +171,26 @@ bool configure_socket_security(const SocketConfiguration configuration)
     const int ipv6_only = 1;
     return setsockopt(configuration.socket, IPPROTO_IPV6, IPV6_V6ONLY, &ipv6_only,
                       sizeof(ipv6_only)) == 0;
+}
+
+/// Enables O_NONBLOCK while preserving all existing descriptor flags.
+bool configure_socket_nonblocking(const NativeSocket socket) noexcept
+{
+    const int current_flags = fcntl(socket, F_GETFL, 0);
+    return current_flags >= 0 && fcntl(socket, F_SETFL, current_flags | O_NONBLOCK) == 0;
+}
+
+/// Clears O_NONBLOCK while preserving all unrelated descriptor flags.
+bool configure_socket_blocking(const NativeSocket socket) noexcept
+{
+    const int current_flags = fcntl(socket, F_GETFL, 0);
+    return current_flags >= 0 && fcntl(socket, F_SETFL, current_flags & ~O_NONBLOCK) == 0;
+}
+
+/// Recognizes either POSIX spelling for a temporarily unavailable operation.
+bool socket_error_would_block(const int error_code) noexcept
+{
+    return error_code == EAGAIN || error_code == EWOULDBLOCK;
 }
 
 #endif

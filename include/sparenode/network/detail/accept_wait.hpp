@@ -4,6 +4,7 @@
 #include <stop_token>
 
 #include "sparenode/network/detail/native_socket.hpp"
+#include "sparenode/network/detail/socket_poller.hpp"
 
 namespace sparenode::network::detail
 {
@@ -20,6 +21,7 @@ enum class AcceptWaitStatus : std::uint8_t
 /// A private loopback datagram channel wakes the native polling call, so stop
 /// requests do not depend on closing the listening socket or periodic polling.
 [[nodiscard]] Result<AcceptWaitStatus, NetworkError>
-wait_for_accept(NativeSocket listener_socket, const std::stop_token &stop_token);
+wait_for_accept(NativeSocket listener_socket, const std::stop_token &stop_token,
+                SocketPoller &poller);
 
 } // namespace sparenode::network::detail
