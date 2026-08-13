@@ -143,6 +143,27 @@ class WakeChannel final
 } // namespace
 
 Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listener_socket,
+                                                       SocketPoller &poller)
+{
+    std::array<SocketPollEntry, 1> descriptors{{
+        {.socket = listener_socket, .watch_readable = true},
+    }};
+
+    const auto poll_result = poller.wait(descriptors, NetworkOperation::accept);
+    if (!poll_result)
+    {
+        return unexpected(poll_result.error());
+    }
+
+    if (descriptors[0].readable)
+    {
+        return AcceptWaitStatus::socket_ready;
+    }
+
+    return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::socket, 0});
+}
+
+Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listener_socket,
                                                        const std::stop_token &stop_token,
                                                        SocketPoller &poller)
 {

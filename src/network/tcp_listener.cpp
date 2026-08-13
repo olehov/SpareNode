@@ -140,10 +140,9 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
         return unexpected(NetworkError{NetworkOperation::accept, NetworkErrorDomain::state, 1});
     }
 
-    const std::stop_token never_stop;
     while (true)
     {
-        const auto wait_result = detail::wait_for_accept(impl_->socket, never_stop, impl_->poller);
+        const auto wait_result = detail::wait_for_accept(impl_->socket, impl_->poller);
         if (!wait_result)
         {
             return unexpected(wait_result.error());

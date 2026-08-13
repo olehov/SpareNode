@@ -16,10 +16,20 @@ enum class AcceptWaitStatus : std::uint8_t
     cancelled,
 };
 
-/// Waits until the listener is readable or the supplied stop token is cancelled.
+/// Implements the wait used by the non-cancellable `TcpListener::accept()` overload.
 ///
-/// A private loopback datagram channel wakes the native polling call, so stop
-/// requests do not depend on closing the listening socket or periodic polling.
+/// Only the listening socket is passed to the poller. No cancellation callback or
+/// UDP wake channel is created, so this operation completes only when the listener
+/// becomes readable or the native poll reports an error.
+[[nodiscard]] Result<AcceptWaitStatus, NetworkError> wait_for_accept(NativeSocket listener_socket,
+                                                                     SocketPoller &poller);
+
+/// Implements the wait used by `TcpListener::accept(std::stop_token)`.
+///
+/// The poller watches both the listening socket and a private loopback UDP wake
+/// channel. A stop callback signals that channel, allowing a request made after
+/// polling begins to wake the blocked operation without closing the listener or
+/// periodically polling with a timeout.
 [[nodiscard]] Result<AcceptWaitStatus, NetworkError>
 wait_for_accept(NativeSocket listener_socket, const std::stop_token &stop_token,
                 SocketPoller &poller);

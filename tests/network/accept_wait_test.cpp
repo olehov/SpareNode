@@ -8,6 +8,36 @@
 #include "sparenode/network/detail/accept_wait.hpp"
 #include "support/fake_socket_poller.hpp"
 
+TEST_CASE("Non-cancellable accept wait polls only the listener", "[network][tcp][unit]")
+{
+    using namespace std::chrono_literals;
+
+    sparenode::test::FakeSocketPoller poller;
+    using WaitResult = sparenode::Result<sparenode::network::detail::AcceptWaitStatus,
+                                         sparenode::network::NetworkError>;
+    std::promise<WaitResult> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::jthread wait_thread(
+        [&poller, &result_promise]
+        {
+            result_promise.set_value(sparenode::network::detail::wait_for_accept(
+                sparenode::network::detail::invalid_socket, poller));
+        });
+
+    poller.wait_until_entered();
+    poller.complete_with_readable(0);
+
+    REQUIRE(result_future.wait_for(2s) == std::future_status::ready);
+    const auto result = result_future.get();
+    wait_thread.join();
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == sparenode::network::detail::AcceptWaitStatus::socket_ready);
+    CHECK(poller.operation() == sparenode::network::NetworkOperation::accept);
+    CHECK(poller.entry_count() == 1);
+}
+
 TEST_CASE("Accept wait delegates blocking to the socket poller", "[network][tcp][cancel][unit]")
 {
     using namespace std::chrono_literals;
