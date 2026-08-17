@@ -31,6 +31,7 @@ struct TcpConnection::Impl
 
     detail::NativeSocket socket{detail::invalid_socket};
     TcpEndpoint peer_endpoint;
+    detail::NativeSocketPoller poller;
 };
 
 struct TcpListener::Impl

@@ -225,7 +225,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept_ready_connection()
     }
 
     detail::NativeSocketOwner accepted_socket(accept_result.value);
-    if (!detail::configure_socket_blocking(accepted_socket.get()))
+    if (!detail::configure_socket_nonblocking(accepted_socket.get()))
     {
         return unexpected(NetworkError{
             NetworkOperation::configure_socket,

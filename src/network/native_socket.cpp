@@ -1,6 +1,8 @@
 #include "sparenode/network/detail/native_socket.hpp"
 
+#include <algorithm>
 #include <cerrno>
+#include <limits>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -114,17 +116,33 @@ bool configure_socket_nonblocking(const NativeSocket socket) noexcept
     return ioctlsocket(socket, FIONBIO, &enabled) == 0;
 }
 
-/// Restores blocking operations on a socket accepted from a nonblocking listener.
-bool configure_socket_blocking(const NativeSocket socket) noexcept
-{
-    u_long enabled = 0;
-    return ioctlsocket(socket, FIONBIO, &enabled) == 0;
-}
-
 /// Recognizes the Winsock result for a nonblocking operation with no available work.
 bool socket_error_would_block(const int error_code) noexcept
 {
     return error_code == WSAEWOULDBLOCK;
+}
+
+/// Recognizes a Winsock operation interrupted before it transferred bytes.
+bool socket_error_interrupted(const int error_code) noexcept
+{
+    return error_code == WSAEINTR;
+}
+
+/// Adapts the bounded span length to Winsock's signed integer API.
+std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> buffer) noexcept
+{
+    const auto size = static_cast<int>(
+        (std::min)(buffer.size(), static_cast<std::size_t>((std::numeric_limits<int>::max)())));
+    return ::recv(socket, reinterpret_cast<char *>(buffer.data()), size, 0);
+}
+
+/// Sends one bounded chunk through Winsock.
+std::ptrdiff_t send_socket(const NativeSocket socket,
+                           const std::span<const std::byte> buffer) noexcept
+{
+    const auto size = static_cast<int>(
+        (std::min)(buffer.size(), static_cast<std::size_t>((std::numeric_limits<int>::max)())));
+    return ::send(socket, reinterpret_cast<const char *>(buffer.data()), size, 0);
 }
 
 #else
@@ -180,17 +198,34 @@ bool configure_socket_nonblocking(const NativeSocket socket) noexcept
     return current_flags >= 0 && fcntl(socket, F_SETFL, current_flags | O_NONBLOCK) == 0;
 }
 
-/// Clears O_NONBLOCK while preserving all unrelated descriptor flags.
-bool configure_socket_blocking(const NativeSocket socket) noexcept
-{
-    const int current_flags = fcntl(socket, F_GETFL, 0);
-    return current_flags >= 0 && fcntl(socket, F_SETFL, current_flags & ~O_NONBLOCK) == 0;
-}
-
 /// Recognizes either POSIX spelling for a temporarily unavailable operation.
 bool socket_error_would_block(const int error_code) noexcept
 {
     return error_code == EAGAIN || error_code == EWOULDBLOCK;
+}
+
+/// Recognizes a POSIX operation interrupted before it transferred bytes.
+bool socket_error_interrupted(const int error_code) noexcept
+{
+    return error_code == EINTR;
+}
+
+/// Receives one caller-bounded chunk from a POSIX socket.
+std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> buffer) noexcept
+{
+    return ::recv(socket, buffer.data(), buffer.size(), 0);
+}
+
+/// Suppresses SIGPIPE so a disconnected peer is reported as a structured error.
+std::ptrdiff_t send_socket(const NativeSocket socket,
+                           const std::span<const std::byte> buffer) noexcept
+{
+#ifdef MSG_NOSIGNAL
+    constexpr int send_flags = MSG_NOSIGNAL;
+#else
+    constexpr int send_flags = 0;
+#endif
+    return ::send(socket, buffer.data(), buffer.size(), send_flags);
 }
 
 #endif
