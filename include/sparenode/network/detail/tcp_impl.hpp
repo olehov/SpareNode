@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "sparenode/network/detail/native_socket.hpp"
+#include "sparenode/network/detail/socket_poller.hpp"
 #include "sparenode/network/tcp_connection.hpp"
 #include "sparenode/network/tcp_listener.hpp"
 
@@ -51,6 +52,7 @@ struct TcpListener::Impl
     Impl &operator=(Impl &&) = delete;
 
     detail::NativeSocket socket{detail::invalid_socket};
+    detail::NativeSocketPoller poller;
 };
 
 } // namespace sparenode::network

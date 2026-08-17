@@ -14,6 +14,7 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
 add_executable(sparenode_tests
+    network/accept_wait_test.cpp
     network/tcp_listener_test.cpp
     smoke_test.cpp
 )
@@ -30,6 +31,7 @@ endif()
 
 target_include_directories(sparenode_tests PRIVATE
     "${PROJECT_BINARY_DIR}/generated"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 sparenode_enable_compiler_warnings(sparenode_tests)

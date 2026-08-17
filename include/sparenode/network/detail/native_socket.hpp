@@ -46,4 +46,13 @@ void close_socket(NativeSocket socket) noexcept;
 /// Applies platform-specific listener security and address-reuse settings.
 [[nodiscard]] bool configure_socket_security(SocketConfiguration configuration);
 
+/// Places a listener in nonblocking mode so readiness cannot race into a blocked accept.
+[[nodiscard]] bool configure_socket_nonblocking(NativeSocket socket) noexcept;
+
+/// Restores blocking mode on an accepted socket for the synchronous connection API.
+[[nodiscard]] bool configure_socket_blocking(NativeSocket socket) noexcept;
+
+/// Reports whether an accept attempt found no connection currently available.
+[[nodiscard]] bool socket_error_would_block(int error_code) noexcept;
+
 } // namespace sparenode::network::detail

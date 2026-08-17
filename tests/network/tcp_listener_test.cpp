@@ -1,7 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
+#include <future>
+#include <stop_token>
+#include <thread>
 #include <utility>
 
 #include "sparenode/network/detail/retry_interrupted_operation.hpp"
@@ -151,6 +155,32 @@ class TestSocket final
     return client;
 }
 
+using AcceptResult =
+    sparenode::Result<sparenode::network::TcpConnection, sparenode::network::NetworkError>;
+
+// Starts cancellable accept on a worker and publishes its result to the caller.
+[[nodiscard]] std::jthread start_cancellable_accept(sparenode::network::TcpListener &listener,
+                                                    const std::stop_token &stop_token,
+                                                    std::promise<AcceptResult> &result_promise,
+                                                    std::promise<void> &started_promise)
+{
+    return std::jthread(
+        [&listener, stop_token, &result_promise, &started_promise]
+        {
+            started_promise.set_value();
+            result_promise.set_value(listener.accept(stop_token));
+        });
+}
+
+// Verifies the structured error used to distinguish cancellation from failure.
+void check_cancelled_accept(const AcceptResult &result)
+{
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::accept);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
+    CHECK(result.error().code == 0);
+}
+
 } // namespace
 
 TEST_CASE("TCP listener rejects non-numeric interfaces", "[network][tcp]")
@@ -206,6 +236,94 @@ TEST_CASE("IPv6 endpoint conversion preserves its numeric scope", "[network][tcp
     REQUIRE(endpoint.has_value());
     CHECK(endpoint->address == "fe80::1%7");
     CHECK(endpoint->port == 4242);
+}
+
+TEST_CASE("TCP accept honours cancellation requested before waiting", "[network][tcp][cancel]")
+{
+    auto listener_result = sparenode::network::TcpListener::bind({"127.0.0.1", 0});
+    REQUIRE(listener_result.has_value());
+    auto listener = std::move(listener_result.value());
+
+    std::stop_source stop_source;
+    REQUIRE(stop_source.request_stop());
+    CHECK_FALSE(stop_source.request_stop());
+
+    const auto accept_result = listener.accept(stop_source.get_token());
+    check_cancelled_accept(accept_result);
+
+    const auto repeated_accept = listener.accept(stop_source.get_token());
+    check_cancelled_accept(repeated_accept);
+    CHECK(listener.is_open());
+}
+
+TEST_CASE("Blocked TCP accept is woken by cancellation", "[network][tcp][cancel]")
+{
+    using namespace std::chrono_literals;
+
+    auto listener_result = sparenode::network::TcpListener::bind({"127.0.0.1", 0});
+    REQUIRE(listener_result.has_value());
+    auto listener = std::move(listener_result.value());
+
+    std::stop_source stop_source;
+    std::promise<AcceptResult> result_promise;
+    auto result_future = result_promise.get_future();
+    std::promise<void> started_promise;
+    auto started_future = started_promise.get_future();
+    auto accept_thread = start_cancellable_accept(listener, stop_source.get_token(), result_promise,
+                                                  started_promise);
+
+    started_future.wait();
+    REQUIRE(result_future.wait_for(50ms) == std::future_status::timeout);
+    REQUIRE(stop_source.request_stop());
+    REQUIRE(result_future.wait_for(2s) == std::future_status::ready);
+
+    auto accept_result = result_future.get();
+    accept_thread.join();
+    check_cancelled_accept(accept_result);
+    CHECK(listener.is_open());
+}
+
+TEST_CASE("Cancellation racing with connection arrival leaves listener reusable",
+          "[network][tcp][cancel][race]")
+{
+    using namespace std::chrono_literals;
+
+    auto listener_result = sparenode::network::TcpListener::bind({"127.0.0.1", 0});
+    REQUIRE(listener_result.has_value());
+    auto listener = std::move(listener_result.value());
+    const auto endpoint = listener.local_endpoint();
+    REQUIRE(endpoint.has_value());
+
+    std::stop_source stop_source;
+    std::promise<AcceptResult> result_promise;
+    auto result_future = result_promise.get_future();
+    std::promise<void> started_promise;
+    auto started_future = started_promise.get_future();
+    auto accept_thread = start_cancellable_accept(listener, stop_source.get_token(), result_promise,
+                                                  started_promise);
+
+    started_future.wait();
+    auto first_client = connect_to(endpoint.value());
+    static_cast<void>(stop_source.request_stop());
+    REQUIRE(result_future.wait_for(2s) == std::future_status::ready);
+
+    auto raced_result = result_future.get();
+    accept_thread.join();
+    if (!raced_result)
+    {
+        check_cancelled_accept(raced_result);
+    }
+    else
+    {
+        CHECK(raced_result->is_open());
+    }
+    CHECK(listener.is_open());
+
+    // A fresh connection proves the listener remains usable regardless of
+    // whether connection arrival or cancellation won the first race.
+    auto second_client = connect_to(endpoint.value());
+    const auto second_connection = listener.accept();
+    REQUIRE(second_connection.has_value());
 }
 
 #ifndef _WIN32
