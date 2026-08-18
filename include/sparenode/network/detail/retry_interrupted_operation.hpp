@@ -29,6 +29,8 @@ template <typename Value> struct InterruptedOperationResult
 /// @param[in] error_provider Provider queried after each failed attempt.
 /// @param[in] should_retry Predicate applied to each reported error code.
 /// @return The successful value with code zero, or the sentinel and terminal code.
+/// @note Retries are unbounded and cannot be cancelled. The caller must provide
+/// a predicate that eventually returns `false` if the operation never succeeds.
 template <typename Value, typename Operation, typename ErrorProvider, typename RetryPredicate>
 [[nodiscard]] InterruptedOperationResult<Value>
 retry_interrupted_operation(const Value invalid_value, Operation operation,

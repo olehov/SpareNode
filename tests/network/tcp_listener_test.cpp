@@ -238,6 +238,18 @@ TEST_CASE("IPv6 endpoint conversion preserves its numeric scope", "[network][tcp
     CHECK(endpoint->port == 4242);
 }
 
+TEST_CASE("Endpoint conversion rejects a null native address", "[network][tcp]")
+{
+    const auto endpoint = sparenode::network::detail::endpoint_from_address(
+        nullptr, sparenode::network::NetworkOperation::query_peer_endpoint);
+
+    REQUIRE_FALSE(endpoint.has_value());
+    CHECK(endpoint.error().operation ==
+          sparenode::network::NetworkOperation::query_peer_endpoint);
+    CHECK(endpoint.error().domain == sparenode::network::NetworkErrorDomain::validation);
+    CHECK(endpoint.error().code == 1);
+}
+
 TEST_CASE("TCP accept honours cancellation requested before waiting", "[network][tcp][cancel]")
 {
     auto listener_result = sparenode::network::TcpListener::bind({"127.0.0.1", 0});

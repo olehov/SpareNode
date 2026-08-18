@@ -37,6 +37,11 @@ addrinfo *AddressInfo::get() const noexcept
 Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
                                                         const NetworkOperation operation)
 {
+    if (address == nullptr)
+    {
+        return unexpected(NetworkError{operation, NetworkErrorDomain::validation, 1});
+    }
+
     std::array<char, INET6_ADDRSTRLEN> buffer{};
     const void *raw_address = nullptr;
     std::uint16_t port = 0;

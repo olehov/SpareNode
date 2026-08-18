@@ -9,7 +9,9 @@ namespace
 
 /// @brief Converts a general socket-wait result to listener-specific vocabulary.
 /// @param[in] status General readiness completion status.
-/// @return Equivalent listener wait status.
+/// @return `cancelled` for cancellation; otherwise `socket_ready`, intentionally
+/// collapsing readable, socket-error, and hangup statuses so accept reports the
+/// authoritative native result.
 [[nodiscard]] AcceptWaitStatus to_accept_status(const SocketWaitStatus status) noexcept
 {
     return status == SocketWaitStatus::cancelled ? AcceptWaitStatus::cancelled

@@ -11,6 +11,7 @@ namespace sparenode::network::detail
 struct SocketPollEntry
 {
     /// @brief Borrowed native socket watched by the poller.
+    /// @note The handle must remain open, valid, and unmodified until wait returns.
     NativeSocket socket{invalid_socket};
     /// @brief Whether read readiness should be requested.
     bool watch_readable{false};
@@ -47,10 +48,15 @@ class SocketPoller
     /// @brief Pollers are non-move-assignable.
     SocketPoller &operator=(SocketPoller &&) = delete;
 
-    /// @brief Blocks until at least one requested event occurs or polling fails.
+    /// @brief Blocks until native polling completes or fails.
     /// @param[in,out] entries Requested events on input and reported events on output.
     /// @param[in] operation Public operation to record if polling fails.
-    /// @return Success after readiness, or a structured socket error.
+    /// @return Success when polling completes, including when error, hangup, or
+    /// invalid flags are reported; a validation error for an empty span; or a
+    /// structured socket error when the native polling call fails.
+    /// @pre The span storage and every socket must remain valid and unmodified for
+    /// the entire call. Callers must not close, reuse, or mutate them concurrently.
+    /// @post On success, callers must inspect every output flag in each entry.
     [[nodiscard]] virtual Result<void, NetworkError> wait(std::span<SocketPollEntry> entries,
                                                           NetworkOperation operation) = 0;
 
@@ -69,7 +75,11 @@ class NativeSocketPoller final : public SocketPoller
     /// @brief Translates portable entries to native descriptors and waits indefinitely.
     /// @param[in,out] entries Requested events on input and reported events on output.
     /// @param[in] operation Public operation to record if polling fails.
-    /// @return Success after readiness, or a structured socket error.
+    /// @return Success when polling completes, including terminal event flags;
+    /// a validation error for an empty span; or a native socket polling error.
+    /// @pre The span storage and every socket must remain valid and unmodified for
+    /// the entire call. Callers must not close, reuse, or mutate them concurrently.
+    /// @post On success, callers must inspect every output flag in each entry.
     [[nodiscard]] Result<void, NetworkError> wait(std::span<SocketPollEntry> entries,
                                                   NetworkOperation operation) override;
 };

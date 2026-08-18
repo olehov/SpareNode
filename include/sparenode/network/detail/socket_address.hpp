@@ -31,9 +31,11 @@ class AddressInfo final
 };
 
 /// @brief Converts a native IPv4/IPv6 address into a portable endpoint.
-/// @param[in] address Borrowed native address to convert.
+/// @param[in] address Borrowed native address to convert. A non-null pointer must
+/// reference a valid `sockaddr_in` or `sockaddr_in6` selected by `sa_family`.
 /// @param[in] operation Public operation to record if conversion fails.
-/// @return The converted endpoint, or a structured address-resolution error.
+/// @return The converted endpoint; a validation error for a null pointer; a state
+/// error for an unsupported family; or a socket error when conversion fails.
 [[nodiscard]] Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
                                                                       NetworkOperation operation);
 

@@ -62,7 +62,8 @@ class TcpListener final
     [[nodiscard]] Result<TcpConnection, NetworkError> accept(const std::stop_token &stop_token);
 
     /// @brief Returns the bound address and effective port selected by the system.
-    /// @return The local endpoint, or a structured socket error.
+    /// @return The local endpoint; a state error when the listener is closed; or a
+    /// structured socket error when the native endpoint query fails.
     [[nodiscard]] Result<TcpEndpoint, NetworkError> local_endpoint() const;
 
     /// @brief Reports whether this object owns an open native socket.

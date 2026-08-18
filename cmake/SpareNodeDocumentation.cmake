@@ -5,7 +5,7 @@ function(sparenode_enable_documentation)
         return()
     endif()
 
-    find_package(Doxygen REQUIRED)
+    find_package(Doxygen 1.9.8 REQUIRED)
 
     set(SPARENODE_DOXYGEN_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/doxygen")
     configure_file(

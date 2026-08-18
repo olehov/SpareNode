@@ -122,6 +122,8 @@ jobs:
   documentation:
     name: Documentation
     runs-on: ubuntu-24.04
+    env:
+      DOXYGEN_VERSION: 1.9.8
 
     steps:
       - name: Check out repository
@@ -133,6 +135,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes doxygen
+          test "$(doxygen --version)" = "$DOXYGEN_VERSION"
 
       - name: Configure documentation
         run: >-
