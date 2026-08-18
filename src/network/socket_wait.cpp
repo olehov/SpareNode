@@ -204,6 +204,42 @@ ready_status(const SocketPollEntry &entry, const SocketWaitInterest interest) no
     return NetworkError{operation, NetworkErrorDomain::socket, 0};
 }
 
+/// @brief Describes how a cancellable wait should proceed after inspecting its wake entry.
+enum class WakeEntryStatus : std::uint8_t
+{
+    inspect_operation,
+    retry,
+    cancelled,
+};
+
+/// @brief Drains and validates the cancellation wake entry after a completed poll.
+/// @param[in] context Stable socket wait resources, including the wake channel.
+/// @param[in] entry Completed wake-channel poll entry.
+/// @param[in] operation Public operation associated with the wait.
+/// @param[in] stop_token Token checked after draining a wake notification.
+/// @return The next wait action, or a structured wake-channel error.
+[[nodiscard]] Result<WakeEntryStatus, NetworkError>
+inspect_wake_entry(const SocketWaitContext &context, const SocketPollEntry &entry,
+                   const NetworkOperation operation, const std::stop_token &stop_token)
+{
+    if (entry.readable)
+    {
+        context.wake_channel.drain();
+    }
+
+    if (stop_token.stop_requested())
+    {
+        return WakeEntryStatus::cancelled;
+    }
+
+    if (entry.invalid || entry.error || entry.hangup)
+    {
+        return unexpected(invalid_wait_result(operation));
+    }
+
+    return entry.readable ? WakeEntryStatus::retry : WakeEntryStatus::inspect_operation;
+}
+
 } // namespace
 
 Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
@@ -264,24 +300,23 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &
             return unexpected(poll_result.error());
         }
 
-        if (descriptors[1].readable)
+        const auto wake_status =
+            inspect_wake_entry(context, descriptors[1], request.operation, stop_token);
+        if (!wake_status)
         {
-            context.wake_channel.drain();
+            return unexpected(wake_status.error());
         }
 
-        if (stop_token.stop_requested())
+        switch (wake_status.value())
         {
+        case WakeEntryStatus::cancelled:
             return SocketWaitStatus::cancelled;
+        case WakeEntryStatus::retry:
+            continue;
+        case WakeEntryStatus::inspect_operation:
+            break;
         }
 
-        if (descriptors[1].invalid || descriptors[1].error || descriptors[1].hangup)
-        {
-            return unexpected(invalid_wait_result(request.operation));
-        }
-        if (descriptors[1].readable)
-        {
-            continue;
-        }
         if (descriptors[0].invalid)
         {
             return unexpected(invalid_wait_result(request.operation));
