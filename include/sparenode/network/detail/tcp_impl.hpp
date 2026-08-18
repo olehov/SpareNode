@@ -12,9 +12,12 @@
 namespace sparenode::network
 {
 
+/// @brief Owns the platform-specific state of one TcpConnection.
 struct TcpConnection::Impl
 {
-    /// Takes ownership of an accepted socket and records its remote endpoint.
+    /// @brief Takes ownership of an accepted socket and records its remote endpoint.
+    /// @param[in] socket Accepted socket whose ownership is transferred.
+    /// @param[in] endpoint Remote endpoint associated with the socket.
     Impl(const detail::NativeSocket socket, TcpEndpoint endpoint)
         : socket(socket), peer_endpoint(std::move(endpoint)),
           io({.wait = {.socket = socket, .poller = poller, .wake_channel = wake_channel},
@@ -22,51 +25,67 @@ struct TcpConnection::Impl
     {
     }
 
-    /// Releases the accepted socket when the public connection is destroyed.
+    /// @brief Releases the accepted socket when the public connection is destroyed.
     ~Impl()
     {
         detail::close_socket(socket);
     }
 
+    /// @brief Copying is forbidden because the native socket has one owner.
     Impl(const Impl &) = delete;
+    /// @brief Copy assignment is forbidden because the native socket has one owner.
     Impl &operator=(const Impl &) = delete;
+    /// @brief Moving is forbidden because collaborators retain internal references.
     Impl(Impl &&) = delete;
+    /// @brief Move assignment is forbidden because collaborators retain references.
     Impl &operator=(Impl &&) = delete;
 
+    /// @brief Owned connected native socket.
     detail::NativeSocket socket{detail::invalid_socket};
+    /// @brief Remote endpoint captured when the connection was accepted.
     TcpEndpoint peer_endpoint;
-    // `io` stores references to these collaborators. Keep them before `io`,
-    // and keep `io` declared last so every referenced object is initialized.
+    /// @brief Native readiness implementation referenced by io.
     detail::NativeSocketPoller poller;
+    /// @brief Lazily initialized cancellation channel referenced by io.
     detail::SocketWakeChannel wake_channel;
+    /// @brief Native transfer implementation referenced by io.
     detail::NativeSocketOperations operations;
+    /// @brief I/O coordinator; declared last because it references preceding members.
     detail::ConnectionIo io;
 };
 
+/// @brief Owns the platform-specific state of one TcpListener.
 struct TcpListener::Impl
 {
-    /// Takes ownership of a socket that has already been bound and made listening.
+    /// @brief Takes ownership of a socket that is already bound and listening.
+    /// @param[in] socket Listening socket whose ownership is transferred.
     explicit Impl(const detail::NativeSocket socket) noexcept
         : socket(socket), wait{.socket = socket, .poller = poller, .wake_channel = wake_channel}
     {
     }
 
-    /// Releases the listening socket when the public listener is destroyed.
+    /// @brief Releases the listening socket when the public listener is destroyed.
     ~Impl()
     {
         detail::close_socket(socket);
     }
 
+    /// @brief Copying is forbidden because the native socket has one owner.
     Impl(const Impl &) = delete;
+    /// @brief Copy assignment is forbidden because the native socket has one owner.
     Impl &operator=(const Impl &) = delete;
+    /// @brief Moving is forbidden because wait retains internal references.
     Impl(Impl &&) = delete;
+    /// @brief Move assignment is forbidden because wait retains internal references.
     Impl &operator=(Impl &&) = delete;
 
+    /// @brief Owned listening native socket.
     detail::NativeSocket socket{detail::invalid_socket};
-    // `wait` stores references to these collaborators. Keep them before `wait`,
-    // and keep `wait` declared last so every referenced object is initialized.
+    /// @brief Native readiness implementation referenced by wait.
     detail::NativeSocketPoller poller;
+    /// @brief Lazily initialized cancellation channel referenced by wait.
     detail::SocketWakeChannel wake_channel;
+    /// @brief Wait context; declared last because it references preceding members.
     detail::SocketWaitContext wait;
 };
 

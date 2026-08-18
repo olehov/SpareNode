@@ -7,7 +7,9 @@ namespace sparenode::network::detail
 namespace
 {
 
-/// Converts the general socket-wait result to the listener-specific vocabulary.
+/// @brief Converts a general socket-wait result to listener-specific vocabulary.
+/// @param[in] status General readiness completion status.
+/// @return Equivalent listener wait status.
 [[nodiscard]] AcceptWaitStatus to_accept_status(const SocketWaitStatus status) noexcept
 {
     return status == SocketWaitStatus::cancelled ? AcceptWaitStatus::cancelled

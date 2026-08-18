@@ -10,13 +10,21 @@ namespace sparenode::network::detail
 namespace
 {
 
-/// Reports readiness states that must not be retried after would-block.
+/// @brief Reports readiness states that must not be retried after would-block.
+/// @param[in] status Status returned by the preceding readiness wait.
+/// @return `true` when another readiness wait cannot make progress.
 [[nodiscard]] bool terminal_readiness(const SocketWaitStatus status) noexcept
 {
     return status == SocketWaitStatus::socket_error || status == SocketWaitStatus::socket_hangup;
 }
 
-/// Implements the shared readiness, cancellation, and retry policy for one transfer.
+/// @brief Implements readiness, cancellation, and retry policy for one transfer.
+/// @tparam Transfer Nullary callable that performs one native transfer attempt.
+/// @param[in] context Borrowed socket and transfer collaborators.
+/// @param[in] request Readiness interest and public operation metadata.
+/// @param[in] stop_token Token observed while waiting for readiness.
+/// @param[in] transfer Transfer callable invoked after readiness is reported.
+/// @return Transferred byte count, or a structured network error.
 template <typename Transfer>
 [[nodiscard]] Result<std::size_t, NetworkError>
 perform_io(const ConnectionIoContext context, const SocketWaitRequest request,

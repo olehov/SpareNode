@@ -5,46 +5,52 @@
 namespace sparenode::network
 {
 
-/// Identifies the network step that failed.
+/// @brief Identifies the network step that failed.
 enum class NetworkOperation : std::uint8_t
 {
-    initialize,
-    resolve_address,
-    create_socket,
-    configure_socket,
-    bind,
-    listen,
-    accept,
-    receive,
-    send,
-    query_local_endpoint,
-    query_peer_endpoint,
+    initialize,           ///< Initialize process-wide networking facilities.
+    resolve_address,      ///< Translate a numeric endpoint to a native address.
+    create_socket,        ///< Create a native socket.
+    configure_socket,     ///< Apply required native socket options.
+    bind,                 ///< Bind a socket to a local address.
+    listen,               ///< Start accepting connection requests.
+    accept,               ///< Accept an incoming connection.
+    receive,              ///< Receive bytes from a connection.
+    send,                 ///< Send bytes through a connection.
+    query_local_endpoint, ///< Query the address bound to a socket.
+    query_peer_endpoint,  ///< Query the address of a connected peer.
 };
 
-/// Identifies which subsystem produced an error code.
+/// @brief Identifies which subsystem produced an error code.
 enum class NetworkErrorDomain : std::uint8_t
 {
-    validation,
-    address_resolution,
-    socket,
-    state,
-    cancellation,
+    validation,         ///< A public argument violated an API contract.
+    address_resolution, ///< The platform address resolver rejected an endpoint.
+    socket,             ///< The host socket API reported an error.
+    state,              ///< The object is not open or is otherwise unusable.
+    cancellation,       ///< A caller-provided stop token requested cancellation.
 };
 
-/// A structured network failure that does not expose sensitive diagnostic text.
+/// @brief A structured network failure without sensitive diagnostic text.
 struct NetworkError
 {
-    /// The operation being performed when the failure occurred.
+    /// @brief Operation being performed when the failure occurred.
     NetworkOperation operation{};
 
-    /// How the platform-specific numeric code should be interpreted.
+    /// @brief Domain used to interpret the numeric error code.
     NetworkErrorDomain domain{};
 
-    /// errno, WSAGetLastError(), getaddrinfo(), or a SpareNode-defined state code.
+    /// @brief Native or SpareNode-defined numeric error code.
+    ///
+    /// Depending on domain, this is errno, WSAGetLastError(), getaddrinfo(), or
+    /// a SpareNode-defined state or cancellation code.
     int code{};
 
-    /// Compares every structured field, which is useful in tests and error handling.
-    friend constexpr bool operator==(const NetworkError &, const NetworkError &) = default;
+    /// @brief Compares every structured error field.
+    /// @param[in] lhs Left-hand error.
+    /// @param[in] rhs Right-hand error.
+    /// @return `true` when operation, domain, and code are equal.
+    friend constexpr bool operator==(const NetworkError &lhs, const NetworkError &rhs) = default;
 };
 
 } // namespace sparenode::network

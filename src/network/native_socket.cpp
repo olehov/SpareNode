@@ -17,16 +17,18 @@ namespace sparenode::network::detail
 namespace
 {
 
-/// Balances the process-wide Winsock startup and cleanup calls through RAII.
+/// @brief Balances process-wide Winsock startup and cleanup through RAII.
 class WinsockRuntime final
 {
   public:
+    /// @brief Requests Winsock 2.2 and stores the startup result code.
     WinsockRuntime() noexcept
     {
         WSADATA data{};
         result_ = WSAStartup(MAKEWORD(2, 2), &data);
     }
 
+    /// @brief Cleans up Winsock only when startup succeeded.
     ~WinsockRuntime()
     {
         if (result_ == 0)
@@ -35,27 +37,32 @@ class WinsockRuntime final
         }
     }
 
+    /// @brief Copying is forbidden because startup has one cleanup owner.
     WinsockRuntime(const WinsockRuntime &) = delete;
+    /// @brief Copy assignment is forbidden because startup has one cleanup owner.
     WinsockRuntime &operator=(const WinsockRuntime &) = delete;
 
+    /// @brief Returns the result produced by WSAStartup.
+    /// @return Zero after successful initialization, otherwise a Winsock error code.
     [[nodiscard]] int result() const noexcept
     {
         return result_;
     }
 
   private:
+    /// @brief Cached WSAStartup result used by callers and cleanup.
     int result_{};
 };
 
 } // namespace
 
-/// Reads the thread-local Winsock error left by the most recent failed call.
+// Reads the thread-local Winsock error left by the most recent failed call.
 int last_socket_error() noexcept
 {
     return WSAGetLastError();
 }
 
-/// Closes an owned Windows socket while keeping destructors non-throwing.
+// Closes an owned Windows socket while keeping destructors non-throwing.
 void close_socket(const NativeSocket socket) noexcept
 {
     if (socket != invalid_socket)
@@ -64,7 +71,7 @@ void close_socket(const NativeSocket socket) noexcept
     }
 }
 
-/// Starts Winsock once for the lifetime of the process.
+// Starts Winsock once for the lifetime of the process.
 Result<void, NetworkError> ensure_socket_runtime()
 {
     // Function-local static initialization is thread-safe and runs only once.
@@ -81,7 +88,7 @@ Result<void, NetworkError> ensure_socket_runtime()
     return {};
 }
 
-/// Prevents port sharing and makes IPv6 binding behaviour explicit on Windows.
+// Prevents port sharing and makes IPv6 binding behaviour explicit on Windows.
 bool configure_socket_security(const SocketConfiguration configuration)
 {
     // Windows requires exclusive ownership to prevent another process from
@@ -109,26 +116,26 @@ bool configure_socket_security(const SocketConfiguration configuration)
     return true;
 }
 
-/// Enables nonblocking operations without changing any other socket setting.
+// Enables nonblocking operations without changing any other socket setting.
 bool configure_socket_nonblocking(const NativeSocket socket) noexcept
 {
     u_long enabled = 1;
     return ioctlsocket(socket, FIONBIO, &enabled) == 0;
 }
 
-/// Recognizes the Winsock result for a nonblocking operation with no available work.
+// Recognizes the Winsock result for a nonblocking operation with no available work.
 bool socket_error_would_block(const int error_code) noexcept
 {
     return error_code == WSAEWOULDBLOCK;
 }
 
-/// Recognizes a Winsock operation interrupted before it transferred bytes.
+// Recognizes a Winsock operation interrupted before it transferred bytes.
 bool socket_error_interrupted(const int error_code) noexcept
 {
     return error_code == WSAEINTR;
 }
 
-/// Adapts the bounded span length to Winsock's signed integer API.
+// Adapts the bounded span length to Winsock's signed integer API.
 std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> buffer) noexcept
 {
     const auto size = static_cast<int>(
@@ -136,7 +143,7 @@ std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> bu
     return ::recv(socket, reinterpret_cast<char *>(buffer.data()), size, 0);
 }
 
-/// Sends one bounded chunk through Winsock.
+// Sends one bounded chunk through Winsock.
 std::ptrdiff_t send_socket(const NativeSocket socket,
                            const std::span<const std::byte> buffer) noexcept
 {
@@ -147,13 +154,13 @@ std::ptrdiff_t send_socket(const NativeSocket socket,
 
 #else
 
-/// Reads errno immediately after a failed POSIX socket operation.
+// Reads errno immediately after a failed POSIX socket operation.
 int last_socket_error() noexcept
 {
     return errno;
 }
 
-/// Closes an owned file descriptor while keeping destructors non-throwing.
+// Closes an owned file descriptor while keeping destructors non-throwing.
 void close_socket(const NativeSocket socket) noexcept
 {
     if (socket != invalid_socket)
@@ -162,14 +169,14 @@ void close_socket(const NativeSocket socket) noexcept
     }
 }
 
-/// Confirms that no runtime initialization is necessary on POSIX systems.
+// Confirms that no runtime initialization is necessary on POSIX systems.
 Result<void, NetworkError> ensure_socket_runtime()
 {
     // POSIX sockets require no process-wide initialization.
     return {};
 }
 
-/// Enables safe rebinding after restart and restricts IPv6 listeners to IPv6.
+// Enables safe rebinding after restart and restricts IPv6 listeners to IPv6.
 bool configure_socket_security(const SocketConfiguration configuration)
 {
     // Permit rebinding after restart while connections from the previous run
@@ -191,32 +198,32 @@ bool configure_socket_security(const SocketConfiguration configuration)
                       sizeof(ipv6_only)) == 0;
 }
 
-/// Enables O_NONBLOCK while preserving all existing descriptor flags.
+// Enables O_NONBLOCK while preserving all existing descriptor flags.
 bool configure_socket_nonblocking(const NativeSocket socket) noexcept
 {
     const int current_flags = fcntl(socket, F_GETFL, 0);
     return current_flags >= 0 && fcntl(socket, F_SETFL, current_flags | O_NONBLOCK) == 0;
 }
 
-/// Recognizes either POSIX spelling for a temporarily unavailable operation.
+// Recognizes either POSIX spelling for a temporarily unavailable operation.
 bool socket_error_would_block(const int error_code) noexcept
 {
     return error_code == EAGAIN || error_code == EWOULDBLOCK;
 }
 
-/// Recognizes a POSIX operation interrupted before it transferred bytes.
+// Recognizes a POSIX operation interrupted before it transferred bytes.
 bool socket_error_interrupted(const int error_code) noexcept
 {
     return error_code == EINTR;
 }
 
-/// Receives one caller-bounded chunk from a POSIX socket.
+// Receives one caller-bounded chunk from a POSIX socket.
 std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> buffer) noexcept
 {
     return ::recv(socket, buffer.data(), buffer.size(), 0);
 }
 
-/// Suppresses SIGPIPE so a disconnected peer is reported as a structured error.
+// Suppresses SIGPIPE so a disconnected peer is reported as a structured error.
 std::ptrdiff_t send_socket(const NativeSocket socket,
                            const std::span<const std::byte> buffer) noexcept
 {

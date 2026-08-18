@@ -11,14 +11,20 @@
 namespace sparenode::network::detail
 {
 
+/// @brief Owns the connected datagram sockets used to signal cancellation.
 struct SocketWakeChannel::Impl
 {
+    /// @brief Adopts the connected reader and writer sockets.
+    /// @param[in] reader Reader socket whose ownership is transferred.
+    /// @param[in] writer Writer socket whose ownership is transferred.
     Impl(NativeSocketOwner reader, NativeSocketOwner writer) noexcept
         : reader(std::move(reader)), writer(std::move(writer))
     {
     }
 
+    /// @brief Socket drained by the waiting thread after a stop request.
     NativeSocketOwner reader;
+    /// @brief Socket used by the stop callback to send a wake byte.
     NativeSocketOwner writer;
 };
 
@@ -151,7 +157,10 @@ bool SocketWakeChannel::is_initialized() const noexcept
 namespace
 {
 
-/// Constructs the portable readiness request for one operation socket.
+/// @brief Constructs the portable readiness request for one operation socket.
+/// @param[in] socket Borrowed operation socket.
+/// @param[in] interest Read or write readiness requested by the operation.
+/// @return Initialized portable poll entry.
 [[nodiscard]] SocketPollEntry operation_entry(const NativeSocket socket,
                                               const SocketWaitInterest interest) noexcept
 {
@@ -161,7 +170,10 @@ namespace
     return entry;
 }
 
-/// Converts poll output to a reason that the native socket call can interpret.
+/// @brief Converts poll output to a status the native operation can interpret.
+/// @param[in] entry Completed portable poll entry.
+/// @param[in] interest Read or write readiness requested by the operation.
+/// @return A recognized completion status, or no value for unexplained flags.
 [[nodiscard]] std::optional<SocketWaitStatus>
 ready_status(const SocketPollEntry &entry, const SocketWaitInterest interest) noexcept
 {
@@ -184,7 +196,9 @@ ready_status(const SocketPollEntry &entry, const SocketWaitInterest interest) no
     return std::nullopt;
 }
 
-/// Produces a structured error for an invalid or unexplained poll result.
+/// @brief Produces an error for an invalid or unexplained poll result.
+/// @param[in] operation Public operation associated with the failed wait.
+/// @return Structured socket-domain error.
 [[nodiscard]] NetworkError invalid_wait_result(const NetworkOperation operation) noexcept
 {
     return NetworkError{operation, NetworkErrorDomain::socket, 0};

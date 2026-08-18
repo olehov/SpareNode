@@ -27,6 +27,7 @@ SpareNode/
 
 - A C++23-compatible compiler
 - CMake 3.25 or newer
+- Doxygen 1.9.8 or newer (only when generating API documentation)
 
 Supported toolchains:
 
@@ -130,6 +131,13 @@ cmake --build build/analysis --parallel
 Generated and third-party targets are not assigned the clang-tidy integration;
 analysis is enabled only for first-party SpareNode targets.
 
+## API documentation
+
+Production C++ interfaces and internal networking helpers use Doxygen contracts
+that describe parameters, results, ownership, lifetime, cancellation, and
+concurrency where relevant. See the [Doxygen documentation guide](docs/doxygen.md)
+for the required comment style and local generation commands.
+
 ## Continuous integration
 
 The GitHub Actions CI workflow runs for pushes and pull requests targeting
@@ -140,6 +148,7 @@ The GitHub Actions CI workflow runs for pushes and pull requests targeting
 - Linux Clang build and CTest execution
 - clang-format validation
 - clang-tidy static analysis
+- Doxygen generation with warnings treated as errors
 - an aggregate `Quality gate` suitable for branch protection
 
 The workflow has read-only repository permissions and does not publish or
