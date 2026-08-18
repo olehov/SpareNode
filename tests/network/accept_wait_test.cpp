@@ -7,19 +7,36 @@
 #include "sparenode/network/detail/accept_wait.hpp"
 #include "support/fake_socket_poller.hpp"
 
+namespace
+{
+
+[[nodiscard]] sparenode::network::detail::SocketWaitContext
+wait_context(sparenode::test::FakeSocketPoller &poller,
+             sparenode::network::detail::SocketWakeChannel &wake_channel)
+{
+    return {
+        .socket = sparenode::network::detail::invalid_socket,
+        .poller = poller,
+        .wake_channel = wake_channel,
+    };
+}
+
+} // namespace
+
 TEST_CASE("Non-cancellable accept wait polls only the listener", "[network][tcp][unit]")
 {
     sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
     using WaitResult = sparenode::Result<sparenode::network::detail::AcceptWaitStatus,
                                          sparenode::network::NetworkError>;
     std::promise<WaitResult> result_promise;
     auto result_future = result_promise.get_future();
 
     std::jthread wait_thread(
-        [&poller, &result_promise]
+        [&poller, &result_promise, &wake_channel]
         {
-            result_promise.set_value(sparenode::network::detail::wait_for_accept(
-                sparenode::network::detail::invalid_socket, poller));
+            result_promise.set_value(
+                sparenode::network::detail::wait_for_accept(wait_context(poller, wake_channel)));
         });
 
     poller.wait_until_entered();
@@ -38,16 +55,17 @@ TEST_CASE("Non-cancellable accept wait polls only the listener", "[network][tcp]
 TEST_CASE("Accept wait preserves socket poller errors", "[network][tcp][unit][error]")
 {
     sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
     using WaitResult = sparenode::Result<sparenode::network::detail::AcceptWaitStatus,
                                          sparenode::network::NetworkError>;
     std::promise<WaitResult> result_promise;
     auto result_future = result_promise.get_future();
 
     std::jthread wait_thread(
-        [&poller, &result_promise]
+        [&poller, &result_promise, &wake_channel]
         {
-            result_promise.set_value(sparenode::network::detail::wait_for_accept(
-                sparenode::network::detail::invalid_socket, poller));
+            result_promise.set_value(
+                sparenode::network::detail::wait_for_accept(wait_context(poller, wake_channel)));
         });
 
     poller.wait_until_entered();
@@ -74,16 +92,17 @@ TEST_CASE("Accept wait delegates blocking to the socket poller", "[network][tcp]
     const auto runtime_result = sparenode::network::detail::ensure_socket_runtime();
     REQUIRE(runtime_result.has_value());
     std::stop_source stop_source;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
     using WaitResult = sparenode::Result<sparenode::network::detail::AcceptWaitStatus,
                                          sparenode::network::NetworkError>;
     std::promise<WaitResult> result_promise;
     auto result_future = result_promise.get_future();
 
     std::jthread wait_thread(
-        [&poller, &stop_source, &result_promise]
+        [&poller, &stop_source, &result_promise, &wake_channel]
         {
             result_promise.set_value(sparenode::network::detail::wait_for_accept(
-                sparenode::network::detail::invalid_socket, stop_source.get_token(), poller));
+                wait_context(poller, wake_channel), stop_source.get_token()));
         });
 
     poller.wait_until_entered();

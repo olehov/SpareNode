@@ -15,6 +15,7 @@ include(Catch)
 
 add_executable(sparenode_tests
     network/accept_wait_test.cpp
+    network/connection_io_test.cpp
     network/socket_wait_test.cpp
     network/tcp_connection_test.cpp
     network/tcp_listener_test.cpp

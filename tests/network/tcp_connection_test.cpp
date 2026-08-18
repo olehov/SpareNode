@@ -1,13 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
-#include <chrono>
 #include <cstddef>
-#include <future>
 #include <span>
 #include <stop_token>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 #include "sparenode/network/network_error.hpp"
@@ -297,41 +294,5 @@ TEST_CASE("TCP connection I/O honours cancellation requested before waiting",
     const auto sent = pair.server.send(std::span<const std::byte>(buffer), stop_source.get_token());
     REQUIRE_FALSE(sent.has_value());
     check_cancelled(sent.error(), sparenode::network::NetworkOperation::send);
-    CHECK(pair.server.is_open());
-}
-
-TEST_CASE("Blocked TCP receive completes after cancellation", "[network][tcp][io][cancel]")
-{
-    using namespace std::chrono_literals;
-
-    auto pair = create_connected_pair();
-    std::stop_source stop_source;
-    using ReceiveResult = sparenode::Result<std::size_t, sparenode::network::NetworkError>;
-    std::promise<ReceiveResult> result_promise;
-    auto result_future = result_promise.get_future();
-    std::promise<void> started_promise;
-    auto started_future = started_promise.get_future();
-    std::array<std::byte, 1> buffer{};
-
-    std::jthread receive_thread(
-        [&pair, &stop_source, &result_promise, &started_promise, &buffer]
-        {
-            started_promise.set_value();
-            result_promise.set_value(pair.server.receive(buffer, stop_source.get_token()));
-        });
-
-    started_future.wait();
-    REQUIRE(stop_source.request_stop());
-    const auto completion = result_future.wait_for(2s);
-    if (completion != std::future_status::ready)
-    {
-        pair.client.close();
-    }
-    REQUIRE(completion == std::future_status::ready);
-
-    const auto result = result_future.get();
-    receive_thread.join();
-    REQUIRE_FALSE(result.has_value());
-    check_cancelled(result.error(), sparenode::network::NetworkOperation::receive);
     CHECK(pair.server.is_open());
 }

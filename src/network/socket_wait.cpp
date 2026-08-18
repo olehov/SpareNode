@@ -1,6 +1,8 @@
 #include "sparenode/network/detail/socket_wait.hpp"
 
 #include <array>
+#include <memory>
+#include <optional>
 #include <stop_token>
 #include <utility>
 
@@ -8,47 +10,31 @@
 
 namespace sparenode::network::detail
 {
-namespace
+
+struct SocketWakeChannel::Impl
 {
-
-/// Owns a loopback-only datagram pair whose readable end participates in poll.
-class WakeChannel final
-{
-  public:
-    WakeChannel(NativeSocketOwner reader, NativeSocketOwner writer) noexcept
-        : reader_(std::move(reader)), writer_(std::move(writer))
+    Impl(NativeSocketOwner reader, NativeSocketOwner writer) noexcept
+        : reader(std::move(reader)), writer(std::move(writer))
     {
     }
 
-    WakeChannel(const WakeChannel &) = delete;
-    WakeChannel &operator=(const WakeChannel &) = delete;
-    WakeChannel(WakeChannel &&) noexcept = default;
-    WakeChannel &operator=(WakeChannel &&) = delete;
-
-    /// Sends one byte to make the reader socket immediately readable.
-    void notify() const noexcept
-    {
-        constexpr char wake_byte = 1;
-        static_cast<void>(::send(writer_.get(), &wake_byte, 1, 0));
-    }
-
-    /// Returns the descriptor watched alongside the operation socket.
-    [[nodiscard]] NativeSocket reader() const noexcept
-    {
-        return reader_.get();
-    }
-
-  private:
-    NativeSocketOwner reader_;
-    NativeSocketOwner writer_;
+    NativeSocketOwner reader;
+    NativeSocketOwner writer;
 };
 
-/// Creates two authenticated UDP sockets connected over IPv4 loopback.
-[[nodiscard]] Result<WakeChannel, NetworkError>
-create_wake_channel(const NetworkOperation operation)
+SocketWakeChannel::SocketWakeChannel() noexcept = default;
+
+SocketWakeChannel::~SocketWakeChannel() = default;
+
+Result<std::unique_ptr<SocketWakeChannel::Impl>, NetworkError>
+SocketWakeChannel::create(const NetworkOperation operation)
 {
-    NativeSocketOwner reader(::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
-    if (reader.get() == invalid_socket)
+    NativeSocketOwner reader_socket(::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+    if (reader_socket.get() == invalid_socket)
+    {
+        return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
+    }
+    if (!configure_socket_nonblocking(reader_socket.get()))
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
@@ -57,21 +43,21 @@ create_wake_channel(const NetworkOperation operation)
     reader_endpoint.sin_family = AF_INET;
     reader_endpoint.sin_port = 0;
     reader_endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (::bind(reader.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
+    if (::bind(reader_socket.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
                static_cast<SocketLength>(sizeof(reader_endpoint))) != 0)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
 
     auto reader_endpoint_length = static_cast<SocketLength>(sizeof(reader_endpoint));
-    if (::getsockname(reader.get(), reinterpret_cast<sockaddr *>(&reader_endpoint),
+    if (::getsockname(reader_socket.get(), reinterpret_cast<sockaddr *>(&reader_endpoint),
                       &reader_endpoint_length) != 0)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
 
-    NativeSocketOwner writer(::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
-    if (writer.get() == invalid_socket)
+    NativeSocketOwner writer_socket(::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+    if (writer_socket.get() == invalid_socket)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
@@ -80,14 +66,14 @@ create_wake_channel(const NetworkOperation operation)
     writer_endpoint.sin_family = AF_INET;
     writer_endpoint.sin_port = 0;
     writer_endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (::bind(writer.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
+    if (::bind(writer_socket.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
                static_cast<SocketLength>(sizeof(writer_endpoint))) != 0)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
 
     auto writer_endpoint_length = static_cast<SocketLength>(sizeof(writer_endpoint));
-    if (::getsockname(writer.get(), reinterpret_cast<sockaddr *>(&writer_endpoint),
+    if (::getsockname(writer_socket.get(), reinterpret_cast<sockaddr *>(&writer_endpoint),
                       &writer_endpoint_length) != 0)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
@@ -95,16 +81,71 @@ create_wake_channel(const NetworkOperation operation)
 
     // Connecting both endpoints makes the kernel discard datagrams from any
     // unrelated local process before they can make the wake reader readable.
-    if (::connect(reader.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
+    if (::connect(reader_socket.get(), reinterpret_cast<const sockaddr *>(&writer_endpoint),
                   static_cast<SocketLength>(sizeof(writer_endpoint))) != 0 ||
-        ::connect(writer.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
+        ::connect(writer_socket.get(), reinterpret_cast<const sockaddr *>(&reader_endpoint),
                   static_cast<SocketLength>(sizeof(reader_endpoint))) != 0)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
 
-    return WakeChannel(std::move(reader), std::move(writer));
+    return std::make_unique<Impl>(std::move(reader_socket), std::move(writer_socket));
 }
+
+Result<void, NetworkError> SocketWakeChannel::ensure_initialized(const NetworkOperation operation)
+{
+    if (impl_ != nullptr)
+    {
+        return {};
+    }
+
+    auto channel_result = create(operation);
+    if (!channel_result)
+    {
+        return unexpected(channel_result.error());
+    }
+
+    impl_ = std::move(channel_result.value());
+    return {};
+}
+
+void SocketWakeChannel::notify() const noexcept
+{
+    if (impl_ == nullptr)
+    {
+        return;
+    }
+
+    constexpr char wake_byte = 1;
+    static_cast<void>(::send(impl_->writer.get(), &wake_byte, 1, 0));
+}
+
+void SocketWakeChannel::drain() const noexcept
+{
+    if (impl_ == nullptr)
+    {
+        return;
+    }
+
+    std::array<char, 16> wake_bytes{};
+    while (::recv(impl_->reader.get(), wake_bytes.data(), static_cast<int>(wake_bytes.size()), 0) >
+           0)
+    {
+    }
+}
+
+NativeSocket SocketWakeChannel::reader() const noexcept
+{
+    return impl_ == nullptr ? invalid_socket : impl_->reader.get();
+}
+
+bool SocketWakeChannel::is_initialized() const noexcept
+{
+    return impl_ != nullptr;
+}
+
+namespace
+{
 
 /// Constructs the portable readiness request for one operation socket.
 [[nodiscard]] SocketPollEntry operation_entry(const NativeSocket socket,
@@ -116,13 +157,27 @@ create_wake_channel(const NetworkOperation operation)
     return entry;
 }
 
-/// Reports events that should be interpreted by the subsequent socket call.
-[[nodiscard]] bool operation_may_proceed(const SocketPollEntry &entry,
-                                         const SocketWaitInterest interest) noexcept
+/// Converts poll output to a reason that the native socket call can interpret.
+[[nodiscard]] std::optional<SocketWaitStatus>
+ready_status(const SocketPollEntry &entry, const SocketWaitInterest interest) noexcept
 {
+    if (entry.error)
+    {
+        return SocketWaitStatus::socket_error;
+    }
+    if (entry.hangup)
+    {
+        return SocketWaitStatus::socket_hangup;
+    }
+
     const bool requested_event =
         interest == SocketWaitInterest::readable ? entry.readable : entry.writable;
-    return requested_event || entry.error || entry.hangup;
+    if (requested_event)
+    {
+        return SocketWaitStatus::socket_ready;
+    }
+
+    return std::nullopt;
 }
 
 /// Produces a structured error for an invalid or unexplained poll result.
@@ -133,31 +188,33 @@ create_wake_channel(const NetworkOperation operation)
 
 } // namespace
 
-Result<SocketWaitStatus, NetworkError> wait_for_socket(const NativeSocket socket,
-                                                       const SocketWaitInterest interest,
-                                                       const NetworkOperation operation,
-                                                       SocketPoller &poller)
+Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext context,
+                                                       const SocketWaitRequest request)
 {
-    std::array<SocketPollEntry, 1> descriptors{{operation_entry(socket, interest)}};
-    const auto poll_result = poller.wait(descriptors, operation);
+    std::array<SocketPollEntry, 1> descriptors{{
+        operation_entry(context.socket, request.interest),
+    }};
+    const auto poll_result = context.poller.wait(descriptors, request.operation);
     if (!poll_result)
     {
         return unexpected(poll_result.error());
     }
 
-    if (operation_may_proceed(descriptors[0], interest))
+    if (descriptors[0].invalid)
     {
-        return SocketWaitStatus::socket_ready;
+        return unexpected(invalid_wait_result(request.operation));
+    }
+    if (const auto status = ready_status(descriptors[0], request.interest); status.has_value())
+    {
+        return status.value();
     }
 
-    return unexpected(invalid_wait_result(operation));
+    return unexpected(invalid_wait_result(request.operation));
 }
 
-Result<SocketWaitStatus, NetworkError> wait_for_socket(const NativeSocket socket,
-                                                       const SocketWaitInterest interest,
-                                                       const NetworkOperation operation,
-                                                       const std::stop_token &stop_token,
-                                                       SocketPoller &poller)
+Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext context,
+                                                       const SocketWaitRequest request,
+                                                       const std::stop_token &stop_token)
 {
     if (stop_token.stop_requested())
     {
@@ -166,25 +223,24 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const NativeSocket socket
 
     if (!stop_token.stop_possible())
     {
-        return wait_for_socket(socket, interest, operation, poller);
+        return wait_for_socket(context, request);
     }
 
-    auto channel_result = create_wake_channel(operation);
-    if (!channel_result)
+    if (auto initialized = context.wake_channel.ensure_initialized(request.operation); !initialized)
     {
-        return unexpected(channel_result.error());
+        return unexpected(initialized.error());
     }
 
-    auto &channel = channel_result.value();
-    const std::stop_callback wake_on_stop(stop_token, [&channel] { channel.notify(); });
+    const std::stop_callback wake_on_stop(stop_token,
+                                          [&context] { context.wake_channel.notify(); });
     std::array<SocketPollEntry, 2> descriptors{{
-        operation_entry(socket, interest),
-        {.socket = channel.reader(), .watch_readable = true},
+        operation_entry(context.socket, request.interest),
+        {.socket = context.wake_channel.reader(), .watch_readable = true},
     }};
 
     while (true)
     {
-        const auto poll_result = poller.wait(descriptors, operation);
+        const auto poll_result = context.poller.wait(descriptors, request.operation);
         if (!poll_result)
         {
             return unexpected(poll_result.error());
@@ -192,9 +248,7 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const NativeSocket socket
 
         if (descriptors[1].readable)
         {
-            // Draining lets an in-flight callback finish before its channel closes.
-            char wake_byte{};
-            static_cast<void>(::recv(channel.reader(), &wake_byte, 1, 0));
+            context.wake_channel.drain();
         }
 
         if (stop_token.stop_requested())
@@ -202,17 +256,24 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const NativeSocket socket
             return SocketWaitStatus::cancelled;
         }
 
+        if (descriptors[1].invalid || descriptors[1].error || descriptors[1].hangup)
+        {
+            return unexpected(invalid_wait_result(request.operation));
+        }
         if (descriptors[1].readable)
         {
             continue;
         }
-
-        if (operation_may_proceed(descriptors[0], interest))
+        if (descriptors[0].invalid)
         {
-            return SocketWaitStatus::socket_ready;
+            return unexpected(invalid_wait_result(request.operation));
+        }
+        if (const auto status = ready_status(descriptors[0], request.interest); status.has_value())
+        {
+            return status.value();
         }
 
-        return unexpected(invalid_wait_result(operation));
+        return unexpected(invalid_wait_result(request.operation));
     }
 }
 

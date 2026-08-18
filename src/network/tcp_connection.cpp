@@ -7,8 +7,7 @@
 #include <stop_token>
 #include <utility>
 
-#include "sparenode/network/detail/native_socket.hpp"
-#include "sparenode/network/detail/socket_wait.hpp"
+#include "sparenode/network/detail/connection_io.hpp"
 
 namespace sparenode::network
 {
@@ -64,37 +63,7 @@ Result<std::size_t, NetworkError> TcpConnection::receive(const std::span<std::by
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::validation, 1});
     }
 
-    while (true)
-    {
-        const auto wait_result =
-            detail::wait_for_socket(impl_->socket, detail::SocketWaitInterest::readable,
-                                    NetworkOperation::receive, stop_token, impl_->poller);
-        if (!wait_result)
-        {
-            return unexpected(wait_result.error());
-        }
-        if (wait_result.value() == detail::SocketWaitStatus::cancelled)
-        {
-            return unexpected(
-                NetworkError{NetworkOperation::receive, NetworkErrorDomain::cancellation, 0});
-        }
-
-        const std::ptrdiff_t received = detail::receive_socket(impl_->socket, buffer);
-        if (received >= 0)
-        {
-            return static_cast<std::size_t>(received);
-        }
-
-        const int error_code = detail::last_socket_error();
-        if (detail::socket_error_would_block(error_code) ||
-            detail::socket_error_interrupted(error_code))
-        {
-            continue;
-        }
-
-        return unexpected(
-            NetworkError{NetworkOperation::receive, NetworkErrorDomain::socket, error_code});
-    }
+    return impl_->io.receive(buffer, stop_token);
 }
 
 /// Sends bytes without allocating a cancellation wake channel.
@@ -116,37 +85,7 @@ Result<std::size_t, NetworkError> TcpConnection::send(const std::span<const std:
         return unexpected(NetworkError{NetworkOperation::send, NetworkErrorDomain::validation, 1});
     }
 
-    while (true)
-    {
-        const auto wait_result =
-            detail::wait_for_socket(impl_->socket, detail::SocketWaitInterest::writable,
-                                    NetworkOperation::send, stop_token, impl_->poller);
-        if (!wait_result)
-        {
-            return unexpected(wait_result.error());
-        }
-        if (wait_result.value() == detail::SocketWaitStatus::cancelled)
-        {
-            return unexpected(
-                NetworkError{NetworkOperation::send, NetworkErrorDomain::cancellation, 0});
-        }
-
-        const std::ptrdiff_t sent = detail::send_socket(impl_->socket, buffer);
-        if (sent >= 0)
-        {
-            return static_cast<std::size_t>(sent);
-        }
-
-        const int error_code = detail::last_socket_error();
-        if (detail::socket_error_would_block(error_code) ||
-            detail::socket_error_interrupted(error_code))
-        {
-            continue;
-        }
-
-        return unexpected(
-            NetworkError{NetworkOperation::send, NetworkErrorDomain::socket, error_code});
-    }
+    return impl_->io.send(buffer, stop_token);
 }
 
 } // namespace sparenode::network

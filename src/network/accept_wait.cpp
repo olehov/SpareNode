@@ -10,17 +10,16 @@ namespace
 /// Converts the general socket-wait result to the listener-specific vocabulary.
 [[nodiscard]] AcceptWaitStatus to_accept_status(const SocketWaitStatus status) noexcept
 {
-    return status == SocketWaitStatus::socket_ready ? AcceptWaitStatus::socket_ready
-                                                    : AcceptWaitStatus::cancelled;
+    return status == SocketWaitStatus::cancelled ? AcceptWaitStatus::cancelled
+                                                 : AcceptWaitStatus::socket_ready;
 }
 
 } // namespace
 
-Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listener_socket,
-                                                       SocketPoller &poller)
+Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext context)
 {
-    const auto result = wait_for_socket(listener_socket, SocketWaitInterest::readable,
-                                        NetworkOperation::accept, poller);
+    const auto result = wait_for_socket(
+        context, {.interest = SocketWaitInterest::readable, .operation = NetworkOperation::accept});
     if (!result)
     {
         return unexpected(result.error());
@@ -29,12 +28,12 @@ Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listen
     return to_accept_status(result.value());
 }
 
-Result<AcceptWaitStatus, NetworkError> wait_for_accept(const NativeSocket listener_socket,
-                                                       const std::stop_token &stop_token,
-                                                       SocketPoller &poller)
+Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext context,
+                                                       const std::stop_token &stop_token)
 {
-    const auto result = wait_for_socket(listener_socket, SocketWaitInterest::readable,
-                                        NetworkOperation::accept, stop_token, poller);
+    const auto result = wait_for_socket(
+        context, {.interest = SocketWaitInterest::readable, .operation = NetworkOperation::accept},
+        stop_token);
     if (!result)
     {
         return unexpected(result.error());

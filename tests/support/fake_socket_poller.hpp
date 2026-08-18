@@ -19,6 +19,14 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     wait(std::span<network::detail::SocketPollEntry> entries,
          network::NetworkOperation operation) override
     {
+        for (auto &entry : entries)
+        {
+            entry.readable = false;
+            entry.writable = false;
+            entry.error = false;
+            entry.hangup = false;
+            entry.invalid = false;
+        }
         operation_ = operation;
         entry_count_ = entries.size();
         if (!entries.empty())
@@ -40,6 +48,14 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         {
             entries[writable_index_].writable = true;
         }
+        if (error_index_ < entries.size())
+        {
+            entries[error_index_].error = true;
+        }
+        if (hangup_index_ < entries.size())
+        {
+            entries[hangup_index_].hangup = true;
+        }
         return {};
     }
 
@@ -60,6 +76,20 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     void complete_with_writable(const std::size_t index)
     {
         writable_index_ = index;
+        resume_.release();
+    }
+
+    /// Returns from the fake wait with one socket reporting an error event.
+    void complete_with_socket_error(const std::size_t index)
+    {
+        error_index_ = index;
+        resume_.release();
+    }
+
+    /// Returns from the fake wait with one socket reporting a hangup event.
+    void complete_with_hangup(const std::size_t index)
+    {
+        hangup_index_ = index;
         resume_.release();
     }
 
@@ -103,6 +133,8 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     bool watches_writable_{false};
     std::size_t readable_index_{(std::numeric_limits<std::size_t>::max)()};
     std::size_t writable_index_{(std::numeric_limits<std::size_t>::max)()};
+    std::size_t error_index_{(std::numeric_limits<std::size_t>::max)()};
+    std::size_t hangup_index_{(std::numeric_limits<std::size_t>::max)()};
     std::optional<network::NetworkError> error_;
 };
 
