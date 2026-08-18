@@ -53,9 +53,13 @@ token before starting another operation.
 
 Internally, accepted sockets are nonblocking. SpareNode waits with `WSAPoll` on
 Windows or `poll` on Linux and uses a private authenticated loopback wake channel
-for stoppable waits. There is no periodic timeout or busy-wait loop. POSIX sends
-suppress `SIGPIPE`, allowing peer disconnection to be returned as a structured
-socket error instead of terminating the process.
+for stoppable waits. The channel is created lazily on the first cancellable
+operation and reused by later sequential operations on the same connection.
+`ConnectionIo` groups the socket, poller, wake channel, and native transfer
+operations behind one internal coordinator, so those stable dependencies are not
+passed separately through each call layer. There is no periodic timeout or
+busy-wait loop. POSIX sends suppress `SIGPIPE`, allowing peer disconnection to be
+returned as a structured socket error instead of terminating the process.
 
 `TcpConnection` is move-only and not thread-safe. Do not call `receive`, `send`,
 `peer_endpoint`, or other methods concurrently on the same object. Do not move

@@ -58,8 +58,11 @@ accept operation has returned. The supported shutdown order is:
 3. Destroy the listener only after that operation has returned.
 
 Internally, cancellation uses a private loopback wake channel monitored together
-with the listening socket. It does not rely on unsafely closing the listener from
-another thread and does not use periodic polling or a busy-wait loop.
+with the listening socket. The channel is created lazily by the first cancellable
+accept and reused by later sequential accepts. Cancellation does not rely on
+unsafely closing the listener from another thread and does not use periodic
+polling or a busy-wait loop. The listener socket, poller, and wake channel travel
+through the internal wait layer as one non-owning context.
 
 Operations return `sparenode::Result<Value, NetworkError>`. Errors identify the
 failed operation, error domain, and native numeric code without embedding paths,
