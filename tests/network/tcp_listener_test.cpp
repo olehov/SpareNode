@@ -244,8 +244,7 @@ TEST_CASE("Endpoint conversion rejects a null native address", "[network][tcp]")
         nullptr, sparenode::network::NetworkOperation::query_peer_endpoint);
 
     REQUIRE_FALSE(endpoint.has_value());
-    CHECK(endpoint.error().operation ==
-          sparenode::network::NetworkOperation::query_peer_endpoint);
+    CHECK(endpoint.error().operation == sparenode::network::NetworkOperation::query_peer_endpoint);
     CHECK(endpoint.error().domain == sparenode::network::NetworkErrorDomain::validation);
     CHECK(endpoint.error().code == 1);
 }
