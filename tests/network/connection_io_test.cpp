@@ -131,6 +131,27 @@ TEST_CASE("Connection send returns a controlled partial native transfer",
     CHECK_FALSE(wake_channel.is_initialized());
 }
 
+TEST_CASE("Fake socket transfers cannot exceed their buffers",
+          "[network][tcp][io][unit][support][bounds]")
+{
+    sparenode::test::FakeSocketOperations operations;
+    std::array<std::byte, 3> receive_buffer{};
+    constexpr std::string_view payload = "send";
+    constexpr std::ptrdiff_t oversized_result = 64;
+
+    operations.set_receive_result(oversized_result);
+    const auto received =
+        operations.receive(sparenode::network::detail::invalid_socket, receive_buffer);
+
+    operations.set_send_result(oversized_result);
+    const auto payload_bytes = bytes_of(payload);
+    const auto sent = operations.send(sparenode::network::detail::invalid_socket, payload_bytes);
+
+    CHECK(received == static_cast<std::ptrdiff_t>(receive_buffer.size()));
+    CHECK(sent == static_cast<std::ptrdiff_t>(payload_bytes.size()));
+    CHECK(std::ranges::equal(operations.sent_bytes(), payload_bytes));
+}
+
 TEST_CASE("Blocked connection receive cancellation is deterministic",
           "[network][tcp][io][unit][cancel]")
 {

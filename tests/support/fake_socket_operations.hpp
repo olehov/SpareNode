@@ -15,24 +15,24 @@ class FakeSocketOperations final : public network::detail::SocketOperations
 {
   public:
     [[nodiscard]] std::ptrdiff_t receive(network::detail::NativeSocket,
-                                         const std::span<std::byte>) noexcept override
+                                         const std::span<std::byte> buffer) noexcept override
     {
         ++receive_calls_;
-        return receive_result_;
+        return bounded_result(receive_result_, buffer.size());
     }
 
     [[nodiscard]] std::ptrdiff_t send(network::detail::NativeSocket,
                                       const std::span<const std::byte> buffer) noexcept override
     {
         ++send_calls_;
-        if (send_result_ > 0)
+        sent_bytes_.clear();
+        const auto transferred = bounded_result(send_result_, buffer.size());
+        if (transferred > 0)
         {
-            const auto transferred =
-                (std::min)(static_cast<std::size_t>(send_result_), buffer.size());
-            const auto sent = buffer.first(transferred);
+            const auto sent = buffer.first(static_cast<std::size_t>(transferred));
             sent_bytes_.assign(sent.begin(), sent.end());
         }
-        return send_result_;
+        return transferred;
     }
 
     [[nodiscard]] int last_error() const noexcept override
@@ -71,6 +71,19 @@ class FakeSocketOperations final : public network::detail::SocketOperations
     }
 
   private:
+    /// Clamps successful native-style results to the supplied buffer boundary.
+    [[nodiscard]] static std::ptrdiff_t bounded_result(const std::ptrdiff_t result,
+                                                       const std::size_t buffer_size) noexcept
+    {
+        if (result <= 0)
+        {
+            return result;
+        }
+
+        return static_cast<std::ptrdiff_t>(
+            (std::min)(static_cast<std::size_t>(result), buffer_size));
+    }
+
     std::ptrdiff_t receive_result_{0};
     std::ptrdiff_t send_result_{0};
     int error_code_{0};

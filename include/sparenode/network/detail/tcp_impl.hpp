@@ -35,6 +35,8 @@ struct TcpConnection::Impl
 
     detail::NativeSocket socket{detail::invalid_socket};
     TcpEndpoint peer_endpoint;
+    // `io` stores references to these collaborators. Keep them before `io`,
+    // and keep `io` declared last so every referenced object is initialized.
     detail::NativeSocketPoller poller;
     detail::SocketWakeChannel wake_channel;
     detail::NativeSocketOperations operations;
@@ -61,6 +63,8 @@ struct TcpListener::Impl
     Impl &operator=(Impl &&) = delete;
 
     detail::NativeSocket socket{detail::invalid_socket};
+    // `wait` stores references to these collaborators. Keep them before `wait`,
+    // and keep `wait` declared last so every referenced object is initialized.
     detail::NativeSocketPoller poller;
     detail::SocketWakeChannel wake_channel;
     detail::SocketWaitContext wait;

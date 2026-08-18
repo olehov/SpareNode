@@ -61,6 +61,10 @@ SocketWakeChannel::create(const NetworkOperation operation)
     {
         return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
     }
+    if (!configure_socket_nonblocking(writer_socket.get()))
+    {
+        return unexpected(NetworkError{operation, NetworkErrorDomain::socket, last_socket_error()});
+    }
 
     sockaddr_in writer_endpoint{};
     writer_endpoint.sin_family = AF_INET;

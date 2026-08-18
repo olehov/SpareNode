@@ -207,6 +207,47 @@ TEST_CASE("Socket wait distinguishes poll hangup readiness", "[network][tcp][io]
     check_terminal_wait(false);
 }
 
+TEST_CASE("Socket poller fake clears completion state between waits",
+          "[network][tcp][io][unit][support]")
+{
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    const auto context = wait_context(poller, wake_channel);
+    constexpr sparenode::network::detail::SocketWaitRequest request{
+        .interest = sparenode::network::detail::SocketWaitInterest::readable,
+        .operation = sparenode::network::NetworkOperation::receive,
+    };
+
+    std::promise<WaitResult> first_promise;
+    auto first_future = first_promise.get_future();
+    std::jthread first_wait(
+        [&] {
+            first_promise.set_value(sparenode::network::detail::wait_for_socket(context, request));
+        });
+    poller.wait_until_entered();
+    poller.complete_with_hangup(0);
+    first_future.wait();
+    const auto first_result = first_future.get();
+    first_wait.join();
+
+    std::promise<WaitResult> second_promise;
+    auto second_future = second_promise.get_future();
+    std::jthread second_wait(
+        [&] {
+            second_promise.set_value(sparenode::network::detail::wait_for_socket(context, request));
+        });
+    poller.wait_until_entered();
+    poller.complete_with_readable(0);
+    second_future.wait();
+    const auto second_result = second_future.get();
+    second_wait.join();
+
+    REQUIRE(first_result.has_value());
+    CHECK(first_result.value() == sparenode::network::detail::SocketWaitStatus::socket_hangup);
+    REQUIRE(second_result.has_value());
+    CHECK(second_result.value() == sparenode::network::detail::SocketWaitStatus::socket_ready);
+}
+
 TEST_CASE("Cancellable socket waits reuse their wake channel", "[network][tcp][io][cancel][unit]")
 {
     sparenode::network::detail::SocketWakeChannel wake_channel;

@@ -27,6 +27,11 @@ class FakeSocketPoller final : public network::detail::SocketPoller
             entry.hangup = false;
             entry.invalid = false;
         }
+        readable_index_ = (std::numeric_limits<std::size_t>::max)();
+        writable_index_ = (std::numeric_limits<std::size_t>::max)();
+        error_index_ = (std::numeric_limits<std::size_t>::max)();
+        hangup_index_ = (std::numeric_limits<std::size_t>::max)();
+        error_.reset();
         operation_ = operation;
         entry_count_ = entries.size();
         if (!entries.empty())
