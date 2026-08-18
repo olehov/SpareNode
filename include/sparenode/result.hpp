@@ -37,6 +37,8 @@ template <typename Value, typename Error> class Result
   public:
     /// @brief Creates a successful result by copying a copyable value.
     /// @param[in] value Value to copy into the result.
+    // Implicit value conversion keeps successful return statements concise.
+    // cppcheck-suppress noExplicitConstructor
     Result(const Value &value)
         requires std::copy_constructible<Value>
         : storage_(std::in_place_index<0>, value)
@@ -45,12 +47,16 @@ template <typename Value, typename Error> class Result
 
     /// @brief Creates a successful result by moving a value into internal storage.
     /// @param[in] value Value to move into the result.
+    // Implicit value conversion keeps successful return statements concise.
+    // cppcheck-suppress noExplicitConstructor
     Result(Value &&value) : storage_(std::in_place_index<0>, std::move(value))
     {
     }
 
     /// @brief Creates a failed result from an explicitly tagged error.
     /// @param[in] failure Tagged error to move into the result.
+    // Unexpected is already an explicit failure tag, so another cast adds no safety.
+    // cppcheck-suppress noExplicitConstructor
     Result(Unexpected<Error> failure) : storage_(std::in_place_index<1>, std::move(failure.error))
     {
     }
@@ -149,6 +155,8 @@ template <typename Error> class Result<void, Error>
 
     /// @brief Creates a failed void result from an explicitly tagged error.
     /// @param[in] failure Tagged error to move into the result.
+    // Unexpected is already an explicit failure tag, so another cast adds no safety.
+    // cppcheck-suppress noExplicitConstructor
     Result(Unexpected<Error> failure) : storage_(std::in_place_index<1>, std::move(failure.error))
     {
     }

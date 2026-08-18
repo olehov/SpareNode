@@ -20,7 +20,7 @@ namespace
 
 } // namespace
 
-Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext context)
+Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext &context)
 {
     const auto result = wait_for_socket(
         context, {.interest = SocketWaitInterest::readable, .operation = NetworkOperation::accept});
@@ -32,7 +32,7 @@ Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext c
     return to_accept_status(result.value());
 }
 
-Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext context,
+Result<AcceptWaitStatus, NetworkError> wait_for_accept(const SocketWaitContext &context,
                                                        const std::stop_token &stop_token)
 {
     const auto result = wait_for_socket(

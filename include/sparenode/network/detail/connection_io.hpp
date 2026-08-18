@@ -90,7 +90,7 @@ class ConnectionIo final
   public:
     /// @brief Stores non-owning collaborators for one connection.
     /// @param[in] context Borrowed socket, poller, wake channel, and operations provider.
-    explicit ConnectionIo(ConnectionIoContext context) noexcept;
+    explicit ConnectionIo(const ConnectionIoContext &context) noexcept;
 
     /// @brief Runs one cancellable, possibly partial receive operation.
     /// @param[out] buffer Destination storage for received bytes.

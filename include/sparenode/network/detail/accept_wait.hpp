@@ -26,7 +26,8 @@ enum class AcceptWaitStatus : std::uint8_t
 /// @param[in] context Borrowed listener socket and stable wait collaborators.
 /// @return `socket_ready` after readable, error, or hangup poll status so the
 /// native accept call can determine the outcome; otherwise a structured poll error.
-[[nodiscard]] Result<AcceptWaitStatus, NetworkError> wait_for_accept(SocketWaitContext context);
+[[nodiscard]] Result<AcceptWaitStatus, NetworkError>
+wait_for_accept(const SocketWaitContext &context);
 
 /// @brief Implements the wait used by `TcpListener::accept(std::stop_token)`.
 ///
@@ -40,6 +41,6 @@ enum class AcceptWaitStatus : std::uint8_t
 /// @return `cancelled` after a stop request; `socket_ready` after readable, error,
 /// or hangup status; otherwise a structured polling or initialization error.
 [[nodiscard]] Result<AcceptWaitStatus, NetworkError>
-wait_for_accept(SocketWaitContext context, const std::stop_token &stop_token);
+wait_for_accept(const SocketWaitContext &context, const std::stop_token &stop_token);
 
 } // namespace sparenode::network::detail

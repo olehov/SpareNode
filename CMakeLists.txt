@@ -19,6 +19,7 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(SpareNodeBuildSettings)
 include(SpareNodeCompilerWarnings)
+include(SpareNodeCppcheck)
 include(SpareNodeDocumentation)
 include(SpareNodeStaticAnalysis)
 
@@ -58,6 +59,7 @@ if(WIN32)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)
+sparenode_enable_cppcheck(sparenode_core)
 sparenode_enable_static_analysis(sparenode_core)
 
 add_executable(sparenode
@@ -73,6 +75,7 @@ target_include_directories(sparenode PRIVATE
 )
 
 sparenode_enable_compiler_warnings(sparenode)
+sparenode_enable_cppcheck(sparenode)
 sparenode_enable_static_analysis(sparenode)
 
 sparenode_enable_documentation()

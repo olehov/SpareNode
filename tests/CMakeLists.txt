@@ -38,6 +38,7 @@ target_include_directories(sparenode_tests PRIVATE
 )
 
 sparenode_enable_compiler_warnings(sparenode_tests)
+sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)

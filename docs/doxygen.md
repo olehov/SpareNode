@@ -18,7 +18,7 @@ Use `///` comments with explicit Doxygen commands:
 /// @return The readiness state, cancellation, or a structured network error.
 /// @note The referenced resources must outlive the call.
 [[nodiscard]] Result<SocketWaitStatus, NetworkError>
-wait_for_socket(SocketWaitContext context, SocketWaitRequest request,
+wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request,
                 const std::stop_token &stop_token);
 ```
 

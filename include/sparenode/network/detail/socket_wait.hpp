@@ -106,8 +106,8 @@ struct SocketWaitContext
 /// @param[in] context Borrowed stable socket and wait collaborators.
 /// @param[in] request Readiness interest and public operation metadata.
 /// @return Completion status, or a structured polling error.
-[[nodiscard]] Result<SocketWaitStatus, NetworkError> wait_for_socket(SocketWaitContext context,
-                                                                     SocketWaitRequest request);
+[[nodiscard]] Result<SocketWaitStatus, NetworkError>
+wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request);
 
 /// @brief Waits for one socket while allowing a stop request to wake the native poll.
 ///
@@ -120,7 +120,7 @@ struct SocketWaitContext
 /// @param[in] stop_token Token observed before and during the blocking wait.
 /// @return Completion status, or a structured polling or initialization error.
 [[nodiscard]] Result<SocketWaitStatus, NetworkError>
-wait_for_socket(SocketWaitContext context, SocketWaitRequest request,
+wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request,
                 const std::stop_token &stop_token);
 
 } // namespace sparenode::network::detail
