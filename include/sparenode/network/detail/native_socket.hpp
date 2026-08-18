@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <span>
+
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/result.hpp"
 
@@ -49,10 +52,18 @@ void close_socket(NativeSocket socket) noexcept;
 /// Places a listener in nonblocking mode so readiness cannot race into a blocked accept.
 [[nodiscard]] bool configure_socket_nonblocking(NativeSocket socket) noexcept;
 
-/// Restores blocking mode on an accepted socket for the synchronous connection API.
-[[nodiscard]] bool configure_socket_blocking(NativeSocket socket) noexcept;
-
-/// Reports whether an accept attempt found no connection currently available.
+/// Reports whether a nonblocking socket operation has no work currently available.
 [[nodiscard]] bool socket_error_would_block(int error_code) noexcept;
+
+/// Reports whether a native socket call was interrupted before doing any work.
+[[nodiscard]] bool socket_error_interrupted(int error_code) noexcept;
+
+/// Receives at most one bounded span from a nonblocking socket.
+[[nodiscard]] std::ptrdiff_t receive_socket(NativeSocket socket,
+                                            std::span<std::byte> buffer) noexcept;
+
+/// Sends at most one bounded span without allowing SIGPIPE to terminate the process.
+[[nodiscard]] std::ptrdiff_t send_socket(NativeSocket socket,
+                                         std::span<const std::byte> buffer) noexcept;
 
 } // namespace sparenode::network::detail

@@ -2,8 +2,10 @@
 
 #include <utility>
 
+#include "sparenode/network/detail/connection_io.hpp"
 #include "sparenode/network/detail/native_socket.hpp"
 #include "sparenode/network/detail/socket_poller.hpp"
+#include "sparenode/network/detail/socket_wait.hpp"
 #include "sparenode/network/tcp_connection.hpp"
 #include "sparenode/network/tcp_listener.hpp"
 
@@ -14,7 +16,9 @@ struct TcpConnection::Impl
 {
     /// Takes ownership of an accepted socket and records its remote endpoint.
     Impl(const detail::NativeSocket socket, TcpEndpoint endpoint)
-        : socket(socket), peer_endpoint(std::move(endpoint))
+        : socket(socket), peer_endpoint(std::move(endpoint)),
+          io({.wait = {.socket = socket, .poller = poller, .wake_channel = wake_channel},
+              .operations = operations})
     {
     }
 
@@ -31,12 +35,19 @@ struct TcpConnection::Impl
 
     detail::NativeSocket socket{detail::invalid_socket};
     TcpEndpoint peer_endpoint;
+    // `io` stores references to these collaborators. Keep them before `io`,
+    // and keep `io` declared last so every referenced object is initialized.
+    detail::NativeSocketPoller poller;
+    detail::SocketWakeChannel wake_channel;
+    detail::NativeSocketOperations operations;
+    detail::ConnectionIo io;
 };
 
 struct TcpListener::Impl
 {
     /// Takes ownership of a socket that has already been bound and made listening.
-    explicit Impl(const detail::NativeSocket socket) noexcept : socket(socket)
+    explicit Impl(const detail::NativeSocket socket) noexcept
+        : socket(socket), wait{.socket = socket, .poller = poller, .wake_channel = wake_channel}
     {
     }
 
@@ -52,7 +63,11 @@ struct TcpListener::Impl
     Impl &operator=(Impl &&) = delete;
 
     detail::NativeSocket socket{detail::invalid_socket};
+    // `wait` stores references to these collaborators. Keep them before `wait`,
+    // and keep `wait` declared last so every referenced object is initialized.
     detail::NativeSocketPoller poller;
+    detail::SocketWakeChannel wake_channel;
+    detail::SocketWaitContext wait;
 };
 
 } // namespace sparenode::network

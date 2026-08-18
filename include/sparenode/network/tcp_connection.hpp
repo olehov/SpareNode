@@ -1,9 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
+#include <stop_token>
 
+#include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
+#include "sparenode/result.hpp"
 
 namespace sparenode::network
 {
@@ -11,6 +16,9 @@ namespace sparenode::network
 class TcpListener;
 
 /// Owns one accepted TCP socket and releases it automatically.
+///
+/// Instances are not thread-safe. Do not run operations concurrently on the
+/// same connection or move or destroy it until an operation has returned.
 class TcpConnection final
 {
   public:
@@ -32,6 +40,32 @@ class TcpConnection final
 
     /// Returns the remote endpoint, or no value for a moved-from connection.
     [[nodiscard]] std::optional<TcpEndpoint> peer_endpoint() const;
+
+    /// Waits for and receives at most one caller-provided buffer of bytes.
+    ///
+    /// A zero-byte success means that the peer performed an orderly shutdown.
+    /// The operation may return fewer bytes than the buffer can hold.
+    [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer);
+
+    /// Receives bytes while allowing another thread to request cancellation.
+    ///
+    /// Cancellation never closes the connection. If bytes are received before
+    /// the stop request is observed, that successful transfer wins the race.
+    [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
+                                                            const std::stop_token &stop_token);
+
+    /// Waits for and sends at most one caller-provided buffer of bytes.
+    ///
+    /// A successful operation may send fewer bytes than supplied; callers that
+    /// require full delivery must continue with the remaining suffix.
+    [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer);
+
+    /// Sends bytes while allowing another thread to request cancellation.
+    ///
+    /// Cancellation never closes the connection. Bytes reported as sent remain
+    /// sent even if cancellation is requested concurrently.
+    [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
+                                                         const std::stop_token &stop_token);
 
   private:
     // PImpl keeps SOCKET/file-descriptor types out of this public header.

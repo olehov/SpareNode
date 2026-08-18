@@ -142,7 +142,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
 
     while (true)
     {
-        const auto wait_result = detail::wait_for_accept(impl_->socket, impl_->poller);
+        const auto wait_result = detail::wait_for_accept(impl_->wait);
         if (!wait_result)
         {
             return unexpected(wait_result.error());
@@ -169,7 +169,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &s
 
     while (true)
     {
-        const auto wait_result = detail::wait_for_accept(impl_->socket, stop_token, impl_->poller);
+        const auto wait_result = detail::wait_for_accept(impl_->wait, stop_token);
         if (!wait_result)
         {
             return unexpected(wait_result.error());
@@ -225,7 +225,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept_ready_connection()
     }
 
     detail::NativeSocketOwner accepted_socket(accept_result.value);
-    if (!detail::configure_socket_blocking(accepted_socket.get()))
+    if (!detail::configure_socket_nonblocking(accepted_socket.get()))
     {
         return unexpected(NetworkError{
             NetworkOperation::configure_socket,

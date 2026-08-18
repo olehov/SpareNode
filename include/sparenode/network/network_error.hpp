@@ -15,6 +15,8 @@ enum class NetworkOperation : std::uint8_t
     bind,
     listen,
     accept,
+    receive,
+    send,
     query_local_endpoint,
     query_peer_endpoint,
 };
