@@ -220,11 +220,10 @@ std::ptrdiff_t receive_socket(const NativeSocket socket, std::span<std::byte> bu
 std::ptrdiff_t send_socket(const NativeSocket socket,
                            const std::span<const std::byte> buffer) noexcept
 {
-#ifdef MSG_NOSIGNAL
-    constexpr int send_flags = MSG_NOSIGNAL;
-#else
-    constexpr int send_flags = 0;
+#ifndef MSG_NOSIGNAL
+#error "send_socket requires MSG_NOSIGNAL; add SO_NOSIGPIPE support for this platform"
 #endif
+    constexpr int send_flags = MSG_NOSIGNAL;
     return ::send(socket, buffer.data(), buffer.size(), send_flags);
 }
 
