@@ -16,7 +16,7 @@ Checks: >
   readability-function-size,
   readability-identifier-naming
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*[\\/](apps|include|src|tests)[\\/].*'
+HeaderFilterRegex: '.*[\\/]SpareNode[\\/](apps|include|src|tests)[\\/].*'
 FormatStyle: file
 # Keep project policy explicit so analyzer upgrades cannot silently change the
 # accepted complexity and naming conventions.

@@ -4,6 +4,11 @@ SpareNode uses Clang-Tidy 18 as the reference static analyzer. The analysis is
 enabled only for first-party application, library, and test targets; generated
 files and third-party dependencies are outside its scope.
 
+The CMake integration anchors its header filter to the exact checkout root and
+then admits only `apps`, `include`, `src`, and `tests`. This keeps dependency
+headers outside the analysis even when their paths contain common directory
+names such as `include` or `src`.
+
 ## Run locally
 
 Use a dedicated build directory so enabling Clang-Tidy does not affect a normal
@@ -18,9 +23,10 @@ cmake --build build/analysis --parallel
 ctest --test-dir build/analysis --output-on-failure
 ```
 
-The CMake integration prefers `clang-tidy-18` and falls back to `clang-tidy`
-when the versioned executable is unavailable. CI installs Clang-Tidy 18
-explicitly and treats every configured diagnostic as an error.
+The CMake integration prefers `clang-tidy-18` and accepts an unversioned or
+explicitly configured executable only when it reports major version 18. It
+stops configuration with a clear error for every other version. CI installs
+Clang-Tidy 18 explicitly and treats every configured diagnostic as an error.
 
 After changing `.clang-tidy`, clean the analysis build before rebuilding. CMake
 does not automatically recompile every translation unit when only the analyzer
@@ -40,7 +46,7 @@ checks. Explicit options keep the policy stable across analyzer upgrades.
 | Check | Limit or convention | Rationale |
 | --- | --- | --- |
 | Function lines | 80 | Keeps implementation units small enough to review as one operation. |
-| Function statements | 80 | Flags large implementations without penalising cohesive Catch2 helpers whose macros expand into several statements. |
+| Function statements | 80 | The audit measured 58, 68, and 76 statements in the largest cohesive test helpers; 80 preserves them while still rejecting larger functions. |
 | Function branches | 10 | Encourages branching and retry policies to be expressed through focused helpers. |
 | Function nesting | 4 levels | Prevents deeply nested control flow. |
 | Function parameters | 5 | Encourages related dependencies and state to be grouped into a meaningful context object. |
