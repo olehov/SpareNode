@@ -50,9 +50,9 @@ if(SPARENODE_ENABLE_CPPCHECK)
         SPARENODE_CPPCHECK_VERSION
         "${SPARENODE_CPPCHECK_VERSION_OUTPUT}"
     )
-    if(NOT SPARENODE_CPPCHECK_VERSION OR SPARENODE_CPPCHECK_VERSION VERSION_LESS 2.13.0)
+    if(NOT SPARENODE_CPPCHECK_VERSION OR SPARENODE_CPPCHECK_VERSION VERSION_LESS 2.21.0)
         message(FATAL_ERROR
-            "Cppcheck 2.13.0 or newer is required; found '${SPARENODE_CPPCHECK_VERSION_OUTPUT}'."
+            "Cppcheck 2.21.0 or newer is required; found '${SPARENODE_CPPCHECK_VERSION_OUTPUT}'."
         )
     endif()
 
@@ -62,7 +62,7 @@ if(SPARENODE_ENABLE_CPPCHECK)
         "--enable=warning,performance,portability,style"
         "--error-exitcode=1"
         "--inline-suppr"
-        "--std=c++20"
+        "--std=c++23"
         "--platform=native"
         "--suppress=missingIncludeSystem"
         "--quiet"

@@ -28,7 +28,7 @@ SpareNode/
 - A C++23-compatible compiler
 - CMake 3.25 or newer
 - Doxygen 1.9.8 or newer (only when generating API documentation)
-- Cppcheck 2.13.0 or newer (only when running Cppcheck analysis)
+- Cppcheck 2.21.0 or newer (only when running Cppcheck analysis)
 
 Supported toolchains:
 

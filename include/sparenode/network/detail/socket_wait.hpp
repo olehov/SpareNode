@@ -95,7 +95,7 @@ class SocketWakeChannel final
 struct SocketWaitContext
 {
     /// @brief Borrowed operation socket watched for readiness.
-    NativeSocket socket;
+    NativeSocket socket{invalid_socket};
     /// @brief Poller used for the blocking native wait.
     SocketPoller &poller;
     /// @brief Reusable wake channel used only by cancellable waits.

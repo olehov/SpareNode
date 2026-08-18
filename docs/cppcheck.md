@@ -6,28 +6,29 @@ performance, portability, and maintainability checks.
 
 ## Supported version
 
-The minimum supported upstream version is Cppcheck 2.13.0. CI pins Ubuntu's
-`2.13.0-2ubuntu3` package and verifies that the executable reports
-`Cppcheck 2.13.0` before analysis starts.
-
-Cppcheck 2.13.0 supports language modes through C++20. SpareNode therefore uses
-its latest supported `--std=c++20` parser mode while the real compiler still
-builds every target as C++23. Update the analyzer version and parser mode
-together when a newer pinned package adds an explicit C++23 mode.
+The minimum supported upstream version is Cppcheck 2.21.0. CI builds the
+official source at commit `e73bf44c3e49686b7495fab352d03a6c6075516b` and
+verifies that the executable reports `Cppcheck 2.21.0` before analysis starts.
+This version supports the project's explicit `--std=c++23` analysis mode.
 
 ## Run locally
 
-On Ubuntu 24.04 or Ubuntu 24.04 under WSL, install the same package as CI:
+Use a package manager when it provides Cppcheck 2.21.0 or newer. Ubuntu 24.04's
+standard package is older, so reproduce CI there by building the pinned source:
 
 ```sh
-sudo apt-get update
-sudo apt-get install cppcheck=2.13.0-2ubuntu3
-cppcheck --version
+git clone --branch 2.21.0 --depth 1 \
+  https://github.com/cppcheck-opensource/cppcheck.git build/tools/cppcheck-source
+test "$(git -C build/tools/cppcheck-source rev-parse HEAD)" = \
+  "e73bf44c3e49686b7495fab352d03a6c6075516b"
+cmake -S build/tools/cppcheck-source -B build/tools/cppcheck-build \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF -DBUILD_TESTING=OFF
+cmake --build build/tools/cppcheck-build --target cppcheck --parallel
+build/tools/cppcheck-build/bin/cppcheck --version
 ```
 
-The reported version must be `Cppcheck 2.13.0`. Other hosts may provide an
-equivalent or newer executable and select it with the CMake cache variable
-shown below.
+The reported version must be `Cppcheck 2.21.0`. Select this executable during
+project configuration with the CMake cache variable shown below.
 
 Configure a dedicated analysis build:
 
@@ -35,7 +36,8 @@ Configure a dedicated analysis build:
 cmake -S . -B build/cppcheck \
   -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DSPARENODE_ENABLE_CPPCHECK=ON
+  -DSPARENODE_ENABLE_CPPCHECK=ON \
+  -DSPARENODE_CPPCHECK_EXECUTABLE="$PWD/build/tools/cppcheck-build/bin/cppcheck"
 cmake --build build/cppcheck --parallel
 ```
 

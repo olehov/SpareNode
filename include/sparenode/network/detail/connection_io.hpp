@@ -79,6 +79,9 @@ class NativeSocketOperations final : public SocketOperations
 struct ConnectionIoContext
 {
     /// @brief Socket readiness context used before each transfer attempt.
+    // SocketWaitContext has reference members, so omitting it during aggregate
+    // initialization is rejected by the compiler rather than leaving it uninitialized.
+    // cppcheck-suppress uninitMemberVarNoCtor
     SocketWaitContext wait;
     /// @brief Native transfer provider used after the socket becomes ready.
     SocketOperations &operations;

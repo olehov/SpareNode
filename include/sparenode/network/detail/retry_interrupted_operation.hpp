@@ -10,9 +10,9 @@ namespace sparenode::network::detail
 template <typename Value> struct InterruptedOperationResult
 {
     /// @brief Native operation result or its invalid sentinel.
-    Value value;
+    Value value{};
     /// @brief Zero after success, otherwise the terminal native error code.
-    int error_code;
+    int error_code{};
 };
 
 /// @brief Repeats an operation while its error is classified as an interruption.
