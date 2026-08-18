@@ -15,21 +15,21 @@
 namespace sparenode::network
 {
 
-/// Wraps an implementation that already owns a bound, listening socket.
+// Wraps an implementation that already owns a bound, listening socket.
 TcpListener::TcpListener(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl))
 {
 }
 
-/// Destroys the implementation, which closes the listening socket through RAII.
+// Destroys the implementation, which closes the listening socket through RAII.
 TcpListener::~TcpListener() = default;
 
-/// Transfers the implementation and leaves the source listener closed.
+// Transfers the implementation and leaves the source listener closed.
 TcpListener::TcpListener(TcpListener &&) noexcept = default;
 
-/// Releases any current socket before taking ownership from the source listener.
+// Releases any current socket before taking ownership from the source listener.
 TcpListener &TcpListener::operator=(TcpListener &&) noexcept = default;
 
-/// Resolves a numeric address, binds the first usable candidate, and starts listening.
+// Resolves a numeric address, binds the first usable candidate, and starts listening.
 Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint, const int backlog)
 {
     if (endpoint.address.empty() || backlog <= 0)
@@ -132,7 +132,7 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
     return unexpected(last_error);
 }
 
-/// Waits for a client and returns exclusive ownership of the accepted connection.
+// Waits for a client and returns exclusive ownership of the accepted connection.
 Result<TcpConnection, NetworkError> TcpListener::accept()
 {
     if (!is_open())
@@ -159,7 +159,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept()
     }
 }
 
-/// Waits for either an incoming connection or a cooperative stop request.
+// Waits for either an incoming connection or a cooperative stop request.
 Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &stop_token)
 {
     if (!is_open())
@@ -201,7 +201,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept(const std::stop_token &s
     }
 }
 
-/// Performs one nonblocking accept and adopts the connection on success.
+// Performs one nonblocking accept and adopts the connection on success.
 Result<TcpConnection, NetworkError> TcpListener::accept_ready_connection()
 {
     sockaddr_storage peer_address{};
@@ -247,7 +247,7 @@ Result<TcpConnection, NetworkError> TcpListener::accept_ready_connection()
     return TcpConnection(std::move(impl));
 }
 
-/// Queries the effective bound address, including an OS-selected ephemeral port.
+// Queries the effective bound address, including an OS-selected ephemeral port.
 Result<TcpEndpoint, NetworkError> TcpListener::local_endpoint() const
 {
     if (!is_open())
@@ -275,7 +275,7 @@ Result<TcpEndpoint, NetworkError> TcpListener::local_endpoint() const
                                          NetworkOperation::query_local_endpoint);
 }
 
-/// Reports whether this object currently owns a valid listening socket.
+// Reports whether this object currently owns a valid listening socket.
 bool TcpListener::is_open() const noexcept
 {
     return impl_ != nullptr && impl_->socket != detail::invalid_socket;

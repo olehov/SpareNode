@@ -119,6 +119,33 @@ jobs:
       - name: Run clang-tidy
         run: cmake --build build/ci-analysis --parallel
 
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-24.04
+    env:
+      DOXYGEN_VERSION: 1.9.8
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes doxygen
+          test "$(doxygen --version)" = "$DOXYGEN_VERSION"
+
+      - name: Configure documentation
+        run: >-
+          cmake -S . -B build/ci-docs
+          -DBUILD_TESTING=OFF
+          -DSPARENODE_BUILD_DOCUMENTATION=ON
+
+      - name: Validate documentation
+        run: cmake --build build/ci-docs --target sparenode_docs
+
   quality-gate:
     name: Quality gate
     if: ${{ always() }}
@@ -127,6 +154,7 @@ jobs:
       - build-linux
       - formatting
       - static-analysis
+      - documentation
     runs-on: ubuntu-24.04
 
     steps:
@@ -136,12 +164,14 @@ jobs:
           LINUX_RESULT: ${{ needs.build-linux.result }}
           FORMATTING_RESULT: ${{ needs.formatting.result }}
           STATIC_ANALYSIS_RESULT: ${{ needs.static-analysis.result }}
+          DOCUMENTATION_RESULT: ${{ needs.documentation.result }}
         run: |
           results=(
             "$WINDOWS_RESULT"
             "$LINUX_RESULT"
             "$FORMATTING_RESULT"
             "$STATIC_ANALYSIS_RESULT"
+            "$DOCUMENTATION_RESULT"
           )
 
           for result in "${results[@]}"; do

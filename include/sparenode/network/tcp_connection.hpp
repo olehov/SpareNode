@@ -15,65 +15,83 @@ namespace sparenode::network
 
 class TcpListener;
 
-/// Owns one accepted TCP socket and releases it automatically.
+/// @brief Owns one accepted TCP socket and releases it automatically.
 ///
 /// Instances are not thread-safe. Do not run operations concurrently on the
 /// same connection or move or destroy it until an operation has returned.
 class TcpConnection final
 {
   public:
-    /// Closes the accepted socket if this object still owns one.
+    /// @brief Closes the accepted socket if this object still owns one.
     ~TcpConnection();
 
-    /// Transfers socket ownership and leaves the source object closed.
-    TcpConnection(TcpConnection &&) noexcept;
+    /// @brief Transfers socket ownership and leaves the source object closed.
+    /// @param[in,out] other Connection whose socket ownership is transferred.
+    TcpConnection(TcpConnection &&other) noexcept;
 
-    /// Releases the current socket, then takes ownership from the source object.
-    TcpConnection &operator=(TcpConnection &&) noexcept;
+    /// @brief Releases the current socket, then takes ownership from the source object.
+    /// @param[in,out] other Connection whose socket ownership is transferred.
+    /// @return This connection after the ownership transfer.
+    TcpConnection &operator=(TcpConnection &&other) noexcept;
 
-    // A native socket must have exactly one owner, so copying is forbidden.
+    /// @brief Copying is forbidden because a native socket must have one owner.
     TcpConnection(const TcpConnection &) = delete;
+    /// @brief Copy assignment is forbidden because a native socket must have one owner.
     TcpConnection &operator=(const TcpConnection &) = delete;
 
-    /// Returns true while this object owns an open native socket.
+    /// @brief Reports whether this object owns an open native socket.
+    /// @return `true` while the connection owns a valid socket.
     [[nodiscard]] bool is_open() const noexcept;
 
-    /// Returns the remote endpoint, or no value for a moved-from connection.
+    /// @brief Returns the remote endpoint.
+    /// @return The peer endpoint, or no value for a moved-from connection.
     [[nodiscard]] std::optional<TcpEndpoint> peer_endpoint() const;
 
-    /// Waits for and receives at most one caller-provided buffer of bytes.
+    /// @brief Waits for and receives at most one caller-provided buffer of bytes.
     ///
     /// A zero-byte success means that the peer performed an orderly shutdown.
     /// The operation may return fewer bytes than the buffer can hold.
+    /// @param[out] buffer Destination storage for received bytes.
+    /// @return The transferred byte count, or a structured network error.
     [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer);
 
-    /// Receives bytes while allowing another thread to request cancellation.
+    /// @brief Receives bytes while allowing another thread to request cancellation.
     ///
     /// Cancellation never closes the connection. If bytes are received before
     /// the stop request is observed, that successful transfer wins the race.
+    /// @param[out] buffer Destination storage for received bytes.
+    /// @param[in] stop_token Token observed while waiting for socket readiness.
+    /// @return The transferred byte count, or a structured network error.
     [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
                                                             const std::stop_token &stop_token);
 
-    /// Waits for and sends at most one caller-provided buffer of bytes.
+    /// @brief Waits for and sends at most one caller-provided buffer of bytes.
     ///
     /// A successful operation may send fewer bytes than supplied; callers that
     /// require full delivery must continue with the remaining suffix.
+    /// @param[in] buffer Bytes available for transmission.
+    /// @return The transferred byte count, or a structured network error.
     [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer);
 
-    /// Sends bytes while allowing another thread to request cancellation.
+    /// @brief Sends bytes while allowing another thread to request cancellation.
     ///
     /// Cancellation never closes the connection. Bytes reported as sent remain
     /// sent even if cancellation is requested concurrently.
+    /// @param[in] buffer Bytes available for transmission.
+    /// @param[in] stop_token Token observed while waiting for socket readiness.
+    /// @return The transferred byte count, or a structured network error.
     [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
                                                          const std::stop_token &stop_token);
 
   private:
-    // PImpl keeps SOCKET/file-descriptor types out of this public header.
+    /// @brief Platform-specific implementation hidden from the public API.
     struct Impl;
 
-    /// Creates a public connection around an implementation that already owns a socket.
+    /// @brief Creates a public connection around an implementation that owns a socket.
+    /// @param[in] impl Implementation whose ownership is transferred to this object.
     explicit TcpConnection(std::unique_ptr<Impl> impl) noexcept;
 
+    /// @brief Owned platform-specific connection state, or null after a move.
     std::unique_ptr<Impl> impl_;
 
     // Only a listener can create a connection from a freshly accepted socket.

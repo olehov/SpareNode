@@ -13,12 +13,12 @@
 namespace sparenode::network::detail
 {
 
-/// Adopts the linked list returned by getaddrinfo.
+// Adopts the linked list returned by getaddrinfo.
 AddressInfo::AddressInfo(addrinfo *value) noexcept : value_(value)
 {
 }
 
-/// Returns the entire address list to the platform resolver.
+// Returns the entire address list to the platform resolver.
 AddressInfo::~AddressInfo()
 {
     if (value_ != nullptr)
@@ -27,16 +27,21 @@ AddressInfo::~AddressInfo()
     }
 }
 
-/// Exposes the first candidate for read-only traversal by the binding code.
+// Exposes the first candidate for read-only traversal by the binding code.
 addrinfo *AddressInfo::get() const noexcept
 {
     return value_;
 }
 
-/// Translates a native IPv4 or IPv6 socket address into the public endpoint type.
+// Translates a native IPv4 or IPv6 socket address into the public endpoint type.
 Result<TcpEndpoint, NetworkError> endpoint_from_address(const sockaddr *address,
                                                         const NetworkOperation operation)
 {
+    if (address == nullptr)
+    {
+        return unexpected(NetworkError{operation, NetworkErrorDomain::validation, 1});
+    }
+
     std::array<char, INET6_ADDRSTRLEN> buffer{};
     const void *raw_address = nullptr;
     std::uint16_t port = 0;
