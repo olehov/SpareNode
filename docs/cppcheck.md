@@ -17,6 +17,7 @@ Use a package manager when it provides Cppcheck 2.21.0 or newer. Ubuntu 24.04's
 standard package is older, so reproduce CI there by building the pinned source:
 
 ```sh
+set -e
 git clone --branch 2.21.0 --depth 1 \
   https://github.com/cppcheck-opensource/cppcheck.git build/tools/cppcheck-source
 test "$(git -C build/tools/cppcheck-source rev-parse HEAD)" = \
