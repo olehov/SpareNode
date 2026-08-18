@@ -28,7 +28,7 @@ namespace
 /// @return Transferred byte count, or a structured network error.
 template <typename Transfer>
 [[nodiscard]] Result<std::size_t, NetworkError>
-perform_io(const ConnectionIoContext context, const SocketWaitRequest request,
+perform_io(const ConnectionIoContext &context, const SocketWaitRequest request,
            const std::stop_token &stop_token, Transfer transfer)
 {
     while (true)
@@ -82,7 +82,7 @@ int NativeSocketOperations::last_error() const noexcept
     return last_socket_error();
 }
 
-ConnectionIo::ConnectionIo(const ConnectionIoContext context) noexcept : context_(context)
+ConnectionIo::ConnectionIo(const ConnectionIoContext &context) noexcept : context_(context)
 {
 }
 

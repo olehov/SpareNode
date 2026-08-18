@@ -59,6 +59,8 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         }
         if (hangup_index_ < entries.size())
         {
+            // The waiting production code observes this output after the fake returns.
+            // cppcheck-suppress unreadVariable
             entries[hangup_index_].hangup = true;
         }
         return {};

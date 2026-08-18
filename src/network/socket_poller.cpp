@@ -68,7 +68,7 @@ inline constexpr short native_writable_event = POLLOUT;
     short events = 0;
     if (entry.watch_readable)
     {
-        events = static_cast<short>(events | native_readable_event);
+        events = native_readable_event;
     }
     if (entry.watch_writable)
     {

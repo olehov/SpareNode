@@ -119,6 +119,47 @@ jobs:
       - name: Run clang-tidy
         run: cmake --build build/ci-analysis --parallel
 
+  cppcheck:
+    name: Cppcheck
+    runs-on: ubuntu-24.04
+    env:
+      CPPCHECK_COMMIT: e73bf44c3e49686b7495fab352d03a6c6075516b
+      CPPCHECK_VERSION: Cppcheck 2.21.0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out Cppcheck
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cppcheck-opensource/cppcheck
+          ref: ${{ env.CPPCHECK_COMMIT }}
+          path: build/cppcheck-source
+          persist-credentials: false
+
+      - name: Build Cppcheck
+        run: |
+          cmake -S build/cppcheck-source -B build/cppcheck-tool \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_GUI=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build build/cppcheck-tool --target cppcheck --parallel
+          test "$(build/cppcheck-tool/bin/cppcheck --version)" = "$CPPCHECK_VERSION"
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/ci-cppcheck
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPARENODE_ENABLE_CPPCHECK=ON
+          -DSPARENODE_CPPCHECK_EXECUTABLE=$GITHUB_WORKSPACE/build/cppcheck-tool/bin/cppcheck
+
+      - name: Analyze first-party targets
+        run: cmake --build build/ci-cppcheck --parallel
+
   documentation:
     name: Documentation
     runs-on: ubuntu-24.04
@@ -154,6 +195,7 @@ jobs:
       - build-linux
       - formatting
       - static-analysis
+      - cppcheck
       - documentation
     runs-on: ubuntu-24.04
 
@@ -164,6 +206,7 @@ jobs:
           LINUX_RESULT: ${{ needs.build-linux.result }}
           FORMATTING_RESULT: ${{ needs.formatting.result }}
           STATIC_ANALYSIS_RESULT: ${{ needs.static-analysis.result }}
+          CPPCHECK_RESULT: ${{ needs.cppcheck.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation.result }}
         run: |
           results=(
@@ -171,6 +214,7 @@ jobs:
             "$LINUX_RESULT"
             "$FORMATTING_RESULT"
             "$STATIC_ANALYSIS_RESULT"
+            "$CPPCHECK_RESULT"
             "$DOCUMENTATION_RESULT"
           )
 

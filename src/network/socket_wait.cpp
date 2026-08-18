@@ -206,7 +206,7 @@ ready_status(const SocketPollEntry &entry, const SocketWaitInterest interest) no
 
 } // namespace
 
-Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext context,
+Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
                                                        const SocketWaitRequest request)
 {
     std::array<SocketPollEntry, 1> descriptors{{
@@ -230,7 +230,7 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext c
     return unexpected(invalid_wait_result(request.operation));
 }
 
-Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext context,
+Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
                                                        const SocketWaitRequest request,
                                                        const std::stop_token &stop_token)
 {

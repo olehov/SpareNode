@@ -28,6 +28,7 @@ SpareNode/
 - A C++23-compatible compiler
 - CMake 3.25 or newer
 - Doxygen 1.9.8 or newer (only when generating API documentation)
+- Cppcheck 2.21.0 or newer (only when running Cppcheck analysis)
 
 Supported toolchains:
 
@@ -131,6 +132,19 @@ cmake --build build/analysis --parallel
 Generated and third-party targets are not assigned the clang-tidy integration;
 analysis is enabled only for first-party SpareNode targets.
 
+Run the complementary Cppcheck analysis in a dedicated build:
+
+```bash
+cmake -S . -B build/cppcheck \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DSPARENODE_ENABLE_CPPCHECK=ON
+cmake --build build/cppcheck --parallel
+```
+
+See the [Cppcheck guide](docs/cppcheck.md) for the diagnostic and suppression
+policy, supported version, analyzer limitations, and upgrade procedure.
+
 ## API documentation
 
 Production C++ interfaces and internal networking helpers use Doxygen contracts
@@ -148,6 +162,7 @@ The GitHub Actions CI workflow runs for pushes and pull requests targeting
 - Linux Clang build and CTest execution
 - clang-format validation
 - clang-tidy static analysis
+- Cppcheck static analysis
 - Doxygen generation with warnings treated as errors
 - an aggregate `Quality gate` suitable for branch protection
 
