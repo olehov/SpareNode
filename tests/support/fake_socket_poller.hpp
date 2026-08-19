@@ -31,6 +31,7 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         writable_index_ = (std::numeric_limits<std::size_t>::max)();
         error_index_ = (std::numeric_limits<std::size_t>::max)();
         hangup_index_ = (std::numeric_limits<std::size_t>::max)();
+        invalid_index_ = (std::numeric_limits<std::size_t>::max)();
         error_.reset();
         operation_ = operation;
         entry_count_ = entries.size();
@@ -63,6 +64,12 @@ class FakeSocketPoller final : public network::detail::SocketPoller
             // cppcheck-suppress unreadVariable
             entries[hangup_index_].hangup = true;
         }
+        if (invalid_index_ < entries.size())
+        {
+            // The waiting production code observes this output after the fake returns.
+            // cppcheck-suppress unreadVariable
+            entries[invalid_index_].invalid = true;
+        }
         return {};
     }
 
@@ -70,6 +77,13 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     void wait_until_entered()
     {
         entered_.acquire();
+    }
+
+    /// Stages readable state without completing the blocked fake wait.
+    /// @param[in] index Entry that becomes readable on the next completion.
+    void stage_readable(const std::size_t index)
+    {
+        readable_index_ = index;
     }
 
     /// Returns from the fake wait with one socket reported as readable.
@@ -97,6 +111,13 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     void complete_with_hangup(const std::size_t index)
     {
         hangup_index_ = index;
+        resume_.release();
+    }
+
+    /// Returns from the fake wait with one socket reported as invalid.
+    void complete_with_invalid(const std::size_t index)
+    {
+        invalid_index_ = index;
         resume_.release();
     }
 
@@ -142,6 +163,7 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     std::size_t writable_index_{(std::numeric_limits<std::size_t>::max)()};
     std::size_t error_index_{(std::numeric_limits<std::size_t>::max)()};
     std::size_t hangup_index_{(std::numeric_limits<std::size_t>::max)()};
+    std::size_t invalid_index_{(std::numeric_limits<std::size_t>::max)()};
     std::optional<network::NetworkError> error_;
 };
 

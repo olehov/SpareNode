@@ -15,6 +15,69 @@
 namespace sparenode::network
 {
 
+namespace
+{
+
+/// @brief Creates, secures, binds, and starts one listening socket candidate.
+/// @param[in] address Resolved address candidate to try.
+/// @param[in] backlog Maximum pending connection count passed to the operating system.
+/// @return Owned listening socket, or the error from the failed setup stage.
+[[nodiscard]] Result<detail::NativeSocketOwner, NetworkError>
+create_listening_socket(const addrinfo &address, const int backlog)
+{
+    detail::NativeSocketOwner socket_owner(
+        ::socket(address.ai_family, address.ai_socktype, address.ai_protocol));
+    if (socket_owner.get() == detail::invalid_socket)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::create_socket,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
+    if (!detail::configure_socket_security({socket_owner.get(), address.ai_family}))
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::configure_socket,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
+    if (::bind(socket_owner.get(), address.ai_addr,
+               static_cast<detail::SocketLength>(address.ai_addrlen)) != 0)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::bind,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
+    if (::listen(socket_owner.get(), backlog) != 0)
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::listen,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
+    if (!detail::configure_socket_nonblocking(socket_owner.get()))
+    {
+        return unexpected(NetworkError{
+            NetworkOperation::configure_socket,
+            NetworkErrorDomain::socket,
+            detail::last_socket_error(),
+        });
+    }
+
+    return socket_owner;
+}
+
+} // namespace
+
 // Wraps an implementation that already owns a bound, listening socket.
 TcpListener::TcpListener(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl))
 {
@@ -71,59 +134,14 @@ Result<TcpListener, NetworkError> TcpListener::bind(const TcpEndpoint &endpoint,
 
     for (auto *current = addresses.get(); current != nullptr; current = current->ai_next)
     {
-        detail::NativeSocketOwner socket_owner(
-            ::socket(current->ai_family, current->ai_socktype, current->ai_protocol));
-        if (socket_owner.get() == detail::invalid_socket)
+        auto socket_result = create_listening_socket(*current, backlog);
+        if (!socket_result)
         {
-            last_error = NetworkError{
-                NetworkOperation::create_socket,
-                NetworkErrorDomain::socket,
-                detail::last_socket_error(),
-            };
+            last_error = socket_result.error();
             continue;
         }
 
-        if (!detail::configure_socket_security({socket_owner.get(), current->ai_family}))
-        {
-            last_error = NetworkError{
-                NetworkOperation::configure_socket,
-                NetworkErrorDomain::socket,
-                detail::last_socket_error(),
-            };
-            continue;
-        }
-
-        if (::bind(socket_owner.get(), current->ai_addr,
-                   static_cast<detail::SocketLength>(current->ai_addrlen)) != 0)
-        {
-            last_error = NetworkError{
-                NetworkOperation::bind,
-                NetworkErrorDomain::socket,
-                detail::last_socket_error(),
-            };
-            continue;
-        }
-
-        if (::listen(socket_owner.get(), backlog) != 0)
-        {
-            last_error = NetworkError{
-                NetworkOperation::listen,
-                NetworkErrorDomain::socket,
-                detail::last_socket_error(),
-            };
-            continue;
-        }
-
-        if (!detail::configure_socket_nonblocking(socket_owner.get()))
-        {
-            last_error = NetworkError{
-                NetworkOperation::configure_socket,
-                NetworkErrorDomain::socket,
-                detail::last_socket_error(),
-            };
-            continue;
-        }
-
+        auto socket_owner = std::move(socket_result).value();
         auto impl = std::make_unique<Impl>(socket_owner.get());
         static_cast<void>(socket_owner.release());
         return TcpListener(std::move(impl));

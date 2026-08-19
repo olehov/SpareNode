@@ -132,6 +132,9 @@ cmake --build build/analysis --parallel
 Generated and third-party targets are not assigned the clang-tidy integration;
 analysis is enabled only for first-party SpareNode targets.
 
+See the [Clang-Tidy guide](docs/clang-tidy.md) for the readability and complexity
+limits, naming conventions, suppression policy, and analyzer upgrade procedure.
+
 Run the complementary Cppcheck analysis in a dedicated build:
 
 ```bash

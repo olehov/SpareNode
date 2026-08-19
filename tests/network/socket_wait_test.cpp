@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <future>
 #include <stop_token>
 #include <thread>
@@ -12,6 +13,14 @@ namespace
 
 using WaitResult = sparenode::Result<sparenode::network::detail::SocketWaitStatus,
                                      sparenode::network::NetworkError>;
+
+/// Selects the terminal wake-channel state reported by the fake poller.
+enum class WakeEntryCompletion : std::uint8_t
+{
+    socket_error,
+    hangup,
+    invalid,
+};
 
 [[nodiscard]] sparenode::network::detail::SocketWaitContext
 wait_context(sparenode::test::FakeSocketPoller &poller,
@@ -95,6 +104,53 @@ void check_terminal_wait(const bool report_error)
                               ? sparenode::network::detail::SocketWaitStatus::socket_error
                               : sparenode::network::detail::SocketWaitStatus::socket_hangup;
     CHECK(result.value() == expected);
+}
+
+/// Verifies that an unusable wake entry produces a structured socket error.
+void check_wake_entry_failure(const WakeEntryCompletion completion)
+{
+    const auto runtime_result = sparenode::network::detail::ensure_socket_runtime();
+    REQUIRE(runtime_result.has_value());
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    std::stop_source stop_source;
+    std::promise<WaitResult> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::jthread wait_thread(
+        [&]
+        {
+            result_promise.set_value(sparenode::network::detail::wait_for_socket(
+                wait_context(poller, wake_channel),
+                {.interest = sparenode::network::detail::SocketWaitInterest::readable,
+                 .operation = sparenode::network::NetworkOperation::receive},
+                stop_source.get_token()));
+        });
+
+    poller.wait_until_entered();
+    // A readable operation entry ensures that ignoring the wake failure would
+    // incorrectly return socket_ready instead of the expected error.
+    poller.stage_readable(0);
+    switch (completion)
+    {
+    case WakeEntryCompletion::socket_error:
+        poller.complete_with_socket_error(1);
+        break;
+    case WakeEntryCompletion::hangup:
+        poller.complete_with_hangup(1);
+        break;
+    case WakeEntryCompletion::invalid:
+        poller.complete_with_invalid(1);
+        break;
+    }
+
+    result_future.wait();
+    const auto result = result_future.get();
+    wait_thread.join();
+
+    REQUIRE(!result.has_value());
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::socket);
 }
 
 } // namespace
@@ -205,6 +261,24 @@ TEST_CASE("Socket wait distinguishes poll error readiness", "[network][tcp][io][
 TEST_CASE("Socket wait distinguishes poll hangup readiness", "[network][tcp][io][unit][error]")
 {
     check_terminal_wait(false);
+}
+
+TEST_CASE("Cancellable socket wait rejects a wake entry error",
+          "[network][tcp][io][cancel][unit][error]")
+{
+    check_wake_entry_failure(WakeEntryCompletion::socket_error);
+}
+
+TEST_CASE("Cancellable socket wait rejects a wake entry hangup",
+          "[network][tcp][io][cancel][unit][error]")
+{
+    check_wake_entry_failure(WakeEntryCompletion::hangup);
+}
+
+TEST_CASE("Cancellable socket wait rejects an invalid wake entry",
+          "[network][tcp][io][cancel][unit][error]")
+{
+    check_wake_entry_failure(WakeEntryCompletion::invalid);
 }
 
 TEST_CASE("Socket poller fake clears completion state between waits",
