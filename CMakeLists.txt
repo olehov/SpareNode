@@ -40,6 +40,7 @@ add_library(sparenode_core STATIC
     src/configuration/environment_file.cpp
     src/configuration/environment_line.cpp
     src/configuration/shared_root.cpp
+    src/filesystem/safe_path.cpp
     src/network/accept_wait.cpp
     src/network/connection_io.cpp
     src/network/native_socket.cpp

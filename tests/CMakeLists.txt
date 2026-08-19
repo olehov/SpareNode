@@ -17,6 +17,7 @@ add_executable(sparenode_tests
     configuration/application_config_test.cpp
     configuration/environment_file_test.cpp
     configuration/shared_root_test.cpp
+    filesystem/safe_path_test.cpp
     network/accept_wait_test.cpp
     network/connection_io_test.cpp
     network/socket_wait_test.cpp

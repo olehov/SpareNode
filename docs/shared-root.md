@@ -40,6 +40,7 @@ handling must resolve untrusted client paths relative to `SharedRoot`; it must
 not accept unrestricted host paths as an equivalent substitute.
 
 Canonicalizing the startup path does not by itself protect individual file
-operations from traversal, symbolic-link changes, or Windows reparse points.
-Those protections belong to the dedicated `SafePath` and filesystem-security
-layers.
+operations. The [`SafePath` boundary](safe-path.md) adds lexical confinement for
+untrusted relative paths. Symbolic-link changes, Windows reparse points, and
+operation-time filesystem races remain the responsibility of the dedicated
+filesystem-security layers.
