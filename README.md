@@ -44,6 +44,8 @@ Run these commands from a Visual Studio Developer PowerShell:
 ```powershell
 cmake -S . -B build/msvc -A x64
 cmake --build build/msvc --config Debug --parallel
+Copy-Item .env.example .env
+# Set SPARENODE_SHARED_ROOT in .env, then run:
 .\build\msvc\bin\Debug\sparenode.exe
 ```
 
@@ -54,6 +56,8 @@ Replace `Debug` with `Release` for an optimised build.
 ```bash
 cmake -S . -B build/gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/gcc --parallel
+cp .env.example .env
+# Set SPARENODE_SHARED_ROOT in .env, then run:
 ./build/gcc/bin/Debug/sparenode
 ```
 
@@ -105,6 +109,14 @@ connection objects with structured errors. Binding requires an explicit numeric
 IPv4 or IPv6 interface address. See the [TCP listener documentation](docs/tcp-listener.md)
 for binding and accept behaviour, and [TCP connection I/O](docs/tcp-connection.md)
 for bounded receive/send operations, cancellation, and ownership rules.
+
+## Shared directory
+
+SpareNode requires exactly one existing directory through the
+`SPARENODE_SHARED_ROOT` key in a local `.env` file. The path is validated and
+stored canonically before the server starts. See the
+[shared-root documentation](docs/shared-root.md) for the configuration contract
+and security boundary.
 
 ## Code quality
 
