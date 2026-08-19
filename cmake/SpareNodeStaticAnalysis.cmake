@@ -69,9 +69,21 @@ if(SPARENODE_ENABLE_CLANG_TIDY)
         )
     endif()
 
+    set(SPARENODE_CLANG_TIDY_SOURCE_REGEX "${PROJECT_SOURCE_DIR}")
+    foreach(SPARENODE_REGEX_META_CHARACTER IN ITEMS
+            "." "^" "$" "*" "+" "?" "(" ")" "[" "]" "{" "}" "|")
+        string(
+            REPLACE
+            "${SPARENODE_REGEX_META_CHARACTER}"
+            "\\${SPARENODE_REGEX_META_CHARACTER}"
+            SPARENODE_CLANG_TIDY_SOURCE_REGEX
+            "${SPARENODE_CLANG_TIDY_SOURCE_REGEX}"
+        )
+    endforeach()
+
     set(
         SPARENODE_CLANG_TIDY_HEADER_FILTER
-        "^${PROJECT_SOURCE_DIR}[\\\\/](apps|include|src|tests)[\\\\/].*"
+        "^${SPARENODE_CLANG_TIDY_SOURCE_REGEX}[\\\\/](apps|include|src|tests)[\\\\/].*"
     )
     set(
         SPARENODE_CLANG_TIDY_COMMAND

@@ -79,6 +79,13 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         entered_.acquire();
     }
 
+    /// Stages readable state without completing the blocked fake wait.
+    /// @param[in] index Entry that becomes readable on the next completion.
+    void stage_readable(const std::size_t index)
+    {
+        readable_index_ = index;
+    }
+
     /// Returns from the fake wait with one socket reported as readable.
     void complete_with_readable(const std::size_t index)
     {

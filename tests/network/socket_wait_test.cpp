@@ -128,6 +128,9 @@ void check_wake_entry_failure(const WakeEntryCompletion completion)
         });
 
     poller.wait_until_entered();
+    // A readable operation entry ensures that ignoring the wake failure would
+    // incorrectly return socket_ready instead of the expected error.
+    poller.stage_readable(0);
     switch (completion)
     {
     case WakeEntryCompletion::socket_error:
