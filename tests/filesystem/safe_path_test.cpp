@@ -46,7 +46,8 @@ TEST_CASE("Safe path resolves a UTF-8 descendant", "[filesystem][safe-path]")
         sparenode::filesystem::SafePath::resolve(shared_root, as_utf8_bytes(u8"дані/file.txt"));
 
     REQUIRE(result);
-    REQUIRE(result->path() == (child / "file.txt").lexically_normal());
+    REQUIRE(result->path() ==
+            (shared_root.path() / std::filesystem::path(u8"дані") / "file.txt").lexically_normal());
 }
 
 TEST_CASE("Safe path resolves an empty request to the shared root", "[filesystem][safe-path]")
@@ -73,7 +74,7 @@ TEST_CASE("Safe path permits a missing descendant inside the shared root",
     const auto result = sparenode::filesystem::SafePath::resolve(shared_root, "new/file.txt");
 
     REQUIRE(result);
-    REQUIRE(result->path() == (directory.path() / "new/file.txt").lexically_normal());
+    REQUIRE(result->path() == (shared_root.path() / "new/file.txt").lexically_normal());
 }
 
 TEST_CASE("Safe path normalizes components that remain inside the shared root",
@@ -85,7 +86,34 @@ TEST_CASE("Safe path normalizes components that remain inside the shared root",
     const auto result = sparenode::filesystem::SafePath::resolve(shared_root, "folder/../file.txt");
 
     REQUIRE(result);
-    REQUIRE(result->path() == (directory.path() / "file.txt").lexically_normal());
+    REQUIRE(result->path() == (shared_root.path() / "file.txt").lexically_normal());
+}
+
+TEST_CASE("Safe path accepts a request at the application length limit", "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::string requested_path(sparenode::filesystem::SafePath::maximum_requested_path_bytes,
+                                     'a');
+
+    const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+    REQUIRE(result);
+}
+
+TEST_CASE("Safe path rejects a request above the application length limit",
+          "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::string requested_path(
+        sparenode::filesystem::SafePath::maximum_requested_path_bytes + 1, 'a');
+
+    const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::path_too_long);
+    REQUIRE(result.error().requested_path.empty());
 }
 
 TEST_CASE("Safe path rejects parent traversal outside the shared root", "[filesystem][safe-path]")

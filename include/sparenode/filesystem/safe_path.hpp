@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -14,6 +15,7 @@ namespace sparenode::filesystem
 /// @brief Identifies why an untrusted path could not be confined to the shared root.
 enum class SafePathErrorCode : std::uint8_t
 {
+    path_too_long,       ///< The requested UTF-8 path exceeds the application input limit.
     invalid_encoding,    ///< The requested path is not valid UTF-8.
     embedded_null,       ///< The requested path contains an ambiguous null byte.
     rooted_path,         ///< The requested path supplies a root, drive, or absolute location.
@@ -24,7 +26,7 @@ enum class SafePathErrorCode : std::uint8_t
 struct SafePathError
 {
     SafePathErrorCode code = SafePathErrorCode::invalid_encoding; ///< Portable error category.
-    std::string requested_path; ///< Original UTF-8 path supplied by the caller.
+    std::string requested_path; ///< Original input, or empty when retaining it would exceed policy.
 };
 
 /// @brief Represents a filesystem path resolved and confined to one shared root.
@@ -36,11 +38,18 @@ struct SafePathError
 class SafePath final
 {
   public:
+    /// @brief Maximum number of UTF-8 bytes accepted from an untrusted path request.
+    ///
+    /// This application-level limit bounds validation and allocation work. It does not
+    /// describe or guarantee the native filesystem's total-path or component limits.
+    static constexpr std::size_t maximum_requested_path_bytes = 4096;
+
     /// @brief Resolves an untrusted UTF-8 path relative to a validated shared root.
     /// @param[in] shared_root Root that must contain the resolved candidate.
     /// @param[in] requested_path Relative UTF-8 path received from an untrusted caller.
     /// @return A confined path, or a structured validation error.
     /// @note An empty requested path resolves to the shared root itself.
+    /// @note Requests larger than maximum_requested_path_bytes are rejected before parsing.
     [[nodiscard]] static Result<SafePath, SafePathError>
     resolve(const configuration::SharedRoot &shared_root, std::string_view requested_path);
 

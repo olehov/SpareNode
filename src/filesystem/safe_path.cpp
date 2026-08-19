@@ -111,6 +111,10 @@ SafePath::SafePath(std::filesystem::path resolved_path) : path_(std::move(resolv
 Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoot &shared_root,
                                                   const std::string_view requested_path)
 {
+    if (requested_path.size() > maximum_requested_path_bytes)
+    {
+        return unexpected(SafePathError{SafePathErrorCode::path_too_long, {}});
+    }
     if (!is_valid_utf8(requested_path))
     {
         return unexpected(
@@ -152,6 +156,8 @@ const char *to_string(const SafePathErrorCode code) noexcept
 {
     switch (code)
     {
+    case SafePathErrorCode::path_too_long:
+        return "the requested path exceeds the application input limit";
     case SafePathErrorCode::invalid_encoding:
         return "the requested path is not valid UTF-8";
     case SafePathErrorCode::embedded_null:
