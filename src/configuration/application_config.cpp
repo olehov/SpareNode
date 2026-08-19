@@ -27,7 +27,8 @@ ApplicationConfig::create(const EnvironmentFile &environment)
                                                  std::nullopt});
     }
 
-    auto shared_root_result = SharedRoot::create(std::filesystem::path(*shared_root_value));
+    const std::u8string shared_root_utf8(shared_root_value->begin(), shared_root_value->end());
+    auto shared_root_result = SharedRoot::create(std::filesystem::path(shared_root_utf8));
     if (!shared_root_result)
     {
         return unexpected(ApplicationConfigError{ApplicationConfigErrorCode::invalid_shared_root,

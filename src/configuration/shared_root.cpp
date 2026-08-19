@@ -17,18 +17,19 @@ Result<SharedRoot, SharedRootError> SharedRoot::create(const std::filesystem::pa
     }
 
     std::error_code filesystem_error;
-    const bool path_exists = std::filesystem::exists(input_path, filesystem_error);
+    auto canonical_path = std::filesystem::canonical(input_path, filesystem_error);
     if (filesystem_error)
     {
+        if (filesystem_error == std::errc::no_such_file_or_directory)
+        {
+            return unexpected(
+                SharedRootError{SharedRootErrorCode::not_found, input_path, filesystem_error});
+        }
         return unexpected(SharedRootError{SharedRootErrorCode::canonicalization_failed, input_path,
                                           filesystem_error});
     }
-    if (!path_exists)
-    {
-        return unexpected(SharedRootError{SharedRootErrorCode::not_found, input_path});
-    }
 
-    const bool path_is_directory = std::filesystem::is_directory(input_path, filesystem_error);
+    const bool path_is_directory = std::filesystem::is_directory(canonical_path, filesystem_error);
     if (filesystem_error)
     {
         return unexpected(SharedRootError{SharedRootErrorCode::canonicalization_failed, input_path,
@@ -37,13 +38,6 @@ Result<SharedRoot, SharedRootError> SharedRoot::create(const std::filesystem::pa
     if (!path_is_directory)
     {
         return unexpected(SharedRootError{SharedRootErrorCode::not_directory, input_path});
-    }
-
-    auto canonical_path = std::filesystem::canonical(input_path, filesystem_error);
-    if (filesystem_error)
-    {
-        return unexpected(SharedRootError{SharedRootErrorCode::canonicalization_failed, input_path,
-                                          filesystem_error});
     }
 
     return SharedRoot(std::move(canonical_path));

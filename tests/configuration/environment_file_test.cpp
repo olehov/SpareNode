@@ -23,6 +23,22 @@ TEST_CASE("Environment file preserves every parsed assignment", "[configuration]
     REQUIRE(result->find("MISSING") == nullptr);
 }
 
+TEST_CASE("Environment file accepts Windows line endings", "[configuration][env]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-environment");
+    const auto environment_file = sparenode::test::write_environment_file(
+        directory, "FIRST=value\r\nSECOND=another value\r\n");
+
+    const auto result = sparenode::configuration::EnvironmentFile::load(environment_file);
+
+    REQUIRE(result);
+    REQUIRE(result->size() == 2);
+    REQUIRE(result->find("FIRST") != nullptr);
+    REQUIRE(*result->find("FIRST") == "value");
+    REQUIRE(result->find("SECOND") != nullptr);
+    REQUIRE(*result->find("SECOND") == "another value");
+}
+
 TEST_CASE("Environment file reports a missing source", "[configuration][env]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-environment");

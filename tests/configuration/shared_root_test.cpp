@@ -28,6 +28,38 @@ TEST_CASE("Shared root canonicalizes redundant path components", "[configuration
     REQUIRE(result->path() == std::filesystem::canonical(directory.path()));
 }
 
+TEST_CASE("Shared root canonicalizes parent-directory components", "[configuration][filesystem]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-shared-root");
+    const auto child = directory.path() / "child";
+    std::filesystem::create_directory(child);
+
+    const auto result = sparenode::configuration::SharedRoot::create(child / "..");
+
+    REQUIRE(result);
+    REQUIRE(result->path() == std::filesystem::canonical(directory.path()));
+}
+
+TEST_CASE("Shared root resolves a directory symlink", "[configuration][filesystem]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-shared-root");
+    const auto target = directory.path() / "target";
+    const auto link = directory.path() / "link";
+    std::filesystem::create_directory(target);
+
+    std::error_code symlink_error;
+    std::filesystem::create_directory_symlink(target, link, symlink_error);
+    if (symlink_error)
+    {
+        SKIP("Directory symlink creation is unavailable: " << symlink_error.message());
+    }
+
+    const auto result = sparenode::configuration::SharedRoot::create(link);
+
+    REQUIRE(result);
+    REQUIRE(result->path() == std::filesystem::canonical(target));
+}
+
 TEST_CASE("Shared root rejects an empty path", "[configuration][filesystem]")
 {
     const auto result = sparenode::configuration::SharedRoot::create({});

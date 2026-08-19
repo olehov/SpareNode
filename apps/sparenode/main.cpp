@@ -49,7 +49,7 @@ void print_application_config_error(const sparenode::configuration::ApplicationC
 } // namespace
 
 /// @brief Loads `.env`, validates startup configuration, and reports the shared directory.
-/// @return Zero on successful configuration, or two when `.env` is invalid.
+/// @return Zero on success, or two when the startup configuration is invalid.
 int main()
 {
     const auto environment_result = sparenode::configuration::EnvironmentFile::load_default();
