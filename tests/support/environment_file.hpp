@@ -26,6 +26,7 @@ write_environment_file(const TemporaryDirectory &directory, const std::string_vi
     }
 
     output << content;
+    output.flush();
     if (!output)
     {
         throw std::runtime_error("Cannot write test environment file");
