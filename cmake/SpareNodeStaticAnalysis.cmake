@@ -71,7 +71,7 @@ if(SPARENODE_ENABLE_CLANG_TIDY)
 
     set(SPARENODE_CLANG_TIDY_SOURCE_REGEX "${PROJECT_SOURCE_DIR}")
     foreach(SPARENODE_REGEX_META_CHARACTER IN ITEMS
-            "." "^" "$" "*" "+" "?" "(" ")" "[" "]" "{" "}" "|")
+            "\\" "." "^" "$" "*" "+" "?" "(" ")" "[" "]" "{" "}" "|")
         string(
             REPLACE
             "${SPARENODE_REGEX_META_CHARACTER}"
