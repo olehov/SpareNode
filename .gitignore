@@ -59,6 +59,11 @@ compile_commands.json
 *.bak
 *.swp
 
+# Local application configuration
+.env
+.env.*
+!.env.example
+
 # IDE and editor files
 .vs/
 .idea/
