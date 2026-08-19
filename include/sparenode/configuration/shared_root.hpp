@@ -21,9 +21,10 @@ enum class SharedRootErrorCode : std::uint8_t
 /// @brief Describes a failure while validating the configured shared root.
 struct SharedRootError
 {
-    SharedRootErrorCode code;          ///< Portable category of the validation failure.
-    std::filesystem::path input_path;  ///< Original path supplied by the caller.
-    std::error_code system_error = {}; ///< Optional platform filesystem error.
+    SharedRootErrorCode code =
+        SharedRootErrorCode::empty_path; ///< Portable category of the validation failure.
+    std::filesystem::path input_path;    ///< Original path supplied by the caller.
+    std::error_code system_error = {};   ///< Optional platform filesystem error.
 };
 
 /// @brief Represents the canonical directory that bounds all shared filesystem access.
