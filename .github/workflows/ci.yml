@@ -72,6 +72,7 @@ jobs:
   formatting:
     name: Formatting
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -79,10 +80,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install clang-format
+      # Ubuntu 24.04 runners include LLVM 18; avoid depending on an APT mirror here.
+      - name: Verify clang-format
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang-format-18
+          set -o pipefail
+          clang-format-18 --version | grep -Eq 'version 18\.'
 
       - name: Verify formatting
         shell: bash
@@ -97,6 +100,7 @@ jobs:
   static-analysis:
     name: Static analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -104,10 +108,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Clang tooling
+      # Ubuntu 24.04 runners include LLVM 18; avoid depending on an APT mirror here.
+      - name: Verify Clang tooling
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-tidy-18
+          set -o pipefail
+          clang++-18 --version | grep -Eq 'version 18\.'
+          clang-tidy-18 --version | grep -Eq 'version 18\.'
 
       - name: Configure
         run: >-
