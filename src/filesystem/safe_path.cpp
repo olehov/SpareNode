@@ -102,6 +102,31 @@ namespace
     return true;
 }
 
+#ifdef _WIN32
+/// @brief Checks whether Win32 normalization can reinterpret a relative component.
+/// @param[in] path Relative native path whose components are inspected.
+/// @return `true` when a non-special component ends in an ASCII space or period.
+[[nodiscard]] bool has_windows_alias_component(const std::filesystem::path &path) noexcept
+{
+    for (const auto &component : path)
+    {
+        const auto &native_component = component.native();
+        if (native_component == L"." || native_component == L".." || native_component.empty())
+        {
+            continue;
+        }
+
+        const auto final_character = native_component.back();
+        if (final_character == L' ' || final_character == L'.')
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+#endif
+
 } // namespace
 
 SafePath::SafePath(std::filesystem::path resolved_path) : path_(std::move(resolved_path))
@@ -133,6 +158,13 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
         return unexpected(
             SafePathError{SafePathErrorCode::rooted_path, std::string(requested_path)});
     }
+#ifdef _WIN32
+    if (has_windows_alias_component(relative_path))
+    {
+        return unexpected(
+            SafePathError{SafePathErrorCode::ambiguous_component, std::string(requested_path)});
+    }
+#endif
 
     const auto normalized_relative_path = relative_path.lexically_normal();
     auto resolved_path = normalized_relative_path.empty() || normalized_relative_path == "."
@@ -164,6 +196,8 @@ const char *to_string(const SafePathErrorCode code) noexcept
         return "the requested path contains a null byte";
     case SafePathErrorCode::rooted_path:
         return "the requested path is not relative";
+    case SafePathErrorCode::ambiguous_component:
+        return "the requested path contains a platform-ambiguous component";
     case SafePathErrorCode::outside_shared_root:
         return "the requested path escapes the shared root";
     }

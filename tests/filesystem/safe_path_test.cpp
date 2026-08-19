@@ -202,4 +202,26 @@ TEST_CASE("Safe path rejects a Windows drive-relative path", "[filesystem][safe-
     REQUIRE_FALSE(result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::rooted_path);
 }
+
+TEST_CASE("Safe path rejects Windows trailing-space and trailing-period aliases",
+          "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string(".. /outside.txt"),
+        std::string("directory./file.txt"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code ==
+                sparenode::filesystem::SafePathErrorCode::ambiguous_component);
+        REQUIRE(result.error().requested_path == requested_path);
+    }
+}
 #endif

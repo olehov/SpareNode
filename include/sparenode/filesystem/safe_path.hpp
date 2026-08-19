@@ -19,6 +19,7 @@ enum class SafePathErrorCode : std::uint8_t
     invalid_encoding,    ///< The requested path is not valid UTF-8.
     embedded_null,       ///< The requested path contains an ambiguous null byte.
     rooted_path,         ///< The requested path supplies a root, drive, or absolute location.
+    ambiguous_component, ///< A component has platform-specific aliasing semantics.
     outside_shared_root, ///< The resolved path is not contained by the configured shared root.
 };
 

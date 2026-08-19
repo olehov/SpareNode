@@ -14,10 +14,12 @@ construct a `SafePath` from an unrestricted host path.
 3. Convert the request to the platform-native `std::filesystem::path` form.
 4. Reject absolute, rooted, drive-qualified, and UNC-style paths according to
    the host platform's path semantics.
-5. Join the relative request to the canonical shared root.
-6. Normalize `.` and `..` components lexically without requiring the target to
+5. On Windows, reject non-special components ending in an ASCII space or
+   period before Win32 can reinterpret them as path aliases.
+6. Join the relative request to the canonical shared root.
+7. Normalize `.` and `..` components lexically without requiring the target to
    exist.
-7. Compare complete path components to ensure the result is the shared root or
+8. Compare complete path components to ensure the result is the shared root or
    one of its descendants.
 
 The 4096-byte limit is a SpareNode input policy that bounds work performed on
@@ -38,8 +40,9 @@ file.
 
 Resolution returns `SafePathError` rather than throwing for expected invalid
 input. The error distinguishes an oversized request, invalid UTF-8, embedded
-null bytes, rooted input, and escape from the shared root. Oversized input is
-not copied into the error object; its `requested_path` field is empty.
+null bytes, rooted input, platform-ambiguous components, and escape from the
+shared root. Oversized input is not copied into the error object; its
+`requested_path` field is empty.
 
 ## Remaining security work
 
