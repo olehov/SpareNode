@@ -83,11 +83,12 @@ namespace
 
 /// @brief Checks path containment using complete native path components.
 /// @param[in] candidate Absolute path whose prefix is inspected.
-/// @param[in] root Canonical shared-root path required as the complete prefix.
+/// @param[in] shared_root Validated shared root required as the complete prefix.
 /// @return `true` when candidate is the root or one of its descendants.
 [[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const std::filesystem::path &root) noexcept
+                                  const configuration::SharedRoot &shared_root) noexcept
 {
+    const auto &root = shared_root.path();
     auto candidate_component = candidate.begin();
     for (const auto &root_component : root)
     {
@@ -133,7 +134,7 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
     auto resolved_path = normalized_relative_path.empty() || normalized_relative_path == "."
                              ? shared_root.path()
                              : (shared_root.path() / normalized_relative_path).lexically_normal();
-    if (!is_within_root(resolved_path, shared_root.path()))
+    if (!is_within_root(resolved_path, shared_root))
     {
         return unexpected(
             SafePathError{SafePathErrorCode::outside_shared_root, std::string(requested_path)});
