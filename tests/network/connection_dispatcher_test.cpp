@@ -359,7 +359,7 @@ TEST_CASE("Dispatcher shutdown cancels active connection operations",
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
     auto &failure = require_optional(observed_failure);
     CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
-    auto &network_error = require_optional(failure.network_error);
+    const auto &network_error = require_optional(failure.network_error);
     CHECK(network_error.operation == network::NetworkOperation::receive);
     CHECK(network_error.domain == network::NetworkErrorDomain::cancellation);
 }
@@ -398,7 +398,7 @@ TEST_CASE("Handler failures remain isolated from later connections",
 
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
     REQUIRE(success_observed.try_acquire_for(test_timeout));
-    auto &failure = require_optional(observed_failure);
+    const auto &failure = require_optional(observed_failure);
     CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
     CHECK(failure.network_error == expected_error);
     CHECK(invocation_count.load() == 2);
