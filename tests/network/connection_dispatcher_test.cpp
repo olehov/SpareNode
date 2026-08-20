@@ -217,6 +217,8 @@ TEST_CASE("Move assignment shuts down replaced dispatcher state",
 
     destination = std::move(replacement);
 
+    CHECK(active.client.peer_closes_within(
+        std::chrono::duration_cast<std::chrono::milliseconds>(test_timeout)));
     CHECK(pending.client.peer_closes_within(
         std::chrono::duration_cast<std::chrono::milliseconds>(test_timeout)));
     auto accepted = sparenode::test::create_connected_tcp_pair();

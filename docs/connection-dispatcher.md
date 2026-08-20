@@ -58,6 +58,8 @@ workers and should avoid long blocking operations.
 The destructor calls `request_stop()` and then joins all workers. Consequently,
 a handler must observe its stop token during blocking work; otherwise destruction
 must wait for that handler to return. The dispatcher must not be destroyed from
-inside one of its own callbacks because a worker cannot join itself. Destruction
-and move assignment also require every producer to have returned from `submit()`;
-call `request_stop()` and join producer threads before either operation.
+inside one of its own callbacks because a worker cannot join itself. Move
+assignment has the same callback restriction for the dispatcher being replaced.
+Destruction, move construction, and move assignment require every affected
+producer to have returned from `submit()`; call `request_stop()` and join
+producer threads before moving or destroying a dispatcher.

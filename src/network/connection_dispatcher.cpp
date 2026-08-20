@@ -121,7 +121,7 @@ struct ConnectionDispatcher::Impl final
             std::terminate();
         }
 
-        TcpConnection connection = std::move(occupied_slot).value();
+        TcpConnection connection = std::move(occupied_slot.value());
         occupied_slot.reset();
         head_ = (head_ + 1) % queue_.size();
         --pending_count_;
