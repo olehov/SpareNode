@@ -82,19 +82,17 @@ struct ConnectionDispatcher::Impl final
     /// @brief Marks shutdown, releases queued connections, and wakes every waiter.
     void request_stop() noexcept
     {
-        std::vector<std::optional<TcpConnection>> abandoned_connections;
+        std::unique_lock lock(mutex_);
+        if (stopping_)
         {
-            std::scoped_lock lock(mutex_);
-            if (stopping_)
-            {
-                return;
-            }
-
-            stopping_ = true;
-            pending_count_ = 0;
-            head_ = 0;
-            abandoned_connections.swap(queue_);
+            return;
         }
+
+        stopping_ = true;
+        pending_count_ = 0;
+        head_ = 0;
+        auto abandoned_connections = std::exchange(queue_, {});
+        lock.unlock();
 
         for (auto &worker : workers_)
         {
@@ -109,7 +107,7 @@ struct ConnectionDispatcher::Impl final
     /// @return The connection transferred out of the ring buffer.
     [[nodiscard]] TcpConnection dequeue()
     {
-        TcpConnection connection = std::move(*queue_[head_]);
+        TcpConnection connection = std::move(queue_[head_]).value();
         queue_[head_].reset();
         head_ = (head_ + 1) % queue_.size();
         --pending_count_;
