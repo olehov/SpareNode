@@ -1,5 +1,6 @@
 #include "sparenode/filesystem/safe_path.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -160,10 +161,35 @@ template <std::size_t Size>
     return has_reserved_prefix && has_reserved_suffix;
 }
 
-/// @brief Checks whether Win32 can reinterpret a relative component as an alias.
+/// @brief Checks whether a code unit is forbidden in an ordinary Win32 path component.
+/// @param[in] character Native code unit to classify.
+/// @return `true` for Win32-reserved punctuation or control characters.
+[[nodiscard]] bool is_windows_forbidden_component_character(const wchar_t character) noexcept
+{
+    if (character >= 1 && character <= 31)
+    {
+        return true;
+    }
+
+    switch (character)
+    {
+    case L'<':
+    case L'>':
+    case L':':
+    case L'"':
+    case L'|':
+    case L'?':
+    case L'*':
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// @brief Checks whether a relative component violates ordinary Win32 naming rules.
 /// @param[in] path Relative native path whose components are inspected.
-/// @return `true` for trailing-space, trailing-period, or reserved-device aliases.
-[[nodiscard]] bool has_windows_alias_component(const std::filesystem::path &path) noexcept
+/// @return `true` for forbidden characters, aliases, or reserved device names.
+[[nodiscard]] bool has_windows_invalid_component(const std::filesystem::path &path) noexcept
 {
     for (const auto &component : path)
     {
@@ -174,7 +200,9 @@ template <std::size_t Size>
         }
 
         const auto final_character = native_component.back();
-        if (final_character == L' ' || final_character == L'.' ||
+        const bool has_forbidden_character =
+            std::ranges::any_of(native_component, is_windows_forbidden_component_character);
+        if (has_forbidden_character || final_character == L' ' || final_character == L'.' ||
             is_windows_device_name(native_component))
         {
             return true;
@@ -217,10 +245,10 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
             SafePathError{SafePathErrorCode::rooted_path, std::string(requested_path)});
     }
 #ifdef _WIN32
-    if (has_windows_alias_component(relative_path))
+    if (has_windows_invalid_component(relative_path))
     {
         return unexpected(
-            SafePathError{SafePathErrorCode::ambiguous_component, std::string(requested_path)});
+            SafePathError{SafePathErrorCode::invalid_component, std::string(requested_path)});
     }
 #endif
 
@@ -254,8 +282,8 @@ const char *to_string(const SafePathErrorCode code) noexcept
         return "the requested path contains a null byte";
     case SafePathErrorCode::rooted_path:
         return "the requested path is not relative";
-    case SafePathErrorCode::ambiguous_component:
-        return "the requested path contains a platform-ambiguous component";
+    case SafePathErrorCode::invalid_component:
+        return "the requested path contains a platform-invalid component";
     case SafePathErrorCode::outside_shared_root:
         return "the requested path escapes the shared root";
     }

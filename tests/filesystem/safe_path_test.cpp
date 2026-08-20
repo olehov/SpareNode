@@ -219,8 +219,7 @@ TEST_CASE("Safe path rejects Windows trailing-space and trailing-period aliases"
 
         CAPTURE(requested_path);
         REQUIRE_FALSE(result);
-        REQUIRE(result.error().code ==
-                sparenode::filesystem::SafePathErrorCode::ambiguous_component);
+        REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
         REQUIRE(result.error().requested_path == requested_path);
     }
 }
@@ -242,8 +241,34 @@ TEST_CASE("Safe path rejects Windows reserved device-name aliases", "[filesystem
 
         CAPTURE(requested_path);
         REQUIRE_FALSE(result);
-        REQUIRE(result.error().code ==
-                sparenode::filesystem::SafePathErrorCode::ambiguous_component);
+        REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
+        REQUIRE(result.error().requested_path == requested_path);
+    }
+}
+
+TEST_CASE("Safe path rejects Windows forbidden component characters", "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string("report.txt:payload"),
+        std::string("folder/item:upload"),
+        std::string("file<name"),
+        std::string("file>name"),
+        std::string("file\"name"),
+        std::string("file|name"),
+        std::string("file?name"),
+        std::string("file*name"),
+        std::string("file") + static_cast<char>(0x1F) + "name",
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
         REQUIRE(result.error().requested_path == requested_path);
     }
 }

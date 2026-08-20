@@ -14,8 +14,9 @@ construct a `SafePath` from an unrestricted host path.
 3. Convert the request to the platform-native `std::filesystem::path` form.
 4. Reject absolute, rooted, drive-qualified, and UNC-style paths according to
    the host platform's path semantics.
-5. On Windows, reject non-special components ending in an ASCII space or
-   period and reserved device names such as `NUL`, `CON`, `COM1`, and their
+5. On Windows, reject alternate data stream separators, reserved punctuation,
+   control characters, non-special components ending in an ASCII space or
+   period, and device names such as `NUL`, `CON`, `COM1`, and their
    extension-bearing aliases before Win32 can reinterpret them.
 6. Join the relative request to the canonical shared root.
 7. Normalize `.` and `..` components lexically without requiring the target to
@@ -41,7 +42,7 @@ file.
 
 Resolution returns `SafePathError` rather than throwing for expected invalid
 input. The error distinguishes an oversized request, invalid UTF-8, embedded
-null bytes, rooted input, platform-ambiguous components, and escape from the
+null bytes, rooted input, platform-invalid components, and escape from the
 shared root. Oversized input is not copied into the error object; its
 `requested_path` field is empty.
 
