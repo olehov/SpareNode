@@ -110,7 +110,10 @@ The cross-platform TCP listener exposes move-only, RAII-managed listener and
 connection objects with structured errors. Binding requires an explicit numeric
 IPv4 or IPv6 interface address. See the [TCP listener documentation](docs/tcp-listener.md)
 for binding and accept behaviour, and [TCP connection I/O](docs/tcp-connection.md)
-for bounded receive/send operations, cancellation, and ownership rules.
+for bounded receive/send operations, cancellation, and ownership rules. Accepted
+connections can be scheduled through the
+[bounded connection dispatcher](docs/connection-dispatcher.md) without creating
+one permanent thread per client.
 
 ## Shared directory
 
