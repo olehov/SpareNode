@@ -70,6 +70,16 @@ create_dispatcher(network::ConnectionDispatcherConfig config)
     { return {}; };
 }
 
+/// Returns an optional test value after enforcing its presence for analyzers.
+template <typename Value> [[nodiscard]] Value &require_optional(std::optional<Value> &optional)
+{
+    if (!optional.has_value())
+    {
+        throw std::logic_error("Expected optional test value to be present");
+    }
+    return optional.value();
+}
+
 } // namespace
 
 TEST_CASE("Connection dispatcher rejects invalid resource limits",
@@ -171,6 +181,8 @@ TEST_CASE("Move construction transfers a running dispatcher", "[network][dispatc
     auto destination = std::move(source);
 
     auto rejected = sparenode::test::create_connected_tcp_pair();
+    // Exercising the documented moved-from contract is intentional.
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     const auto rejected_result = source.submit(std::move(rejected.server), {});
     REQUIRE_FALSE(rejected_result.has_value());
     CHECK(rejected_result.error() ==
@@ -257,9 +269,9 @@ TEST_CASE("A full dispatcher queue supports caller cancellation",
     producer.request_stop();
     producer.join();
 
-    REQUIRE(submission_result.has_value());
-    REQUIRE_FALSE(submission_result->has_value());
-    CHECK(submission_result->error() ==
+    auto &completed_submission = require_optional(submission_result);
+    REQUIRE_FALSE(completed_submission.has_value());
+    CHECK(completed_submission.error() ==
           network::DispatchError{network::DispatchErrorCode::cancelled, 0});
 
     gate.open();
@@ -302,9 +314,9 @@ TEST_CASE("Dispatcher shutdown wakes blocked producers and drops queued ownershi
     dispatcher.request_stop();
     producer.join();
 
-    REQUIRE(submission_result.has_value());
-    REQUIRE_FALSE(submission_result->has_value());
-    CHECK(submission_result->error() ==
+    auto &completed_submission = require_optional(submission_result);
+    REQUIRE_FALSE(completed_submission.has_value());
+    CHECK(completed_submission.error() ==
           network::DispatchError{network::DispatchErrorCode::stopped, 0});
     CHECK(pending.client.peer_closes_within(
         std::chrono::duration_cast<std::chrono::milliseconds>(test_timeout)));
@@ -345,11 +357,11 @@ TEST_CASE("Dispatcher shutdown cancels active connection operations",
 
     dispatcher.request_stop();
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
-    REQUIRE(observed_failure.has_value());
-    CHECK(observed_failure->kind == network::ConnectionFailureKind::handler_error);
-    REQUIRE(observed_failure->network_error.has_value());
-    CHECK(observed_failure->network_error->operation == network::NetworkOperation::receive);
-    CHECK(observed_failure->network_error->domain == network::NetworkErrorDomain::cancellation);
+    auto &failure = require_optional(observed_failure);
+    CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
+    auto &network_error = require_optional(failure.network_error);
+    CHECK(network_error.operation == network::NetworkOperation::receive);
+    CHECK(network_error.domain == network::NetworkErrorDomain::cancellation);
 }
 
 TEST_CASE("Handler failures remain isolated from later connections",
@@ -386,9 +398,9 @@ TEST_CASE("Handler failures remain isolated from later connections",
 
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
     REQUIRE(success_observed.try_acquire_for(test_timeout));
-    REQUIRE(observed_failure.has_value());
-    CHECK(observed_failure->kind == network::ConnectionFailureKind::handler_error);
-    CHECK(observed_failure->network_error == expected_error);
+    auto &failure = require_optional(observed_failure);
+    CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
+    CHECK(failure.network_error == expected_error);
     CHECK(invocation_count.load() == 2);
     dispatcher.request_stop();
 }
