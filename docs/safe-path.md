@@ -15,7 +15,8 @@ construct a `SafePath` from an unrestricted host path.
 4. Reject absolute, rooted, drive-qualified, and UNC-style paths according to
    the host platform's path semantics.
 5. On Windows, reject non-special components ending in an ASCII space or
-   period before Win32 can reinterpret them as path aliases.
+   period and reserved device names such as `NUL`, `CON`, `COM1`, and their
+   extension-bearing aliases before Win32 can reinterpret them.
 6. Join the relative request to the canonical shared root.
 7. Normalize `.` and `..` components lexically without requiring the target to
    exist.

@@ -103,9 +103,66 @@ namespace
 }
 
 #ifdef _WIN32
-/// @brief Checks whether Win32 normalization can reinterpret a relative component.
+/// @brief Compares a Windows component name with an uppercase ASCII name.
+/// @tparam Size Number of code units in the expected literal, including its null terminator.
+/// @param[in] candidate Native component text whose ASCII letters are compared without case.
+/// @param[in] expected Uppercase ASCII name to match.
+/// @return `true` when both names are equal under ASCII case folding.
+template <std::size_t Size>
+[[nodiscard]] bool equals_ascii_case_insensitive(const std::wstring_view candidate,
+                                                 const wchar_t (&expected)[Size]) noexcept
+{
+    if (candidate.size() != Size - 1)
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < candidate.size(); ++index)
+    {
+        const auto character = candidate[index];
+        const auto uppercase_character = character >= L'a' && character <= L'z'
+                                             ? static_cast<wchar_t>(character - L'a' + L'A')
+                                             : character;
+        if (uppercase_character != expected[index])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// @brief Checks whether a component base name aliases a reserved Win32 device.
+/// @param[in] component Native component including any extension or stream suffix.
+/// @return `true` for documented device aliases, matched case-insensitively.
+[[nodiscard]] bool is_windows_device_name(const std::wstring_view component) noexcept
+{
+    const auto base_name = component.substr(0, component.find_first_of(L".:"));
+    if (equals_ascii_case_insensitive(base_name, L"CON") ||
+        equals_ascii_case_insensitive(base_name, L"PRN") ||
+        equals_ascii_case_insensitive(base_name, L"AUX") ||
+        equals_ascii_case_insensitive(base_name, L"NUL"))
+    {
+        return true;
+    }
+
+    if (base_name.size() != 4)
+    {
+        return false;
+    }
+
+    const auto prefix = base_name.substr(0, 3);
+    const auto suffix = base_name.back();
+    const bool has_reserved_prefix = equals_ascii_case_insensitive(prefix, L"COM") ||
+                                     equals_ascii_case_insensitive(prefix, L"LPT");
+    const bool has_reserved_suffix = (suffix >= L'1' && suffix <= L'9') || suffix == L'\u00B9' ||
+                                     suffix == L'\u00B2' || suffix == L'\u00B3';
+    return has_reserved_prefix && has_reserved_suffix;
+}
+
+/// @brief Checks whether Win32 can reinterpret a relative component as an alias.
 /// @param[in] path Relative native path whose components are inspected.
-/// @return `true` when a non-special component ends in an ASCII space or period.
+/// @return `true` for trailing-space, trailing-period, or reserved-device aliases.
 [[nodiscard]] bool has_windows_alias_component(const std::filesystem::path &path) noexcept
 {
     for (const auto &component : path)
@@ -117,7 +174,8 @@ namespace
         }
 
         const auto final_character = native_component.back();
-        if (final_character == L' ' || final_character == L'.')
+        if (final_character == L' ' || final_character == L'.' ||
+            is_windows_device_name(native_component))
         {
             return true;
         }

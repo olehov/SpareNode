@@ -224,4 +224,46 @@ TEST_CASE("Safe path rejects Windows trailing-space and trailing-period aliases"
         REQUIRE(result.error().requested_path == requested_path);
     }
 }
+
+TEST_CASE("Safe path rejects Windows reserved device-name aliases", "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string("NUL"),           std::string("con.txt"),    std::string("PRN.log"),
+        std::string("AUX"),           std::string("COM1"),       std::string("LPT9"),
+        std::string("folder/NUL"),    std::string("NUL:stream"), as_utf8_bytes(u8"COM\u00B9.data"),
+        as_utf8_bytes(u8"lpt\u00B3"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code ==
+                sparenode::filesystem::SafePathErrorCode::ambiguous_component);
+        REQUIRE(result.error().requested_path == requested_path);
+    }
+}
+
+TEST_CASE("Safe path preserves Windows names that only resemble device aliases",
+          "[filesystem][safe-path]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string("COM0"),       std::string("COM10"), std::string("LPT0.txt"),
+        std::string("serial.txt"), std::string("null"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE(result);
+    }
+}
 #endif
