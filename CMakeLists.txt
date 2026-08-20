@@ -15,6 +15,8 @@ project(
     LANGUAGES CXX
 )
 
+find_package(Threads REQUIRED)
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(SpareNodeBuildSettings)
@@ -42,6 +44,7 @@ add_library(sparenode_core STATIC
     src/configuration/shared_root.cpp
     src/filesystem/safe_path.cpp
     src/network/accept_wait.cpp
+    src/network/connection_dispatcher.cpp
     src/network/connection_io.cpp
     src/network/native_socket.cpp
     src/network/socket_poller.cpp
@@ -57,6 +60,10 @@ target_compile_features(sparenode_core PUBLIC
 
 target_include_directories(sparenode_core PUBLIC
     "${PROJECT_SOURCE_DIR}/include"
+)
+
+target_link_libraries(sparenode_core PRIVATE
+    Threads::Threads
 )
 
 if(WIN32)
