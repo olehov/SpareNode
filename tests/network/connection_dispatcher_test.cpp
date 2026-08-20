@@ -157,6 +157,74 @@ TEST_CASE("Connection dispatcher rejects invalid and pre-cancelled submissions",
     dispatcher.request_stop();
 }
 
+TEST_CASE("Move construction transfers a running dispatcher", "[network][dispatcher][move]")
+{
+    std::binary_semaphore handled(0);
+    auto handler = [&](network::TcpConnection,
+                       const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
+    {
+        handled.release();
+        return {};
+    };
+
+    auto source = create_dispatcher({{1, 1}, std::move(handler), {}});
+    auto destination = std::move(source);
+
+    auto rejected = sparenode::test::create_connected_tcp_pair();
+    const auto rejected_result = source.submit(std::move(rejected.server), {});
+    REQUIRE_FALSE(rejected_result.has_value());
+    CHECK(rejected_result.error() ==
+          network::DispatchError{network::DispatchErrorCode::stopped, 0});
+    CHECK(rejected.client.peer_closes_within(
+        std::chrono::duration_cast<std::chrono::milliseconds>(test_timeout)));
+
+    auto accepted = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(destination.submit(std::move(accepted.server), {}).has_value());
+    REQUIRE(handled.try_acquire_for(test_timeout));
+    destination.request_stop();
+}
+
+TEST_CASE("Move assignment shuts down replaced dispatcher state",
+          "[network][dispatcher][move][shutdown]")
+{
+    StopAwareGate gate;
+    std::binary_semaphore original_handler_started(0);
+    auto original_handler =
+        [&](network::TcpConnection,
+            const std::stop_token &stop_token) -> sparenode::Result<void, network::NetworkError>
+    {
+        original_handler_started.release();
+        static_cast<void>(gate.wait(stop_token));
+        return {};
+    };
+
+    auto destination = create_dispatcher({{1, 1}, std::move(original_handler), {}});
+    auto active = sparenode::test::create_connected_tcp_pair();
+    auto pending = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(destination.submit(std::move(active.server), {}).has_value());
+    REQUIRE(original_handler_started.try_acquire_for(test_timeout));
+    REQUIRE(destination.submit(std::move(pending.server), {}).has_value());
+
+    std::binary_semaphore replacement_handled(0);
+    auto replacement_handler =
+        [&](network::TcpConnection,
+            const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
+    {
+        replacement_handled.release();
+        return {};
+    };
+    auto replacement = create_dispatcher({{1, 1}, std::move(replacement_handler), {}});
+
+    destination = std::move(replacement);
+
+    CHECK(pending.client.peer_closes_within(
+        std::chrono::duration_cast<std::chrono::milliseconds>(test_timeout)));
+    auto accepted = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(destination.submit(std::move(accepted.server), {}).has_value());
+    REQUIRE(replacement_handled.try_acquire_for(test_timeout));
+    destination.request_stop();
+}
+
 TEST_CASE("A full dispatcher queue supports caller cancellation",
           "[network][dispatcher][capacity][cancel]")
 {

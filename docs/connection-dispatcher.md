@@ -19,16 +19,18 @@ allocate storage based on connection load. Each queued or active
 
 ## Submission policy
 
-`submit()` transfers an open connection only after a queue slot is available.
-When the queue is full, the producer waits without polling. The wait ends when:
+`submit()` takes ownership of the submitted `TcpConnection` at call entry. If
+the queue is full, the dispatcher holds the connection while the producer waits
+without polling for a queue slot. The wait ends when:
 
 1. a worker frees capacity and the connection is accepted;
 2. the caller's `std::stop_token` is requested and `cancelled` is returned; or
 3. dispatcher shutdown begins and `stopped` is returned.
 
-A stop request that already exists when `submit()` starts always returns
-`cancelled`. On every failed submission, the by-value connection is destroyed
-by the call and its socket is closed through RAII.
+If the connection is open, a stop request that already exists when `submit()`
+starts returns `cancelled`. An invalid connection returns `invalid_connection`
+first. On every failed submission, the by-value connection is destroyed by the
+call and its socket is closed through RAII.
 
 ## Handler contract
 
@@ -56,4 +58,6 @@ workers and should avoid long blocking operations.
 The destructor calls `request_stop()` and then joins all workers. Consequently,
 a handler must observe its stop token during blocking work; otherwise destruction
 must wait for that handler to return. The dispatcher must not be destroyed from
-inside one of its own callbacks because a worker cannot join itself.
+inside one of its own callbacks because a worker cannot join itself. Destruction
+and move assignment also require every producer to have returned from `submit()`;
+call `request_stop()` and join producer threads before either operation.

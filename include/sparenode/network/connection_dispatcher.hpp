@@ -24,6 +24,7 @@ enum class DispatchErrorCode : std::uint8_t
     stopped,                          ///< The dispatcher has begun shutting down.
     cancelled,                        ///< The caller cancelled a blocked submission.
     worker_start_failed,              ///< The operating system could not create a worker.
+    resource_allocation_failed,       ///< Dispatcher storage could not be allocated.
 };
 
 /// @brief Describes a dispatcher configuration or submission failure.
@@ -104,6 +105,10 @@ struct ConnectionDispatcherConfig
 /// The dispatcher owns every successfully submitted connection until a worker
 /// transfers it to the configured handler. The class is safe for concurrent
 /// submissions, but only one thread may move or destroy the dispatcher itself.
+///
+/// @warning Destruction and move assignment must not run concurrently with
+/// `submit()`. Call `request_stop()` and then join every producer thread before
+/// destroying or move-assigning a dispatcher.
 class ConnectionDispatcher final
 {
   public:
@@ -115,13 +120,20 @@ class ConnectionDispatcher final
 
     /// @brief Requests shutdown, releases pending connections, and joins all workers.
     /// @pre Destruction does not run from one of this dispatcher's handler callbacks.
+    /// @pre No thread is executing `submit()` on this dispatcher.
     ~ConnectionDispatcher();
 
     /// @brief Transfers dispatcher ownership without relocating active worker state.
+    ///
+    /// The moved-from dispatcher has no implementation: `submit()` returns
+    /// `DispatchErrorCode::stopped`, and `request_stop()` has no effect.
     /// @param[in,out] other Dispatcher whose implementation is transferred.
     ConnectionDispatcher(ConnectionDispatcher &&other) noexcept;
 
     /// @brief Stops the current dispatcher before taking ownership from another.
+    ///
+    /// The moved-from dispatcher has no implementation: `submit()` returns
+    /// `DispatchErrorCode::stopped`, and `request_stop()` has no effect.
     /// @param[in,out] other Dispatcher whose implementation is transferred.
     /// @return This dispatcher after the ownership transfer.
     ConnectionDispatcher &operator=(ConnectionDispatcher &&other) noexcept;

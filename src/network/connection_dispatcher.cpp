@@ -2,10 +2,13 @@
 
 #include <condition_variable>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <stop_token>
 #include <system_error>
 #include <thread>
@@ -82,17 +85,21 @@ struct ConnectionDispatcher::Impl final
     /// @brief Marks shutdown, releases queued connections, and wakes every waiter.
     void request_stop() noexcept
     {
-        std::unique_lock lock(mutex_);
-        if (stopping_)
         {
-            return;
-        }
+            std::scoped_lock lock(mutex_);
+            if (stopping_)
+            {
+                return;
+            }
 
-        stopping_ = true;
-        pending_count_ = 0;
-        head_ = 0;
-        auto abandoned_connections = std::exchange(queue_, {});
-        lock.unlock();
+            stopping_ = true;
+            for (auto &pending_connection : queue_)
+            {
+                pending_connection.reset();
+            }
+            pending_count_ = 0;
+            head_ = 0;
+        }
 
         for (auto &worker : workers_)
         {
@@ -107,8 +114,15 @@ struct ConnectionDispatcher::Impl final
     /// @return The connection transferred out of the ring buffer.
     [[nodiscard]] TcpConnection dequeue()
     {
-        TcpConnection connection = std::move(queue_[head_]).value();
-        queue_[head_].reset();
+        auto &occupied_slot = queue_[head_];
+        if (!occupied_slot.has_value())
+        {
+            // A positive pending count guarantees that the head slot is occupied.
+            std::terminate();
+        }
+
+        TcpConnection connection = std::move(occupied_slot).value();
+        occupied_slot.reset();
         head_ = (head_ + 1) % queue_.size();
         --pending_count_;
         return connection;
@@ -227,6 +241,14 @@ ConnectionDispatcher::create(ConnectionDispatcherConfig config)
     {
         return unexpected(
             DispatchError{DispatchErrorCode::worker_start_failed, error.code().value()});
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(DispatchError{DispatchErrorCode::resource_allocation_failed, 0});
+    }
+    catch (const std::length_error &)
+    {
+        return unexpected(DispatchError{DispatchErrorCode::resource_allocation_failed, 0});
     }
 }
 

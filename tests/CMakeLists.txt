@@ -30,6 +30,7 @@ add_executable(sparenode_tests
 target_link_libraries(sparenode_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_core
+    Threads::Threads
 )
 
 if(WIN32)
