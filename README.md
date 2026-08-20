@@ -118,7 +118,9 @@ SpareNode requires exactly one existing directory through the
 `SPARENODE_SHARED_ROOT` key in a local `.env` file. The path is validated and
 stored canonically before the server starts. See the
 [shared-root documentation](docs/shared-root.md) for the configuration contract
-and security boundary.
+and security boundary. Untrusted relative paths are represented by the
+[`SafePath` abstraction](docs/safe-path.md) before filesystem operations consume
+them.
 
 ## Code quality
 
