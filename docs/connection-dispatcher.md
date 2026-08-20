@@ -63,6 +63,8 @@ cannot join itself. Move assignment has the same callback restriction for the
 dispatcher being replaced.
 
 Destruction, move construction, and move assignment require every affected call
-to `submit()` or `request_stop()` to have returned. Call `request_stop()`, wait
-for it to return, and join producer threads before moving or destroying a
-dispatcher.
+to `submit()` or `request_stop()` to have returned. Before destruction, call
+`request_stop()`, wait for it to return, and join producer threads. Before move
+construction or move assignment, quiesce affected operations without stopping
+the source dispatcher; its active workers and queued connections transfer to the
+new owner.

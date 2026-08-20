@@ -108,8 +108,9 @@ struct ConnectionDispatcherConfig
 ///
 /// @warning Destruction, move construction, and move assignment must not run
 /// concurrently with `submit()` or `request_stop()` on an affected dispatcher.
-/// Call `request_stop()`, wait for that call to return, and then join every
-/// producer thread before moving or destroying a dispatcher.
+/// Before destruction, call `request_stop()`, wait for it to return, and join
+/// every producer thread. Before a move, wait for affected operations to return
+/// without stopping the source dispatcher whose active state will be transferred.
 class ConnectionDispatcher final
 {
   public:
