@@ -107,8 +107,9 @@ struct ConnectionDispatcherConfig
 /// submissions, but only one thread may move or destroy the dispatcher itself.
 ///
 /// @warning Destruction, move construction, and move assignment must not run
-/// concurrently with `submit()` on an affected dispatcher. Call `request_stop()`
-/// and then join every producer thread before moving or destroying a dispatcher.
+/// concurrently with `submit()` or `request_stop()` on an affected dispatcher.
+/// Call `request_stop()`, wait for that call to return, and then join every
+/// producer thread before moving or destroying a dispatcher.
 class ConnectionDispatcher final
 {
   public:
@@ -119,8 +120,9 @@ class ConnectionDispatcher final
     create(ConnectionDispatcherConfig config);
 
     /// @brief Requests shutdown, releases pending connections, and joins all workers.
-    /// @pre Destruction does not run from one of this dispatcher's handler callbacks.
-    /// @pre No thread is executing `submit()` on this dispatcher.
+    /// @pre Destruction does not run from one of this dispatcher's handler or
+    /// failure-observer callbacks.
+    /// @pre No thread is executing `submit()` or `request_stop()` on this dispatcher.
     ~ConnectionDispatcher();
 
     /// @brief Transfers dispatcher ownership without relocating active worker state.
@@ -128,7 +130,7 @@ class ConnectionDispatcher final
     /// The moved-from dispatcher has no implementation: `submit()` returns
     /// `DispatchErrorCode::stopped`, and `request_stop()` has no effect.
     /// @param[in,out] other Dispatcher whose implementation is transferred.
-    /// @pre No thread is executing `submit()` on `other`.
+    /// @pre No thread is executing `submit()` or `request_stop()` on `other`.
     ConnectionDispatcher(ConnectionDispatcher &&other) noexcept;
 
     /// @brief Stops the current dispatcher before taking ownership from another.
@@ -137,8 +139,10 @@ class ConnectionDispatcher final
     /// `DispatchErrorCode::stopped`, and `request_stop()` has no effect.
     /// @param[in,out] other Dispatcher whose implementation is transferred.
     /// @return This dispatcher after the ownership transfer.
-    /// @pre No thread is executing `submit()` on this dispatcher or `other`.
-    /// @pre The call does not run from one of this dispatcher's handler callbacks.
+    /// @pre No thread is executing `submit()` or `request_stop()` on this dispatcher or
+    /// `other`.
+    /// @pre The call does not run from one of this dispatcher's handler or
+    /// failure-observer callbacks.
     ConnectionDispatcher &operator=(ConnectionDispatcher &&other) noexcept;
 
     /// @brief Copying is forbidden because a dispatcher uniquely owns its workers.
@@ -161,6 +165,8 @@ class ConnectionDispatcher final
     ///
     /// The function is idempotent and non-blocking. Pending connections are closed
     /// immediately through RAII; active handlers receive their worker stop token.
+    /// @pre The call does not run concurrently with destruction, move construction,
+    /// or move assignment involving this dispatcher.
     void request_stop() noexcept;
 
   private:
