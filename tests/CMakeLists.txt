@@ -20,6 +20,7 @@ add_executable(sparenode_tests
     filesystem/safe_path_test.cpp
     network/accept_wait_test.cpp
     network/connection_dispatcher_test.cpp
+    network/connection_server_test.cpp
     network/connection_io_test.cpp
     network/socket_wait_test.cpp
     network/tcp_connection_test.cpp

@@ -1,12 +1,16 @@
 #pragma once
 
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <string>
 #include <utility>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
+#include "sparenode/network/tcp_endpoint.hpp"
 #include "sparenode/network/tcp_listener.hpp"
 
 #ifdef _WIN32
@@ -17,6 +21,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -24,6 +29,31 @@
 
 namespace sparenode::test
 {
+
+/// Identifies platform errors that mean IPv6 loopback is unavailable rather than broken.
+/// @param[in] error Listener startup error produced while binding an IPv6 endpoint.
+/// @return `true` only for native errors associated with unavailable IPv6 support.
+[[nodiscard]] inline bool is_ipv6_loopback_unavailable(const network::NetworkError &error) noexcept
+{
+    if (error.domain == network::NetworkErrorDomain::address_resolution)
+    {
+        return error.code == EAI_FAMILY
+#ifdef EAI_ADDRFAMILY
+               || error.code == EAI_ADDRFAMILY
+#endif
+            ;
+    }
+
+#ifdef _WIN32
+    return error.domain == network::NetworkErrorDomain::socket &&
+           (error.code == WSAEAFNOSUPPORT || error.code == WSAEPROTONOSUPPORT ||
+            error.code == WSAENOPROTOOPT || error.code == WSAEADDRNOTAVAIL);
+#else
+    return error.domain == network::NetworkErrorDomain::socket &&
+           (error.code == EAFNOSUPPORT || error.code == EPROTONOSUPPORT ||
+            error.code == ENOPROTOOPT || error.code == EADDRNOTAVAIL);
+#endif
+}
 
 #ifdef _WIN32
 using NativeTestSocket = SOCKET;
@@ -106,6 +136,38 @@ class TestClientSocket final
   private:
     NativeTestSocket socket_{invalid_test_socket};
 };
+
+/// Connects an owning native test client to a public numeric endpoint.
+/// @param[in] endpoint Loopback endpoint exposed by the server under test.
+/// @return Connected client socket whose destructor closes the native handle.
+[[nodiscard]] inline TestClientSocket connect_test_client(const network::TcpEndpoint &endpoint)
+{
+    const int address_family = endpoint.address.find(':') == std::string::npos ? AF_INET : AF_INET6;
+    const NativeTestSocket socket = ::socket(address_family, SOCK_STREAM, IPPROTO_TCP);
+    REQUIRE(socket != invalid_test_socket);
+    TestClientSocket client(socket);
+
+    if (address_family == AF_INET)
+    {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(endpoint.port);
+        REQUIRE(inet_pton(AF_INET, endpoint.address.c_str(), &address.sin_addr) == 1);
+        REQUIRE(::connect(socket, reinterpret_cast<const sockaddr *>(&address),
+                          static_cast<TestSocketLength>(sizeof(address))) == 0);
+    }
+    else
+    {
+        sockaddr_in6 address{};
+        address.sin6_family = AF_INET6;
+        address.sin6_port = htons(endpoint.port);
+        REQUIRE(inet_pton(AF_INET6, endpoint.address.c_str(), &address.sin6_addr) == 1);
+        REQUIRE(::connect(socket, reinterpret_cast<const sockaddr *>(&address),
+                          static_cast<TestSocketLength>(sizeof(address))) == 0);
+    }
+
+    return client;
+}
 
 /// Groups the public server side with the native client side of a loopback connection.
 struct ConnectedTcpPair

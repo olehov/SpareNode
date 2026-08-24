@@ -45,6 +45,7 @@ add_library(sparenode_core STATIC
     src/filesystem/safe_path.cpp
     src/network/accept_wait.cpp
     src/network/connection_dispatcher.cpp
+    src/network/connection_server.cpp
     src/network/connection_io.cpp
     src/network/native_socket.cpp
     src/network/socket_poller.cpp

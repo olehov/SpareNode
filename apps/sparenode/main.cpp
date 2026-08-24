@@ -43,7 +43,7 @@ void print_application_config_error(const sparenode::configuration::ApplicationC
             std::cerr << " (" << error.shared_root_error->system_error.message() << ')';
         }
     }
-    std::cerr << "\nUpdate SPARENODE_SHARED_ROOT in .env.\n";
+    std::cerr << "\nUpdate the reported variable in .env.\n";
 }
 
 } // namespace
@@ -68,6 +68,8 @@ int main()
     }
 
     std::cout << "SpareNode " << sparenode::version << '\n'
-              << "Shared root: " << configuration_result->shared_root().path().string() << '\n';
+              << "Shared root: " << configuration_result->shared_root().path().string() << '\n'
+              << "Multithreading: "
+              << (configuration_result->multithreading_enabled() ? "enabled" : "disabled") << '\n';
     return 0;
 }

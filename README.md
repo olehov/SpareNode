@@ -125,6 +125,10 @@ and security boundary. Untrusted relative paths are represented by the
 [`SafePath` abstraction](docs/safe-path.md) before filesystem operations consume
 them.
 
+`SPARENODE_MULTITHREADING` accepts exactly `true` or `false` and defaults to
+`false` when omitted. The default limits asynchronous connection handling to one
+worker; setting it to `true` uses the fixed worker count configured by the server.
+
 ## Code quality
 
 The repository contains project-wide `.clang-format` and `.clang-tidy`
