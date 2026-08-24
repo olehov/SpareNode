@@ -129,6 +129,16 @@ them.
 `false` when omitted. The default limits asynchronous connection handling to one
 worker; setting it to `true` uses the fixed worker count configured by the server.
 
+## Logging
+
+SpareNode emits structured, thread-safe lifecycle and failure diagnostics to the
+terminal. `SPARENODE_LOG_LEVEL` selects the minimum severity from `debug`, `info`,
+`warning`, or `error`, and defaults to `info` when omitted. Log records escape
+control characters and initial integration excludes configuration values, shared
+paths, credentials, tokens, session identifiers, and file contents. See the
+[application logging guide](docs/logging.md) for the format, concurrency model,
+network observers, and testing contract.
+
 ## Code quality
 
 The repository contains project-wide `.clang-format` and `.clang-tidy`
