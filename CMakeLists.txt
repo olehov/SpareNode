@@ -43,6 +43,10 @@ add_library(sparenode_core STATIC
     src/configuration/environment_line.cpp
     src/configuration/shared_root.cpp
     src/filesystem/safe_path.cpp
+    src/logging/console_log_sink.cpp
+    src/logging/logger.cpp
+    src/logging/log_severity.cpp
+    src/logging/network_logging.cpp
     src/network/accept_wait.cpp
     src/network/connection_dispatcher.cpp
     src/network/connection_server.cpp

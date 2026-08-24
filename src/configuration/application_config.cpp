@@ -6,14 +6,29 @@
 namespace sparenode::configuration
 {
 
-ApplicationConfig::ApplicationConfig(SharedRoot shared_root, const bool multithreading_enabled)
-    : shared_root_(std::move(shared_root)), multithreading_enabled_(multithreading_enabled)
+ApplicationConfig::ApplicationConfig(SharedRoot shared_root, const bool multithreading_enabled,
+                                     const logging::LogSeverity minimum_log_severity)
+    : shared_root_(std::move(shared_root)), multithreading_enabled_(multithreading_enabled),
+      minimum_log_severity_(minimum_log_severity)
 {
 }
 
 Result<ApplicationConfig, ApplicationConfigError>
 ApplicationConfig::create(const EnvironmentFile &environment)
 {
+    logging::LogSeverity minimum_log_severity = logging::LogSeverity::info;
+    if (const auto *value = environment.find(log_level_variable_name); value != nullptr)
+    {
+        const auto parsed_severity = logging::parse_log_severity(*value);
+        if (!parsed_severity.has_value())
+        {
+            return unexpected(
+                ApplicationConfigError{ApplicationConfigErrorCode::invalid_log_severity,
+                                       std::string(log_level_variable_name), std::nullopt});
+        }
+        minimum_log_severity = parsed_severity.value();
+    }
+
     bool multithreading_enabled = false;
     if (const auto *value = environment.find(multithreading_variable_name); value != nullptr)
     {
@@ -62,7 +77,8 @@ ApplicationConfig::create(const EnvironmentFile &environment)
                                                  shared_root_result.error()});
     }
 
-    return ApplicationConfig(std::move(shared_root_result).value(), multithreading_enabled);
+    return ApplicationConfig(std::move(shared_root_result).value(), multithreading_enabled,
+                             minimum_log_severity);
 }
 
 const SharedRoot &ApplicationConfig::shared_root() const noexcept
@@ -73,6 +89,11 @@ const SharedRoot &ApplicationConfig::shared_root() const noexcept
 bool ApplicationConfig::multithreading_enabled() const noexcept
 {
     return multithreading_enabled_;
+}
+
+logging::LogSeverity ApplicationConfig::minimum_log_severity() const noexcept
+{
+    return minimum_log_severity_;
 }
 
 const char *to_string(const ApplicationConfigErrorCode code) noexcept
@@ -87,6 +108,8 @@ const char *to_string(const ApplicationConfigErrorCode code) noexcept
         return "SPARENODE_SHARED_ROOT does not identify a valid directory";
     case ApplicationConfigErrorCode::invalid_boolean:
         return "configuration boolean must be true or false";
+    case ApplicationConfigErrorCode::invalid_log_severity:
+        return "log severity must be debug, info, warning, or error";
     }
 
     return "unknown application configuration error";

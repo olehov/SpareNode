@@ -7,6 +7,7 @@
 
 #include "sparenode/configuration/environment_file.hpp"
 #include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/logging/log_severity.hpp"
 #include "sparenode/result.hpp"
 
 namespace sparenode::configuration
@@ -18,7 +19,8 @@ enum class ApplicationConfigErrorCode : std::uint8_t
     missing_shared_root, ///< `SPARENODE_SHARED_ROOT` was not supplied.
     missing_value,       ///< `SPARENODE_SHARED_ROOT` has an empty value.
     invalid_shared_root, ///< The supplied shared-root path failed validation.
-    invalid_boolean      ///< A boolean variable is neither `true` nor `false`.
+    invalid_boolean,     ///< A boolean variable is neither `true` nor `false`.
+    invalid_log_severity ///< The configured logging threshold is unsupported.
 };
 
 /// @brief Describes a semantic application-configuration failure without throwing.
@@ -48,6 +50,10 @@ class ApplicationConfig final
     /// @return `true` for a fixed multi-worker pool; `false` for one worker.
     [[nodiscard]] bool multithreading_enabled() const noexcept;
 
+    /// @brief Returns the minimum severity emitted by application logging.
+    /// @return Configured threshold, defaulting to `info` when omitted.
+    [[nodiscard]] logging::LogSeverity minimum_log_severity() const noexcept;
+
   private:
     /// @brief Environment-file key that configures the shared-root directory.
     static constexpr std::string_view shared_root_variable_name = "SPARENODE_SHARED_ROOT";
@@ -55,13 +61,20 @@ class ApplicationConfig final
     /// @brief Environment-file key that enables the multi-worker connection pool.
     static constexpr std::string_view multithreading_variable_name = "SPARENODE_MULTITHREADING";
 
+    /// @brief Environment-file key that controls the minimum emitted log severity.
+    static constexpr std::string_view log_level_variable_name = "SPARENODE_LOG_LEVEL";
+
     /// @brief Creates an application configuration from validated settings.
     /// @param[in] shared_root Directory exposed by the server.
     /// @param[in] multithreading_enabled Whether more than one worker may be configured.
-    ApplicationConfig(SharedRoot shared_root, bool multithreading_enabled);
+    /// @param[in] minimum_log_severity Lowest severity forwarded to the logging sink.
+    ApplicationConfig(SharedRoot shared_root, bool multithreading_enabled,
+                      logging::LogSeverity minimum_log_severity);
 
-    SharedRoot shared_root_;             ///< Sole directory exposed by SpareNode v0.1.
-    bool multithreading_enabled_{false}; ///< Enables a multi-worker connection pool.
+    SharedRoot shared_root_;                   ///< Sole directory exposed by SpareNode v0.1.
+    bool multithreading_enabled_{false};       ///< Enables a multi-worker connection pool.
+    logging::LogSeverity minimum_log_severity_{///< Minimum emitted diagnostic severity.
+                                               logging::LogSeverity::info};
 };
 
 /// @brief Returns a concise description of an application-configuration failure.
