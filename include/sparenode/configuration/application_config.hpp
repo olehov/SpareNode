@@ -60,7 +60,7 @@ class ApplicationConfig final
     /// @param[in] multithreading_enabled Whether more than one worker may be configured.
     ApplicationConfig(SharedRoot shared_root, bool multithreading_enabled);
 
-    SharedRoot shared_root_;            ///< Sole directory exposed by SpareNode v0.1.
+    SharedRoot shared_root_;             ///< Sole directory exposed by SpareNode v0.1.
     bool multithreading_enabled_{false}; ///< Enables a multi-worker connection pool.
 };
 

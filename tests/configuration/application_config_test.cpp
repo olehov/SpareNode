@@ -37,8 +37,8 @@ TEST_CASE("Application configuration reads the multithreading switch",
     const auto shared_directory = directory.path() / "shared";
     std::filesystem::create_directory(shared_directory);
     const auto environment_file = sparenode::test::write_environment_file(
-        directory, "SPARENODE_SHARED_ROOT=" + shared_directory.string() +
-                       "\nSPARENODE_MULTITHREADING=true\n");
+        directory,
+        "SPARENODE_SHARED_ROOT=" + shared_directory.string() + "\nSPARENODE_MULTITHREADING=true\n");
     const auto environment_result =
         sparenode::configuration::EnvironmentFile::load(environment_file);
     REQUIRE(environment_result);
