@@ -1,6 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -98,8 +97,20 @@ TEST_CASE("Console sink serializes independent logger instances", "[logging][con
     first_worker.join();
     second_worker.join();
 
-    const std::string emitted = output.str();
-    CHECK(static_cast<std::size_t>(std::ranges::count(emitted, '\n')) == records_per_logger * 2);
+    std::istringstream emitted_lines(output.str());
+    std::string line;
+    std::size_t line_count = 0;
+    while (std::getline(emitted_lines, line))
+    {
+        constexpr std::string_view record_marker = "] [INFO] [worker] ";
+        CHECK(line.starts_with('['));
+        CHECK(line.find(record_marker) == 25);
+        CHECK(line.find(record_marker, 26) == std::string::npos);
+        CHECK((line.ends_with("] [INFO] [worker] first") ||
+               line.ends_with("] [INFO] [worker] second")));
+        ++line_count;
+    }
+    CHECK(line_count == records_per_logger * 2);
 }
 
 TEST_CASE("Log severity parser accepts only documented configuration values",

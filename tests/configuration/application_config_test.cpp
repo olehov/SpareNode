@@ -55,23 +55,27 @@ TEST_CASE("Application configuration reads the minimum log severity",
 TEST_CASE("Application configuration rejects an invalid minimum log severity",
           "[configuration][application][logging]")
 {
-    const sparenode::test::TemporaryDirectory directory("sparenode-config");
-    const auto shared_directory = directory.path() / "shared";
-    std::filesystem::create_directory(shared_directory);
-    const auto environment_file = sparenode::test::write_environment_file(
-        directory,
-        "SPARENODE_SHARED_ROOT=" + shared_directory.string() + "\nSPARENODE_LOG_LEVEL=verbose\n");
-    const auto environment_result =
-        sparenode::configuration::EnvironmentFile::load(environment_file);
-    REQUIRE(environment_result);
+    for (const std::string_view invalid_value :
+         {std::string_view{}, std::string_view{"INFO"}, std::string_view{"verbose"}})
+    {
+        const sparenode::test::TemporaryDirectory directory("sparenode-config");
+        const auto shared_directory = directory.path() / "shared";
+        std::filesystem::create_directory(shared_directory);
+        const auto environment_file = sparenode::test::write_environment_file(
+            directory, "SPARENODE_SHARED_ROOT=" + shared_directory.string() +
+                           "\nSPARENODE_LOG_LEVEL=" + std::string(invalid_value) + '\n');
+        const auto environment_result =
+            sparenode::configuration::EnvironmentFile::load(environment_file);
+        REQUIRE(environment_result);
 
-    const auto result =
-        sparenode::configuration::ApplicationConfig::create(environment_result.value());
+        const auto result =
+            sparenode::configuration::ApplicationConfig::create(environment_result.value());
 
-    REQUIRE_FALSE(result);
-    CHECK(result.error().code ==
-          sparenode::configuration::ApplicationConfigErrorCode::invalid_log_severity);
-    CHECK(result.error().variable == "SPARENODE_LOG_LEVEL");
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code ==
+              sparenode::configuration::ApplicationConfigErrorCode::invalid_log_severity);
+        CHECK(result.error().variable == "SPARENODE_LOG_LEVEL");
+    }
 }
 
 TEST_CASE("Application configuration reads the multithreading switch",
