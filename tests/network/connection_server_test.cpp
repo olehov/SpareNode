@@ -95,9 +95,11 @@ class BlockingFirstHandler final
             {
                 return sparenode::unexpected(cancellation_error());
             }
+            first_completed_.store(true);
         }
         else
         {
+            second_overlapped_first_.store(!first_completed_.load());
             second_completed_.release();
         }
         return {};
@@ -111,11 +113,10 @@ class BlockingFirstHandler final
     }
 
     /// @brief Waits for the second handler invocation.
-    /// @param[in] timeout Maximum time to wait.
-    /// @return `true` when the second handler completed before the timeout.
-    [[nodiscard]] bool wait_for_second(const std::chrono::milliseconds timeout)
+    /// @return `true` when the second handler completed before the test timeout.
+    [[nodiscard]] bool wait_for_second()
     {
-        return second_completed_.try_acquire_for(timeout);
+        return second_completed_.try_acquire_for(test_timeout);
     }
 
     /// @brief Releases the first blocked invocation.
@@ -131,9 +132,18 @@ class BlockingFirstHandler final
         return invocation_count_.load();
     }
 
+    /// @brief Reports whether the second invocation overlapped the blocked first invocation.
+    /// @return `true` when more than one worker entered the handler concurrently.
+    [[nodiscard]] bool second_overlapped_first() const noexcept
+    {
+        return second_overlapped_first_.load();
+    }
+
   private:
     StopAwareGate gate_;
     std::atomic<int> invocation_count_{};
+    std::atomic<bool> first_completed_{};
+    std::atomic<bool> second_overlapped_first_{};
     std::binary_semaphore first_started_{0};
     std::binary_semaphore second_completed_{0};
 };
@@ -318,7 +328,7 @@ TEST_CASE("Connection server handles a second client while the first is blocked"
     auto first_client = sparenode::test::connect_test_client(local_endpoint);
     REQUIRE(handler_state.wait_for_first());
     auto second_client = sparenode::test::connect_test_client(local_endpoint);
-    REQUIRE(handler_state.wait_for_second(test_timeout));
+    REQUIRE(handler_state.wait_for_second());
 
     handler_state.release_first();
     server.request_stop();
@@ -357,8 +367,11 @@ TEST_CASE("Connection server multithreading switch can enforce one worker",
         [&handler_state](network::TcpConnection connection, const std::stop_token &stop_token)
     { return handler_state.handle(std::move(connection), stop_token); };
 
-    auto server_result = network::ConnectionServer::start(
-        {{"127.0.0.1", 0}, 128, false, {{2, 2}, std::move(handler), {}}, {}});
+    network::ConnectionServerConfig config{
+        {"127.0.0.1", 0}, 128, false, {{2, 2}, std::move(handler), {}}, {}};
+    REQUIRE(config.effective_worker_count() == 1);
+
+    auto server_result = network::ConnectionServer::start(std::move(config));
     REQUIRE(server_result.has_value());
     auto server = std::move(server_result).value();
     const auto endpoint = server.local_endpoint();
@@ -367,14 +380,49 @@ TEST_CASE("Connection server multithreading switch can enforce one worker",
     auto first_client = sparenode::test::connect_test_client(local_endpoint);
     REQUIRE(handler_state.wait_for_first());
     auto second_client = sparenode::test::connect_test_client(local_endpoint);
-    CHECK_FALSE(handler_state.wait_for_second(std::chrono::milliseconds{50}));
 
     handler_state.release_first();
-    REQUIRE(handler_state.wait_for_second(test_timeout));
+    REQUIRE(handler_state.wait_for_second());
     server.request_stop();
     CHECK(first_client.peer_closes_within(test_timeout));
     CHECK(second_client.peer_closes_within(test_timeout));
     CHECK(handler_state.invocation_count() == 2);
+    CHECK_FALSE(handler_state.second_overlapped_first());
+}
+
+TEST_CASE("Connection server accepts an IPv6 loopback client", "[network][server][ipv6]")
+{
+    std::binary_semaphore handled{0};
+    auto handler =
+        [&handled](network::TcpConnection,
+                   const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
+    {
+        handled.release();
+        return {};
+    };
+
+    auto server_result = network::ConnectionServer::start(
+        {{"::1", 0}, 128, false, {{1, 1}, std::move(handler), {}}, {}});
+    if (!server_result.has_value())
+    {
+        const auto &network_error = server_result.error().network_error;
+        if (network_error.has_value() &&
+            sparenode::test::is_ipv6_loopback_unavailable(network_error.value()))
+        {
+            SKIP("IPv6 loopback is unavailable on this host");
+        }
+    }
+    REQUIRE(server_result.has_value());
+    auto server = std::move(server_result).value();
+    const auto endpoint = server.local_endpoint();
+    const auto &local_endpoint = sparenode::test::require_optional(endpoint);
+    REQUIRE(local_endpoint.address == "::1");
+
+    auto client = sparenode::test::connect_test_client(local_endpoint);
+    REQUIRE(handled.try_acquire_for(test_timeout));
+
+    server.request_stop();
+    CHECK(client.peer_closes_within(test_timeout));
 }
 
 TEST_CASE("Connection server isolates one client failure from later clients",

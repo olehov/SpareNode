@@ -175,10 +175,7 @@ ConnectionServer::start(ConnectionServerConfig config)
                                            endpoint.error(), std::nullopt, 0});
         }
 
-        if (!config.multithreading_enabled)
-        {
-            config.dispatcher.options.worker_count = 1;
-        }
+        config.dispatcher.options.worker_count = config.effective_worker_count();
 
         auto dispatcher = ConnectionDispatcher::create(std::move(config.dispatcher));
         if (!dispatcher)

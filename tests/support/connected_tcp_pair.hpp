@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <string>
 #include <utility>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "sparenode/network/tcp_listener.hpp"
@@ -18,6 +21,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -25,6 +29,31 @@
 
 namespace sparenode::test
 {
+
+/// Identifies platform errors that mean IPv6 loopback is unavailable rather than broken.
+/// @param[in] error Listener startup error produced while binding an IPv6 endpoint.
+/// @return `true` only for native errors associated with unavailable IPv6 support.
+[[nodiscard]] inline bool is_ipv6_loopback_unavailable(const network::NetworkError &error) noexcept
+{
+    if (error.domain == network::NetworkErrorDomain::address_resolution)
+    {
+        return error.code == EAI_FAMILY
+#ifdef EAI_ADDRFAMILY
+               || error.code == EAI_ADDRFAMILY
+#endif
+            ;
+    }
+
+#ifdef _WIN32
+    return error.domain == network::NetworkErrorDomain::socket &&
+           (error.code == WSAEAFNOSUPPORT || error.code == WSAEPROTONOSUPPORT ||
+            error.code == WSAENOPROTOOPT || error.code == WSAEADDRNOTAVAIL);
+#else
+    return error.domain == network::NetworkErrorDomain::socket &&
+           (error.code == EAFNOSUPPORT || error.code == EPROTONOSUPPORT ||
+            error.code == ENOPROTOOPT || error.code == EADDRNOTAVAIL);
+#endif
+}
 
 #ifdef _WIN32
 using NativeTestSocket = SOCKET;

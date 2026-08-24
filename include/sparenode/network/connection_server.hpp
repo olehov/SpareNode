@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -82,6 +83,13 @@ struct ConnectionServerConfig
 
     /// @brief Optional observer for failures at the accept or dispatch boundary.
     ConnectionServerFailureObserver failure_observer;
+
+    /// @brief Resolves the worker count allowed by the multithreading switch.
+    /// @return Configured worker count when enabled, otherwise exactly one worker.
+    [[nodiscard]] constexpr std::size_t effective_worker_count() const noexcept
+    {
+        return multithreading_enabled ? dispatcher.options.worker_count : 1;
+    }
 };
 
 /// @brief Accepts TCP clients and dispatches them through a bounded fixed worker pool.

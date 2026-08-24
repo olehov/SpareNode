@@ -50,6 +50,26 @@ TEST_CASE("Application configuration reads the multithreading switch",
     CHECK(result->multithreading_enabled());
 }
 
+TEST_CASE("Application configuration accepts an explicitly disabled multithreading switch",
+          "[configuration][application][concurrency]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config");
+    const auto shared_directory = directory.path() / "shared";
+    std::filesystem::create_directory(shared_directory);
+    const auto environment_file = sparenode::test::write_environment_file(
+        directory, "SPARENODE_SHARED_ROOT=" + shared_directory.string() +
+                       "\nSPARENODE_MULTITHREADING=false\n");
+    const auto environment_result =
+        sparenode::configuration::EnvironmentFile::load(environment_file);
+    REQUIRE(environment_result);
+
+    const auto result =
+        sparenode::configuration::ApplicationConfig::create(environment_result.value());
+
+    REQUIRE(result);
+    CHECK_FALSE(result->multithreading_enabled());
+}
+
 TEST_CASE("Application configuration rejects an invalid multithreading switch",
           "[configuration][application][concurrency]")
 {
