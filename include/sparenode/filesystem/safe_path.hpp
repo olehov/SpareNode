@@ -15,12 +15,13 @@ namespace sparenode::filesystem
 /// @brief Identifies why an untrusted path could not be confined to the shared root.
 enum class SafePathErrorCode : std::uint8_t
 {
-    path_too_long,       ///< The requested UTF-8 path exceeds the application input limit.
-    invalid_encoding,    ///< The requested path is not valid UTF-8.
-    embedded_null,       ///< The requested path contains an ambiguous null byte.
-    rooted_path,         ///< The requested path supplies a root, drive, or absolute location.
-    invalid_component,   ///< A component violates platform-specific naming rules.
-    outside_shared_root, ///< The resolved path is not contained by the configured shared root.
+    path_too_long,            ///< The requested UTF-8 path exceeds the application input limit.
+    invalid_percent_encoding, ///< Percent encoding is malformed or ambiguously nested.
+    invalid_encoding,         ///< The requested path is not valid UTF-8.
+    embedded_null,            ///< The requested path contains an ambiguous null byte.
+    rooted_path,              ///< The requested path supplies a root, drive, or absolute location.
+    invalid_component,        ///< A component violates platform-specific naming rules.
+    outside_shared_root,      ///< The resolved path is not contained by the configured shared root.
 };
 
 /// @brief Describes a failure while resolving an untrusted path.
@@ -47,10 +48,11 @@ class SafePath final
 
     /// @brief Resolves an untrusted UTF-8 path relative to a validated shared root.
     /// @param[in] shared_root Root that must contain the resolved candidate.
-    /// @param[in] requested_path Relative UTF-8 path received from an untrusted caller.
+    /// @param[in] requested_path URL-encoded relative UTF-8 path from an untrusted caller.
     /// @return A confined path, or a structured validation error.
     /// @note An empty requested path resolves to the shared root itself.
     /// @note Requests larger than maximum_requested_path_bytes are rejected before parsing.
+    /// @note Slash and backslash are interpreted as separators on every platform.
     [[nodiscard]] static Result<SafePath, SafePathError>
     resolve(const configuration::SharedRoot &shared_root, std::string_view requested_path);
 
