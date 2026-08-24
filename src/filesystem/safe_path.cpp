@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <utility>
 
+#include "sparenode/filesystem/detail/path_request_decoder.hpp"
+
 namespace sparenode::filesystem
 {
 namespace
@@ -101,6 +103,26 @@ namespace
     }
 
     return true;
+}
+
+/// @brief Detects absolute and drive-qualified syntax consistently on every host.
+/// @param[in] normalized_request Decoded path whose separators are all `/`.
+/// @return `true` for slash-rooted, UNC-style, or drive-qualified input.
+[[nodiscard]] bool has_portable_root(const std::string_view normalized_request) noexcept
+{
+    if (normalized_request.empty())
+    {
+        return false;
+    }
+    if (normalized_request.front() == '/')
+    {
+        return true;
+    }
+
+    const char first_character = normalized_request.front();
+    const bool has_drive_letter = (first_character >= 'A' && first_character <= 'Z') ||
+                                  (first_character >= 'a' && first_character <= 'z');
+    return normalized_request.size() >= 2 && has_drive_letter && normalized_request[1] == ':';
 }
 
 #ifdef _WIN32
@@ -226,18 +248,32 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
     {
         return unexpected(SafePathError{SafePathErrorCode::path_too_long, {}});
     }
-    if (!is_valid_utf8(requested_path))
+
+    auto decoded_request = detail::decode_path_request(requested_path);
+    if (!decoded_request)
+    {
+        return unexpected(SafePathError{SafePathErrorCode::invalid_percent_encoding,
+                                        std::string(requested_path)});
+    }
+    const auto &normalized_request = decoded_request.value();
+    if (!is_valid_utf8(normalized_request))
     {
         return unexpected(
             SafePathError{SafePathErrorCode::invalid_encoding, std::string(requested_path)});
     }
-    if (requested_path.find('\0') != std::string_view::npos)
+    if (normalized_request.find('\0') != std::string_view::npos)
     {
         return unexpected(
             SafePathError{SafePathErrorCode::embedded_null, std::string(requested_path)});
     }
 
-    const std::u8string requested_path_utf8(requested_path.begin(), requested_path.end());
+    if (has_portable_root(normalized_request))
+    {
+        return unexpected(
+            SafePathError{SafePathErrorCode::rooted_path, std::string(requested_path)});
+    }
+
+    const std::u8string requested_path_utf8(normalized_request.begin(), normalized_request.end());
     const std::filesystem::path relative_path(requested_path_utf8);
     if (relative_path.has_root_name() || relative_path.has_root_directory())
     {
@@ -276,6 +312,8 @@ const char *to_string(const SafePathErrorCode code) noexcept
     {
     case SafePathErrorCode::path_too_long:
         return "the requested path exceeds the application input limit";
+    case SafePathErrorCode::invalid_percent_encoding:
+        return "the requested path contains invalid or nested percent encoding";
     case SafePathErrorCode::invalid_encoding:
         return "the requested path is not valid UTF-8";
     case SafePathErrorCode::embedded_null:

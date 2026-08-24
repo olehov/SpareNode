@@ -89,6 +89,32 @@ TEST_CASE("Safe path normalizes components that remain inside the shared root",
     REQUIRE(result->path() == (shared_root.path() / "file.txt").lexically_normal());
 }
 
+TEST_CASE("Safe path decodes valid URL path bytes before resolution",
+          "[filesystem][safe-path][encoding]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+
+    const auto result =
+        sparenode::filesystem::SafePath::resolve(shared_root, "folder%2Ffile%20name%25.txt");
+
+    REQUIRE(result);
+    REQUIRE(result->path() ==
+            (shared_root.path() / "folder" / "file name%.txt").lexically_normal());
+}
+
+TEST_CASE("Safe path normalizes mixed separators consistently", "[filesystem][safe-path][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+
+    const auto result =
+        sparenode::filesystem::SafePath::resolve(shared_root, "folder\\child/../file.txt");
+
+    REQUIRE(result);
+    REQUIRE(result->path() == (shared_root.path() / "folder" / "file.txt").lexically_normal());
+}
+
 TEST_CASE("Safe path accepts a request at the application length limit", "[filesystem][safe-path]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
@@ -127,6 +153,98 @@ TEST_CASE("Safe path rejects parent traversal outside the shared root", "[filesy
 
     REQUIRE_FALSE(result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
+}
+
+TEST_CASE("Safe path rejects plain encoded and mixed-separator traversal",
+          "[filesystem][safe-path][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_directory = directory.path() / "shared";
+    std::filesystem::create_directory(shared_directory);
+    const auto shared_root = require_shared_root(shared_directory);
+    const std::array requested_paths{
+        std::string("../outside.txt"),
+        std::string("../../outside.txt"),
+        std::string("foo/../../../outside.txt"),
+        std::string("..\\outside.txt"),
+        std::string("foo\\..\\..\\outside.txt"),
+        std::string("%2e%2e%2foutside.txt"),
+        std::string("%2E%2E%5Coutside.txt"),
+        std::string("folder/%2e%2e/%2e%2e/outside.txt"),
+        std::string("folder%5c..%5c..%5coutside.txt"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code ==
+                sparenode::filesystem::SafePathErrorCode::outside_shared_root);
+    }
+}
+
+TEST_CASE("Safe path rejects portable absolute and drive-qualified syntax",
+          "[filesystem][safe-path][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string("/etc/passwd"),       std::string("\\windows\\system.ini"),
+        std::string("C:\\Windows"),       std::string("C:relative.txt"),
+        std::string("//server/share"),    std::string("%2Fetc%2Fpasswd"),
+        std::string("%5Cwindows%5Cfile"), std::string("%43%3A%5CWindows"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::rooted_path);
+    }
+}
+
+TEST_CASE("Safe path rejects malformed and ambiguously nested percent encoding",
+          "[filesystem][safe-path][encoding][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+    const std::array requested_paths{
+        std::string("%"),
+        std::string("%2"),
+        std::string("%GG"),
+        std::string("folder/%2G/file.txt"),
+        std::string("%252e%252e%252foutside.txt"),
+    };
+
+    for (const auto &requested_path : requested_paths)
+    {
+        const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
+
+        CAPTURE(requested_path);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code ==
+                sparenode::filesystem::SafePathErrorCode::invalid_percent_encoding);
+        REQUIRE(result.error().requested_path == requested_path);
+    }
+}
+
+TEST_CASE("Safe path validates decoded bytes before filesystem conversion",
+          "[filesystem][safe-path][encoding][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
+    const auto shared_root = require_shared_root(directory.path());
+
+    const auto null_result = sparenode::filesystem::SafePath::resolve(shared_root, "file%00hidden");
+    const auto utf8_result = sparenode::filesystem::SafePath::resolve(shared_root, "%C0%AF");
+
+    REQUIRE_FALSE(null_result);
+    REQUIRE(null_result.error().code == sparenode::filesystem::SafePathErrorCode::embedded_null);
+    REQUIRE_FALSE(utf8_result);
+    REQUIRE(utf8_result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_encoding);
 }
 
 TEST_CASE("Safe path uses components instead of string-prefix containment",

@@ -42,6 +42,7 @@ add_library(sparenode_core STATIC
     src/configuration/environment_file.cpp
     src/configuration/environment_line.cpp
     src/configuration/shared_root.cpp
+    src/filesystem/path_request_decoder.cpp
     src/filesystem/safe_path.cpp
     src/logging/console_log_sink.cpp
     src/logging/logger.cpp
