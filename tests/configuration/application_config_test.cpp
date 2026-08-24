@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 #include "sparenode/configuration/application_config.hpp"
 #include "sparenode/configuration/environment_file.hpp"
@@ -26,6 +27,52 @@ TEST_CASE("Application configuration reads its shared root from parsed variables
 
     REQUIRE(result);
     REQUIRE(result->shared_root().path() == std::filesystem::canonical(shared_directory));
+    CHECK_FALSE(result->multithreading_enabled());
+}
+
+TEST_CASE("Application configuration reads the multithreading switch",
+          "[configuration][application][concurrency]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config");
+    const auto shared_directory = directory.path() / "shared";
+    std::filesystem::create_directory(shared_directory);
+    const auto environment_file = sparenode::test::write_environment_file(
+        directory, "SPARENODE_SHARED_ROOT=" + shared_directory.string() +
+                       "\nSPARENODE_MULTITHREADING=true\n");
+    const auto environment_result =
+        sparenode::configuration::EnvironmentFile::load(environment_file);
+    REQUIRE(environment_result);
+
+    const auto result =
+        sparenode::configuration::ApplicationConfig::create(environment_result.value());
+
+    REQUIRE(result);
+    CHECK(result->multithreading_enabled());
+}
+
+TEST_CASE("Application configuration rejects an invalid multithreading switch",
+          "[configuration][application][concurrency]")
+{
+    for (const std::string_view invalid_value : {std::string_view{}, std::string_view{"auto"}})
+    {
+        const sparenode::test::TemporaryDirectory directory("sparenode-config");
+        const auto shared_directory = directory.path() / "shared";
+        std::filesystem::create_directory(shared_directory);
+        const auto environment_file = sparenode::test::write_environment_file(
+            directory, "SPARENODE_SHARED_ROOT=" + shared_directory.string() +
+                           "\nSPARENODE_MULTITHREADING=" + std::string(invalid_value) + '\n');
+        const auto environment_result =
+            sparenode::configuration::EnvironmentFile::load(environment_file);
+        REQUIRE(environment_result);
+
+        const auto result =
+            sparenode::configuration::ApplicationConfig::create(environment_result.value());
+
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code ==
+              sparenode::configuration::ApplicationConfigErrorCode::invalid_boolean);
+        CHECK(result.error().variable == "SPARENODE_MULTITHREADING");
+    }
 }
 
 TEST_CASE("Application configuration decodes a UTF-8 shared-root path",

@@ -17,7 +17,8 @@ enum class ApplicationConfigErrorCode : std::uint8_t
 {
     missing_shared_root, ///< `SPARENODE_SHARED_ROOT` was not supplied.
     missing_value,       ///< `SPARENODE_SHARED_ROOT` has an empty value.
-    invalid_shared_root  ///< The supplied shared-root path failed validation.
+    invalid_shared_root, ///< The supplied shared-root path failed validation.
+    invalid_boolean      ///< A boolean variable is neither `true` nor `false`.
 };
 
 /// @brief Describes a semantic application-configuration failure without throwing.
@@ -43,15 +44,24 @@ class ApplicationConfig final
     /// @return A stable reference valid for the lifetime of this object.
     [[nodiscard]] const SharedRoot &shared_root() const noexcept;
 
+    /// @brief Reports whether the application should use multiple connection workers.
+    /// @return `true` for a fixed multi-worker pool; `false` for one worker.
+    [[nodiscard]] bool multithreading_enabled() const noexcept;
+
   private:
     /// @brief Environment-file key that configures the shared-root directory.
     static constexpr std::string_view shared_root_variable_name = "SPARENODE_SHARED_ROOT";
 
-    /// @brief Creates an application configuration with one validated shared root.
-    /// @param[in] shared_root Directory exposed by the server.
-    explicit ApplicationConfig(SharedRoot shared_root);
+    /// @brief Environment-file key that enables the multi-worker connection pool.
+    static constexpr std::string_view multithreading_variable_name = "SPARENODE_MULTITHREADING";
 
-    SharedRoot shared_root_; ///< Sole directory exposed by SpareNode v0.1.
+    /// @brief Creates an application configuration from validated settings.
+    /// @param[in] shared_root Directory exposed by the server.
+    /// @param[in] multithreading_enabled Whether more than one worker may be configured.
+    ApplicationConfig(SharedRoot shared_root, bool multithreading_enabled);
+
+    SharedRoot shared_root_;            ///< Sole directory exposed by SpareNode v0.1.
+    bool multithreading_enabled_{false}; ///< Enables a multi-worker connection pool.
 };
 
 /// @brief Returns a concise description of an application-configuration failure.

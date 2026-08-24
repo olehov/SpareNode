@@ -8,7 +8,6 @@
 #include <mutex>
 #include <optional>
 #include <semaphore>
-#include <stdexcept>
 #include <stop_token>
 #include <thread>
 #include <utility>
@@ -18,6 +17,7 @@
 #include "sparenode/network/tcp_connection.hpp"
 #include "sparenode/result.hpp"
 #include "support/connected_tcp_pair.hpp"
+#include "support/optional.hpp"
 
 namespace
 {
@@ -68,16 +68,6 @@ create_dispatcher(network::ConnectionDispatcherConfig config)
     return [](network::TcpConnection,
               const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
     { return {}; };
-}
-
-/// Returns an optional test value after enforcing its presence for analyzers.
-template <typename Value> [[nodiscard]] Value &require_optional(std::optional<Value> &optional)
-{
-    if (!optional.has_value())
-    {
-        throw std::logic_error("Expected optional test value to be present");
-    }
-    return optional.value();
 }
 
 } // namespace
@@ -269,7 +259,7 @@ TEST_CASE("A full dispatcher queue supports caller cancellation",
     producer.request_stop();
     producer.join();
 
-    auto &completed_submission = require_optional(submission_result);
+    auto &completed_submission = sparenode::test::require_optional(submission_result);
     REQUIRE_FALSE(completed_submission.has_value());
     CHECK(completed_submission.error() ==
           network::DispatchError{network::DispatchErrorCode::cancelled, 0});
@@ -314,7 +304,7 @@ TEST_CASE("Dispatcher shutdown wakes blocked producers and drops queued ownershi
     dispatcher.request_stop();
     producer.join();
 
-    auto &completed_submission = require_optional(submission_result);
+    auto &completed_submission = sparenode::test::require_optional(submission_result);
     REQUIRE_FALSE(completed_submission.has_value());
     CHECK(completed_submission.error() ==
           network::DispatchError{network::DispatchErrorCode::stopped, 0});
@@ -357,9 +347,9 @@ TEST_CASE("Dispatcher shutdown cancels active connection operations",
 
     dispatcher.request_stop();
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
-    auto &failure = require_optional(observed_failure);
+    auto &failure = sparenode::test::require_optional(observed_failure);
     CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
-    const auto &network_error = require_optional(failure.network_error);
+    const auto &network_error = sparenode::test::require_optional(failure.network_error);
     CHECK(network_error.operation == network::NetworkOperation::receive);
     CHECK(network_error.domain == network::NetworkErrorDomain::cancellation);
 }
@@ -398,7 +388,7 @@ TEST_CASE("Handler failures remain isolated from later connections",
 
     REQUIRE(failure_observed.try_acquire_for(test_timeout));
     REQUIRE(success_observed.try_acquire_for(test_timeout));
-    const auto &failure = require_optional(observed_failure);
+    const auto &failure = sparenode::test::require_optional(observed_failure);
     CHECK(failure.kind == network::ConnectionFailureKind::handler_error);
     CHECK(failure.network_error == expected_error);
     CHECK(invocation_count.load() == 2);
