@@ -129,6 +129,12 @@ them.
 `false` when omitted. The default limits asynchronous connection handling to one
 worker; setting it to `true` uses the fixed worker count configured by the server.
 
+The planned persistent [`spnode.conf` format](docs/configuration-format.md) is
+specified separately so its lexer and parser can be implemented without
+guesswork. `config/spnode.conf.example` demonstrates that format, but the
+executable continues to load `.env` until the configuration pipeline is
+integrated.
+
 ## Logging
 
 SpareNode emits structured, thread-safe lifecycle and failure diagnostics to the

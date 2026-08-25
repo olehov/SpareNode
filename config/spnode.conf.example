@@ -1,0 +1,16 @@
+# SpareNode persistent configuration format example.
+# The executable does not load this file until the lexer and parser are integrated.
+server {
+    bind "0.0.0.0";
+    port 8080;
+    multithreading true;
+    worker_threads 4;
+    log_level "info";
+
+    share "Documents" {
+        path "/absolute/path/to/share";
+        read true;
+        write false;
+        delete false;
+    }
+}
