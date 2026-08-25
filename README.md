@@ -135,6 +135,11 @@ guesswork. `config/spnode.conf.example` demonstrates that format, but the
 executable continues to load `.env` until the configuration pipeline is
 integrated.
 
+The first implementation stage is the platform-independent
+[`ConfigLexer`](docs/configuration-lexer.md), which produces source-located
+tokens and structured lexical errors without interpreting configuration
+semantics.
+
 ## Logging
 
 SpareNode emits structured, thread-safe lifecycle and failure diagnostics to the
