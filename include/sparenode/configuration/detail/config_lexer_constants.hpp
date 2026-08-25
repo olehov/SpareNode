@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace sparenode::configuration::config_lexer_constants
+namespace sparenode::configuration::detail::config_lexer_constants
 {
 
 /// @brief Byte sequence that may prefix a UTF-8 configuration file.
@@ -73,4 +73,4 @@ inline constexpr std::uint32_t utf8_continuation_payload_bits = 6U;
 /// @brief Largest diagnostic context, including an escape prefix and one UTF-8 scalar.
 inline constexpr std::size_t maximum_error_context_bytes = 5;
 
-} // namespace sparenode::configuration::config_lexer_constants
+} // namespace sparenode::configuration::detail::config_lexer_constants
