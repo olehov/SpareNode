@@ -178,6 +178,16 @@ TEST_CASE("Configuration lexer rejects malformed strings with structured locatio
         CHECK(error.context == "\\S");
     }
 
+    SECTION("unsupported non-ASCII escape")
+    {
+        const std::string input = "\"\\\xF0\x9F\x98\x80\"";
+        const auto error = require_lexer_error(input);
+        CHECK(error.code ==
+              sparenode::configuration::ConfigLexerErrorCode::invalid_escape_sequence);
+        CHECK(error.location == sparenode::configuration::SourceLocation{1, 1, 2});
+        CHECK(error.context == std::string("\\\xF0\x9F\x98\x80", 5));
+    }
+
     SECTION("raw line break")
     {
         const auto error = require_lexer_error("\"first\nsecond\"");

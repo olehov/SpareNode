@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace sparenode::configuration::config_lexer_constants
@@ -68,5 +69,8 @@ inline constexpr std::uint32_t unicode_maximum_code_point = 0x10FFFFU;
 
 /// @brief Number of code-point payload bits carried by each continuation byte.
 inline constexpr std::uint32_t utf8_continuation_payload_bits = 6U;
+
+/// @brief Largest diagnostic context, including an escape prefix and one UTF-8 scalar.
+inline constexpr std::size_t maximum_error_context_bytes = 5;
 
 } // namespace sparenode::configuration::config_lexer_constants

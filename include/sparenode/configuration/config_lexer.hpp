@@ -73,10 +73,12 @@ class ConfigLexer final
     [[nodiscard]] SourceLocation location() const noexcept;
 
     /// @brief Advances over one ASCII character and updates line tracking.
+    /// @pre At least one input byte remains at `offset_`.
     void advance_ascii() noexcept;
 
-    /// @brief Validates and advances over one non-ASCII UTF-8 scalar.
+    /// @brief Validates the non-ASCII UTF-8 scalar at `offset_` without advancing.
     /// @return Scalar byte length, or zero for malformed UTF-8.
+    /// @pre At least one input byte remains at `offset_`.
     [[nodiscard]] std::size_t utf8_sequence_length() const noexcept;
 
     /// @brief Advances over one already validated non-ASCII scalar.

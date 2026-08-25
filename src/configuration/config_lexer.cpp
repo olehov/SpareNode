@@ -1,6 +1,7 @@
 #include "sparenode/configuration/config_lexer.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <utility>
 
 #include "config_lexer_constants.hpp"
@@ -11,6 +12,14 @@ namespace
 {
 
 namespace lexer_constants = config_lexer_constants;
+
+/// @brief Converts a potentially signed source character into its byte value.
+/// @param[in] character Source character to convert without sign extension.
+/// @return Equivalent unsigned byte value.
+[[nodiscard]] constexpr unsigned char to_unsigned_byte(const char character) noexcept
+{
+    return static_cast<unsigned char>(character);
+}
 
 /// @brief Reports whether an ASCII byte can begin an identifier.
 /// @param[in] byte Byte to classify.
@@ -41,23 +50,21 @@ namespace lexer_constants = config_lexer_constants;
         return false;
     }
 
-    return static_cast<unsigned char>(input[offset]) == lexer_constants::utf8_byte_order_mark[0] &&
-           static_cast<unsigned char>(input[offset + 1]) ==
-               lexer_constants::utf8_byte_order_mark[1] &&
-           static_cast<unsigned char>(input[offset + 2]) ==
-               lexer_constants::utf8_byte_order_mark[2];
+    return to_unsigned_byte(input[offset]) == lexer_constants::utf8_byte_order_mark[0] &&
+           to_unsigned_byte(input[offset + 1]) == lexer_constants::utf8_byte_order_mark[1] &&
+           to_unsigned_byte(input[offset + 2]) == lexer_constants::utf8_byte_order_mark[2];
 }
 
 /// @brief Copies a bounded source fragment for error diagnostics.
 /// @param[in] input Complete source bytes.
 /// @param[in] offset First offending byte.
 /// @param[in] length Desired byte count.
-/// @return Owned context containing at most four bytes.
+/// @return Owned context containing at most five bytes.
 [[nodiscard]] std::string make_context(const std::string_view input, const std::size_t offset,
                                        const std::size_t length = 1)
 {
-    constexpr std::size_t maximum_context_bytes = 4;
-    return std::string(input.substr(offset, std::min(length, maximum_context_bytes)));
+    return std::string(
+        input.substr(offset, std::min(length, lexer_constants::maximum_error_context_bytes)));
 }
 
 } // namespace
@@ -93,6 +100,7 @@ SourceLocation ConfigLexer::location() const noexcept
 
 void ConfigLexer::advance_ascii() noexcept
 {
+    assert(!at_end());
     const char current = input_[offset_];
     ++offset_;
 
@@ -118,7 +126,8 @@ void ConfigLexer::advance_ascii() noexcept
 
 std::size_t ConfigLexer::utf8_sequence_length() const noexcept
 {
-    const unsigned char leading = static_cast<unsigned char>(input_[offset_]);
+    assert(!at_end());
+    const unsigned char leading = to_unsigned_byte(input_[offset_]);
     std::size_t length = 0;
     std::uint32_t code_point = 0;
     std::uint32_t minimum_code_point = 0;
@@ -156,7 +165,7 @@ std::size_t ConfigLexer::utf8_sequence_length() const noexcept
 
     for (std::size_t index = 1; index < length; ++index)
     {
-        const unsigned char continuation = static_cast<unsigned char>(input_[offset_ + index]);
+        const unsigned char continuation = to_unsigned_byte(input_[offset_ + index]);
         if ((continuation & lexer_constants::utf8_continuation_prefix_mask) !=
             lexer_constants::utf8_continuation_prefix)
         {
@@ -187,7 +196,7 @@ std::optional<ConfigLexerError> ConfigLexer::skip_trivia()
 {
     while (!at_end())
     {
-        const unsigned char byte = static_cast<unsigned char>(input_[offset_]);
+        const unsigned char byte = to_unsigned_byte(input_[offset_]);
         if (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n')
         {
             advance_ascii();
@@ -202,7 +211,7 @@ std::optional<ConfigLexerError> ConfigLexer::skip_trivia()
         advance_ascii();
         while (!at_end() && input_[offset_] != '\r' && input_[offset_] != '\n')
         {
-            const unsigned char comment_byte = static_cast<unsigned char>(input_[offset_]);
+            const unsigned char comment_byte = to_unsigned_byte(input_[offset_]);
             if (comment_byte == 0)
             {
                 auto error = ConfigLexerError{ConfigLexerErrorCode::embedded_null, location(),
@@ -243,7 +252,7 @@ ConfigToken ConfigLexer::lex_identifier()
     do
     {
         advance_ascii();
-    } while (!at_end() && is_identifier_continuation(static_cast<unsigned char>(input_[offset_])));
+    } while (!at_end() && is_identifier_continuation(to_unsigned_byte(input_[offset_])));
 
     const auto lexeme = input_.substr(start, offset_ - start);
     const auto kind = lexeme == "true" || lexeme == "false" ? ConfigTokenKind::boolean_literal
@@ -293,7 +302,7 @@ Result<ConfigToken, ConfigLexerError> ConfigLexer::lex_string()
 
 std::optional<ConfigLexerError> ConfigLexer::consume_string_character(std::string &decoded)
 {
-    const unsigned char byte = static_cast<unsigned char>(input_[offset_]);
+    const unsigned char byte = to_unsigned_byte(input_[offset_]);
     if (byte == '\r' || byte == '\n')
     {
         return ConfigLexerError{ConfigLexerErrorCode::line_break_in_string, location(),
@@ -342,7 +351,7 @@ std::optional<ConfigLexerError> ConfigLexer::consume_escape(std::string &decoded
                                 "\\"};
     }
 
-    const unsigned char byte = static_cast<unsigned char>(input_[offset_]);
+    const unsigned char byte = to_unsigned_byte(input_[offset_]);
     if (byte == 0)
     {
         return ConfigLexerError{ConfigLexerErrorCode::embedded_null, location(),
@@ -384,8 +393,14 @@ std::optional<ConfigLexerError> ConfigLexer::consume_escape(std::string &decoded
         decoded.push_back('\t');
         break;
     default:
-        return ConfigLexerError{ConfigLexerErrorCode::invalid_escape_sequence, escape_location,
-                                make_context(input_, escape_location.byte_offset, 2)};
+    {
+        const std::size_t escaped_length = byte < lexer_constants::utf8_first_non_ascii_byte
+                                               ? std::size_t{1}
+                                               : utf8_sequence_length();
+        return ConfigLexerError{
+            ConfigLexerErrorCode::invalid_escape_sequence, escape_location,
+            make_context(input_, escape_location.byte_offset, std::size_t{1} + escaped_length)};
+    }
     }
     advance_ascii();
     return std::nullopt;
@@ -423,7 +438,7 @@ Result<ConfigToken, ConfigLexerError> ConfigLexer::next()
                            location()};
     }
 
-    const unsigned char byte = static_cast<unsigned char>(input_[offset_]);
+    const unsigned char byte = to_unsigned_byte(input_[offset_]);
     if (is_identifier_start(byte))
     {
         return lex_identifier();
