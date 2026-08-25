@@ -8,6 +8,7 @@ server {
     log_level "info";
 
     share "Documents" {
+        # Replace this placeholder with an existing directory before starting SpareNode.
         path "/absolute/path/to/share";
         read true;
         write false;

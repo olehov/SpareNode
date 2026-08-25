@@ -33,11 +33,13 @@ server {
 On Windows, the share can instead use an escaped native path:
 
 ```conf
-share "Documents" {
-    path "D:\\Shared\\Documents";
-    read true;
-    write false;
-    delete false;
+server {
+    share "Documents" {
+        path "D:\\Shared\\Documents";
+        read true;
+        write false;
+        delete false;
+    }
 }
 ```
 
@@ -330,6 +332,14 @@ associates that location with the source file to produce diagnostics such as
 `spnode.conf:7:14: error: unterminated string literal`. Diagnostics should name
 the error category and relevant directive without echoing secrets. Later stages
 must not reinterpret or decode string escapes a second time.
+
+When a required directive is absent, its semantic error points at the closing
+`}` of the block that should contain it. This applies to a missing `share` and to
+`worker_threads` when `multithreading true` is present. If the relevant closing
+delimiter is unavailable, including when the entire `server` block is absent,
+the error points at end-of-input. End-of-input is the position immediately after
+the final decoded character: an empty file is `1:1`, and a file ending in a line
+break points at column 1 of the following line.
 
 The lexer does not validate directive placement, duplicates, addresses, ports,
 permissions, or filesystem paths. The parser does not open filesystem paths.
