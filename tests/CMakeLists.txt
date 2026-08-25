@@ -15,6 +15,7 @@ include(Catch)
 
 add_executable(sparenode_tests
     configuration/application_config_test.cpp
+    configuration/config_lexer_test.cpp
     configuration/environment_file_test.cpp
     configuration/shared_root_test.cpp
     filesystem/safe_path_test.cpp
