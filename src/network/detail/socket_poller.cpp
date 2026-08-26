@@ -65,16 +65,9 @@ inline constexpr short native_writable_event = POLLOUT;
 /// @return Native bit mask of requested events.
 [[nodiscard]] short requested_native_events(const SocketPollEntry &entry) noexcept
 {
-    short events = 0;
-    if (entry.watch_readable)
-    {
-        events = native_readable_event;
-    }
-    if (entry.watch_writable)
-    {
-        events = static_cast<short>(events | native_writable_event);
-    }
-    return events;
+    const short readable_events = entry.watch_readable ? native_readable_event : short{};
+    const short writable_events = entry.watch_writable ? native_writable_event : short{};
+    return static_cast<short>(readable_events | writable_events);
 }
 
 /// @brief Clears results left by an earlier wait before descriptors are reused.
