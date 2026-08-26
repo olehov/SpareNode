@@ -41,24 +41,24 @@ add_library(sparenode_core STATIC
     src/configuration/application_config.cpp
     src/configuration/config_lexer.cpp
     src/configuration/environment_file.cpp
-    src/configuration/environment_line.cpp
+    src/configuration/detail/environment_line.cpp
     src/configuration/shared_root.cpp
-    src/filesystem/path_request_decoder.cpp
+    src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/safe_path.cpp
     src/logging/console_log_sink.cpp
     src/logging/logger.cpp
     src/logging/log_severity.cpp
     src/logging/network_logging.cpp
-    src/network/accept_wait.cpp
     src/network/connection_dispatcher.cpp
     src/network/connection_server.cpp
-    src/network/connection_io.cpp
-    src/network/native_socket.cpp
-    src/network/socket_poller.cpp
-    src/network/socket_wait.cpp
-    src/network/socket_address.cpp
     src/network/tcp_connection.cpp
     src/network/tcp_listener.cpp
+    src/network/detail/accept_wait.cpp
+    src/network/detail/connection_io.cpp
+    src/network/detail/native_socket.cpp
+    src/network/detail/socket_address.cpp
+    src/network/detail/socket_poller.cpp
+    src/network/detail/socket_wait.cpp
 )
 
 target_compile_features(sparenode_core PUBLIC

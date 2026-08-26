@@ -4,14 +4,14 @@
 #include <cassert>
 #include <utility>
 
-#include "config_lexer_constants.hpp"
+#include "sparenode/configuration/detail/config_lexer_constants.hpp"
 
 namespace sparenode::configuration
 {
 namespace
 {
 
-namespace lexer_constants = config_lexer_constants;
+namespace lexer_constants = detail::config_lexer_constants;
 
 /// @brief Converts a potentially signed source character into its byte value.
 /// @param[in] character Source character to convert without sign extension.
