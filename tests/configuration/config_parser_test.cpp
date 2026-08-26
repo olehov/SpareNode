@@ -187,6 +187,20 @@ TEST_CASE("Configuration parser rejects unexpected names nesting and value types
               ConfigParserExpectation::share_item);
     }
 
+    SECTION("missing share name")
+    {
+        const auto error = require_parser_error("server { share { } }");
+        CHECK(sparenode::test::require_optional(error.expected) ==
+              ConfigParserExpectation::string_literal);
+    }
+
+    SECTION("wrong share directive value type")
+    {
+        const auto error = require_parser_error("server { share \"x\" { read \"yes\"; } }");
+        CHECK(sparenode::test::require_optional(error.expected) ==
+              ConfigParserExpectation::boolean_literal);
+    }
+
     SECTION("unexpected nested block")
     {
         const auto error = require_parser_error("server { { } }");

@@ -42,8 +42,11 @@ placing every directive name into one overly broad enum.
 `ConfigParserError` distinguishes lexical failures, unexpected tokens, and
 integer representation overflow. Grammatical failures carry the expected syntax,
 actual token kind, and source location. An unknown identifier is copied into the
-error, while string literal contents are deliberately not copied into parser
-diagnostics because configuration values may later contain sensitive data.
+error, while string literal contents are not copied into grammatical parser
+failures because configuration values may later contain sensitive data. Wrapped
+lexer failures retain the lexer's bounded diagnostic context, which can contain
+the bytes surrounding malformed string input and must therefore be handled as
+potentially sensitive diagnostic data.
 
 The parser is iterative over the grammar's two fixed block levels. Every
 successful loop iteration consumes a complete directive or share block; malformed
