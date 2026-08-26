@@ -1,7 +1,7 @@
 # Configuration lexer
 
-`ConfigLexer` is the lexical boundary between UTF-8 `spnode.conf` source and the
-future configuration parser. It recognizes identifiers, strings, integers,
+`ConfigLexer` is the lexical boundary between UTF-8 `spnode.conf` source and
+`ConfigParser`. It recognizes identifiers, strings, integers,
 booleans, braces, semicolons, and explicit end-of-input while consuming comments
 and whitespace. It does not validate directive names, block structure, duplicate
 settings, ports, permissions, or filesystem paths.
