@@ -83,6 +83,8 @@ TEST_CASE("Configuration validator accepts version one defaults and independent 
 
     REQUIRE(result.has_value());
     CHECK(result->parsed().server.shares.front().name == "Documents");
+    REQUIRE(result->shared_roots().size() == 1);
+    CHECK(result->shared_roots().front().path() == std::filesystem::canonical(directory.path()));
 }
 
 TEST_CASE("Configuration validator collects independent server failures",
@@ -130,6 +132,21 @@ TEST_CASE("Configuration validator enforces worker thread relationships",
         auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
             make_configuration(directory.path(), "multithreading true;\nworker_threads 2;\n")));
         CHECK(result.has_value());
+    }
+
+    SECTION("enabled with the upper worker boundary")
+    {
+        auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), "multithreading true;\nworker_threads 64;\n")));
+        CHECK(result.has_value());
+    }
+
+    SECTION("explicitly disabled with a worker count")
+    {
+        const auto errors = require_validation_errors(
+            make_configuration(directory.path(), "multithreading false;\nworker_threads 4;\n"));
+        REQUIRE(errors.size() == 1);
+        CHECK(errors.front().code == ConfigValidationErrorCode::unexpected_worker_threads);
     }
 }
 

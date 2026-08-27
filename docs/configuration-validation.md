@@ -3,7 +3,9 @@
 `ConfigValidator` is the semantic boundary between the parser model and later
 runtime configuration mapping. It performs no listener creation and starts no
 worker threads. Success produces `ValidatedConfiguration`, which cannot be
-constructed directly by unchecked callers.
+constructed directly by unchecked callers. The validated wrapper retains the
+canonical `SharedRoot` for each parsed share, so the runtime mapping stage does
+not need to reinterpret the original path that was checked.
 
 Validation collects independently detectable failures in deterministic source
 traversal order. Each `ConfigValidationError` retains a source location and may

@@ -1,8 +1,6 @@
 #include "sparenode/configuration/config_validator.hpp"
 
 #include <algorithm>
-#include <array>
-#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <unordered_set>
@@ -16,6 +14,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #endif
 
 namespace sparenode::configuration
@@ -27,9 +26,6 @@ constexpr std::uint64_t minimum_port = 1;
 constexpr std::uint64_t maximum_port = 65'535;
 constexpr std::uint64_t minimum_worker_threads = 2;
 constexpr std::uint64_t maximum_worker_threads = 64;
-constexpr std::size_t server_directive_count = 5;
-constexpr std::size_t share_directive_count = 4;
-
 using directives::ParsedServerDirective;
 using directives::ParsedShareDirective;
 using directives::ServerDirectiveKind;
@@ -78,20 +74,25 @@ class ValidationState final
         return std::move(errors_);
     }
 
+    /// @brief Transfers canonical roots collected for successfully validated shares.
+    /// @return Roots in the same order as the parsed share blocks.
+    [[nodiscard]] std::vector<SharedRoot> release_shared_roots()
+    {
+        return std::move(shared_roots_);
+    }
+
   private:
     /// @brief Validates singleton server directives and their individual values.
     void validate_server_directives()
     {
-        std::array<bool, server_directive_count> encountered{};
+        std::unordered_set<ServerDirectiveKind> encountered;
         for (const auto &directive : configuration_.server.directives)
         {
-            const auto index = static_cast<std::size_t>(directive.kind);
-            if (encountered[index])
+            if (!encountered.insert(directive.kind).second)
             {
                 add_server_error(ConfigValidationErrorCode::duplicate_server_directive, directive);
                 continue;
             }
-            encountered[index] = true;
             validate_server_directive(directive);
         }
         validate_threading_relationship();
@@ -229,18 +230,16 @@ class ValidationState final
     /// @brief Validates share directive cardinality and the first path value.
     void validate_share_directives(const ParsedShareBlock &share)
     {
-        std::array<bool, share_directive_count> encountered{};
+        std::unordered_set<ShareDirectiveKind> encountered;
         const ParsedShareDirective *path_directive = nullptr;
         for (const auto &directive : share.directives)
         {
-            const auto index = static_cast<std::size_t>(directive.kind);
-            if (encountered[index])
+            if (!encountered.insert(directive.kind).second)
             {
                 add_share_directive_error(ConfigValidationErrorCode::duplicate_share_directive,
                                           share, directive);
                 continue;
             }
-            encountered[index] = true;
             if (directive.kind == ShareDirectiveKind::path)
             {
                 path_directive = &directive;
@@ -273,7 +272,9 @@ class ValidationState final
             error.share_name = share.name;
             error.shared_root_error = std::move(root_result.error());
             errors_.push_back(std::move(error));
+            return;
         }
+        shared_roots_.push_back(std::move(root_result).value());
     }
 
     /// @brief Adds an error associated with one server directive.
@@ -314,6 +315,7 @@ class ValidationState final
 
     const ParsedConfiguration &configuration_;
     std::vector<ConfigValidationError> errors_;
+    std::vector<SharedRoot> shared_roots_;
     bool multithreading_enabled_{false};
     std::uint64_t worker_threads_{};
     const ParsedServerDirective *worker_threads_directive_{};
@@ -327,8 +329,9 @@ ConfigValidationError::ConfigValidationError(const ConfigValidationErrorCode err
 {
 }
 
-ValidatedConfiguration::ValidatedConfiguration(ParsedConfiguration parsed_configuration)
-    : parsed_(std::move(parsed_configuration))
+ValidatedConfiguration::ValidatedConfiguration(ParsedConfiguration parsed_configuration,
+                                               std::vector<SharedRoot> shared_roots)
+    : parsed_(std::move(parsed_configuration)), shared_roots_(std::move(shared_roots))
 {
 }
 
@@ -342,6 +345,16 @@ ParsedConfiguration ValidatedConfiguration::release_parsed() && noexcept
     return std::move(parsed_);
 }
 
+const std::vector<SharedRoot> &ValidatedConfiguration::shared_roots() const noexcept
+{
+    return shared_roots_;
+}
+
+std::vector<SharedRoot> ValidatedConfiguration::release_shared_roots() && noexcept
+{
+    return std::move(shared_roots_);
+}
+
 Result<ValidatedConfiguration, std::vector<ConfigValidationError>>
 ConfigValidator::validate(ParsedConfiguration configuration)
 {
@@ -351,7 +364,7 @@ ConfigValidator::validate(ParsedConfiguration configuration)
     {
         return unexpected(std::move(errors));
     }
-    return ValidatedConfiguration(std::move(configuration));
+    return ValidatedConfiguration(std::move(configuration), validation.release_shared_roots());
 }
 
 const char *to_string(const ConfigValidationErrorCode code) noexcept
@@ -385,7 +398,7 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
     case ConfigValidationErrorCode::missing_share_path:
         return "the required share path is missing";
     case ConfigValidationErrorCode::invalid_share_path:
-        return "share path is not an existing directory";
+        return "share path was rejected as a shared root";
     }
     return "unknown configuration validation error";
 }

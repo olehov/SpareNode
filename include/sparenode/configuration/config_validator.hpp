@@ -65,14 +65,25 @@ class ValidatedConfiguration final
     /// @return Owned parser model carrying the validator's success guarantee.
     [[nodiscard]] ParsedConfiguration release_parsed() && noexcept;
 
+    /// @brief Returns canonical roots validated for shares in parser source order.
+    /// @return Roots aligned one-to-one with parsed().server.shares.
+    [[nodiscard]] const std::vector<SharedRoot> &shared_roots() const noexcept;
+
+    /// @brief Transfers canonical share roots to the runtime configuration stage.
+    /// @return Roots aligned one-to-one with the released parsed share collection.
+    [[nodiscard]] std::vector<SharedRoot> release_shared_roots() && noexcept;
+
   private:
     friend class ConfigValidator;
 
     /// @brief Stores parser output after all semantic checks have succeeded.
     /// @param[in] parsed_configuration Complete validated parser model.
-    explicit ValidatedConfiguration(ParsedConfiguration parsed_configuration);
+    /// @param[in] shared_roots Canonical roots corresponding to parsed shares.
+    ValidatedConfiguration(ParsedConfiguration parsed_configuration,
+                           std::vector<SharedRoot> shared_roots);
 
-    ParsedConfiguration parsed_; ///< Syntax tree protected by the validation boundary.
+    ParsedConfiguration parsed_;           ///< Syntax tree protected by the validation boundary.
+    std::vector<SharedRoot> shared_roots_; ///< Canonical roots aligned with parsed shares.
 };
 
 /// @brief Applies version-one semantic and filesystem rules to parsed configuration.
