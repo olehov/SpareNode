@@ -76,7 +76,7 @@ class ValidationState final
 
     /// @brief Transfers canonical roots collected for successfully validated shares.
     /// @return Roots in the same order as the parsed share blocks.
-    [[nodiscard]] std::vector<SharedRoot> release_shared_roots()
+    [[nodiscard]] std::vector<SharedRoot> release_shared_roots() &&
     {
         return std::move(shared_roots_);
     }
@@ -364,7 +364,8 @@ ConfigValidator::validate(ParsedConfiguration configuration)
     {
         return unexpected(std::move(errors));
     }
-    return ValidatedConfiguration(std::move(configuration), validation.release_shared_roots());
+    return ValidatedConfiguration(std::move(configuration),
+                                  std::move(validation).release_shared_roots());
 }
 
 const char *to_string(const ConfigValidationErrorCode code) noexcept
