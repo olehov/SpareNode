@@ -1,5 +1,5 @@
 # SpareNode persistent configuration format example.
-# The executable does not load this file until the lexer and parser are integrated.
+# Start SpareNode with: sparenode --config /path/to/spnode.conf
 server {
     bind "0.0.0.0";
     port 8080;

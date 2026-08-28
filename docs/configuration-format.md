@@ -2,10 +2,9 @@
 
 This document defines version 1 of the persistent `spnode.conf` format. The
 repository keeps its distributable example at `config/spnode.conf.example` and
-reserves `config/spnode.conf` for a local development configuration. This is the
-lexical and grammatical contract for the configuration lexer and parser; the
-current executable continues to read `.env` until those later components are
-integrated.
+reserves `config/spnode.conf` for a local development configuration. Start the
+executable with `sparenode --config /path/to/spnode.conf`; legacy `.env` settings
+are not consulted and have no precedence over this explicit source.
 
 The language is deliberately small. It is not nginx-compatible and does not
 support includes, substitutions, expressions, or executable statements.

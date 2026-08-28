@@ -38,8 +38,11 @@ configure_file(
 )
 
 add_library(sparenode_core STATIC
+    src/application/command_line.cpp
+    src/application/running_application.cpp
     src/configuration/application_config.cpp
     src/configuration/config_lexer.cpp
+    src/configuration/config_loader.cpp
     src/configuration/config_parser.cpp
     src/configuration/config_validator.cpp
     src/configuration/environment_file.cpp

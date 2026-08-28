@@ -44,9 +44,9 @@ Run these commands from a Visual Studio Developer PowerShell:
 ```powershell
 cmake -S . -B build/msvc -A x64
 cmake --build build/msvc --config Debug --parallel
-Copy-Item .env.example .env
-# Set SPARENODE_SHARED_ROOT in .env, then run:
-.\build\msvc\bin\Debug\sparenode.exe
+Copy-Item config\spnode.conf.example config\spnode.conf
+# Set an existing share path, then run:
+.\build\msvc\bin\Debug\sparenode.exe --config config\spnode.conf
 ```
 
 Replace `Debug` with `Release` for an optimised build.
@@ -56,9 +56,9 @@ Replace `Debug` with `Release` for an optimised build.
 ```bash
 cmake -S . -B build/gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/gcc --parallel
-cp .env.example .env
-# Set SPARENODE_SHARED_ROOT in .env, then run:
-./build/gcc/bin/Debug/sparenode
+cp config/spnode.conf.example config/spnode.conf
+# Set an existing share path, then run:
+./build/gcc/bin/Debug/sparenode --config config/spnode.conf
 ```
 
 ### Linux (Clang)
@@ -66,9 +66,7 @@ cp .env.example .env
 ```bash
 cmake -S . -B build/clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/clang --parallel
-cp .env.example .env
-# Set SPARENODE_SHARED_ROOT in .env, then run:
-./build/clang/bin/Debug/sparenode
+./build/clang/bin/Debug/sparenode --config config/spnode.conf
 ```
 
 For a release build on Linux, configure with `-DCMAKE_BUILD_TYPE=Release`.
@@ -117,23 +115,19 @@ one permanent thread per client.
 
 ## Shared directory
 
-SpareNode requires exactly one existing directory through the
-`SPARENODE_SHARED_ROOT` key in a local `.env` file. The path is validated and
-stored canonically before the server starts. See the
+SpareNode requires an explicit `--config <path>` argument selecting `spnode.conf`.
+The configured share path is validated and stored canonically before any listener
+starts. See the
 [shared-root documentation](docs/shared-root.md) for the configuration contract
 and security boundary. Untrusted relative paths are represented by the
 [`SafePath` abstraction](docs/safe-path.md) before filesystem operations consume
 them.
 
-`SPARENODE_MULTITHREADING` accepts exactly `true` or `false` and defaults to
-`false` when omitted. The default limits asynchronous connection handling to one
-worker; setting it to `true` uses the fixed worker count configured by the server.
-
-The planned persistent [`spnode.conf` format](docs/configuration-format.md) is
-specified separately so its lexer and parser can be implemented without
-guesswork. `config/spnode.conf.example` demonstrates that format, but the
-executable continues to load `.env` until the configuration pipeline is
-integrated.
+The persistent [`spnode.conf` format](docs/configuration-format.md) is the sole
+startup source of network, threading, logging, share, and permission settings.
+Legacy `.env` values are no longer read by the executable, so there is no ambiguous
+precedence between configuration sources. `config/spnode.conf.example` demonstrates
+the supported format.
 
 The first implementation stage is the platform-independent
 [`ConfigLexer`](docs/configuration-lexer.md), which produces source-located
