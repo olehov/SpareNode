@@ -43,6 +43,7 @@ add_library(sparenode_core STATIC
     src/configuration/config_parser.cpp
     src/configuration/config_validator.cpp
     src/configuration/environment_file.cpp
+    src/configuration/runtime_config_mapper.cpp
     src/configuration/detail/environment_line.cpp
     src/configuration/shared_root.cpp
     src/filesystem/detail/path_request_decoder.cpp
