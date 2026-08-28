@@ -38,6 +38,13 @@ TEST_CASE("Command line requires exactly one explicit configuration path", "[app
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == CommandLineErrorCode::duplicate_config);
     }
+    SECTION("adjacent duplicate option")
+    {
+        constexpr std::array arguments{std::string_view{"--config"}, std::string_view{"--config"}};
+        const auto result = sparenode::application::parse_command_line(arguments);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error().code == CommandLineErrorCode::duplicate_config);
+    }
     SECTION("unknown option")
     {
         constexpr std::array arguments{std::string_view{"--port"}, std::string_view{"8080"}};

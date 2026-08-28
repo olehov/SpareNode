@@ -1,5 +1,7 @@
 #include "sparenode/logging/console_log_sink.hpp"
 
+#include "sparenode/logging/detail/console_color_detection.hpp"
+
 #include <cstdio>
 #include <iostream>
 #include <ostream>
@@ -67,7 +69,7 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 /// @brief Identifies the C file behind a known standard C++ stream.
 /// @param[in] output Candidate standard output stream.
 /// @return `stdout`, `stderr`, or `nullptr` for a non-standard stream.
-[[nodiscard]] std::FILE *standard_file_for(std::ostream &output) noexcept
+[[nodiscard]] std::FILE *standard_file_for(const std::ostream &output) noexcept
 {
     if (&output == &std::cout)
     {
@@ -82,9 +84,9 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 
 #ifdef _WIN32
 /// @brief Enables ANSI processing for an interactive Windows console stream.
-/// @param[in,out] output Candidate standard terminal stream.
+/// @param[in] output Candidate standard terminal stream.
 /// @return `true` when the stream is a console that accepts ANSI colors.
-[[nodiscard]] bool enable_terminal_colors(std::ostream &output) noexcept
+[[nodiscard]] bool enable_terminal_colors(const std::ostream &output) noexcept
 {
     std::FILE *const file = standard_file_for(output);
     if (file == nullptr || ::_isatty(::_fileno(file)) == 0)
@@ -105,30 +107,12 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 /// @brief Detects whether a standard POSIX stream is attached to a terminal.
 /// @param[in] output Candidate standard terminal stream.
 /// @return `true` when ANSI colors can be emitted interactively.
-[[nodiscard]] bool enable_terminal_colors(std::ostream &output) noexcept
+[[nodiscard]] bool enable_terminal_colors(const std::ostream &output) noexcept
 {
     std::FILE *const file = standard_file_for(output);
     return file != nullptr && ::isatty(::fileno(file)) != 0;
 }
 #endif
-
-/// @brief Resolves an explicit or automatically detected console color policy.
-/// @param[in,out] output Destination used for automatic terminal detection.
-/// @param[in] mode Requested color policy.
-/// @return Whether severity markers should contain ANSI color sequences.
-[[nodiscard]] bool resolve_color_mode(std::ostream &output, const ConsoleColorMode mode) noexcept
-{
-    switch (mode)
-    {
-    case ConsoleColorMode::automatic:
-        return enable_terminal_colors(output);
-    case ConsoleColorMode::enabled:
-        return true;
-    case ConsoleColorMode::disabled:
-        return false;
-    }
-    return false;
-}
 
 /// @brief Inserts ANSI color around the severity marker in a formatted record.
 /// @param[in] formatted_record Plain formatted log line.
@@ -154,8 +138,7 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 /// @param[in] diagnostic Preformatted diagnostic text.
 /// @param[in] severity Severity selecting the label and color.
 /// @return Diagnostic with ANSI sequences surrounding each matching label.
-[[nodiscard]] std::string colorize_diagnostic(std::string diagnostic,
-                                              const LogSeverity severity)
+[[nodiscard]] std::string colorize_diagnostic(std::string diagnostic, const LogSeverity severity)
 {
     const std::string_view label = diagnostic_label(severity);
     const std::string_view color = severity_color(severity);
@@ -171,10 +154,25 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 
 } // namespace
 
+bool detail::resolve_console_color_mode(const std::ostream &output, const ConsoleColorMode mode,
+                                        const ConsoleTerminalDetector detector) noexcept
+{
+    switch (mode)
+    {
+    case ConsoleColorMode::automatic:
+        return detector != nullptr && detector(output);
+    case ConsoleColorMode::enabled:
+        return true;
+    case ConsoleColorMode::disabled:
+        return false;
+    }
+    return false;
+}
+
 void write_console_diagnostic(std::ostream &output, const std::string_view diagnostic,
                               const LogSeverity severity, const ConsoleColorMode color_mode)
 {
-    if (resolve_color_mode(output, color_mode))
+    if (detail::resolve_console_color_mode(output, color_mode, enable_terminal_colors))
     {
         output << colorize_diagnostic(std::string(diagnostic), severity);
     }
@@ -186,7 +184,8 @@ void write_console_diagnostic(std::ostream &output, const std::string_view diagn
 }
 
 ConsoleLogSink::ConsoleLogSink(std::ostream &output, const ConsoleColorMode color_mode) noexcept
-    : output_(&output), colors_enabled_(resolve_color_mode(output, color_mode))
+    : output_(&output), colors_enabled_(detail::resolve_console_color_mode(output, color_mode,
+                                                                           enable_terminal_colors))
 {
 }
 

@@ -188,6 +188,31 @@ TEST_CASE("Configuration loader formats both file I/O failure categories",
     CHECK(read_diagnostic == "error: unable to read configuration file 'config/spnode.conf'");
 }
 
+TEST_CASE("Configuration loader escapes terminal control bytes in source paths",
+          "[configuration][loader][security]")
+{
+    using sparenode::configuration::ConfigFileError;
+    using sparenode::configuration::ConfigFileErrorCode;
+    using sparenode::configuration::ConfigLoadError;
+
+    std::string unsafe_path = "config/unsafe";
+    unsafe_path.push_back('\x1B');
+    unsafe_path.push_back('\x7F');
+    unsafe_path += ".conf";
+    const auto diagnostic = sparenode::configuration::format_config_load_error(ConfigLoadError{
+        std::filesystem::path(unsafe_path), ConfigFileError{ConfigFileErrorCode::open_failed}});
+    const auto located_diagnostic = sparenode::configuration::format_config_load_error(
+        ConfigLoadError{std::filesystem::path(unsafe_path),
+                        sparenode::configuration::ConfigLexerError{
+                            sparenode::configuration::ConfigLexerErrorCode::invalid_utf8,
+                            sparenode::configuration::SourceLocation{0, 2, 3},
+                            {}}});
+
+    CHECK(diagnostic == "error: unable to open configuration file 'config/unsafe\\x1B\\x7F.conf'");
+    CHECK(located_diagnostic ==
+          "config/unsafe\\x1B\\x7F.conf:2:3: error: configuration input contains invalid UTF-8");
+}
+
 TEST_CASE("Configuration loader covers every lexer failure category",
           "[configuration][loader][errors]")
 {

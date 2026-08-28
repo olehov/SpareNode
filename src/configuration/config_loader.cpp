@@ -13,6 +13,25 @@ namespace sparenode::configuration
 namespace
 {
 
+/// Uppercase digits used to render one control byte as `\\xNN`.
+constexpr std::string_view hexadecimal_digits = "0123456789ABCDEF";
+
+/// @brief Appends a path while escaping bytes that can alter terminal output.
+/// @param[in,out] output Destination receiving the safe path representation.
+/// @param[in] path Configuration source path that may contain untrusted bytes.
+void append_escaped_path(std::ostringstream &output, const std::filesystem::path &path)
+{
+    for (const unsigned char byte : path.generic_string())
+    {
+        if (byte < 0x20U || byte == 0x7FU)
+        {
+            output << "\\x" << hexadecimal_digits[byte >> 4U] << hexadecimal_digits[byte & 0x0FU];
+            continue;
+        }
+        output << static_cast<char>(byte);
+    }
+}
+
 /// @brief Reads enough bytes to preserve the lexer's configured size boundary.
 /// @param[in] source_path File selected by the application user.
 /// @return Complete bounded source text, or a structured file I/O failure.
@@ -44,18 +63,28 @@ read_config_source(const std::filesystem::path &source_path)
 void append_diagnostic(std::ostringstream &output, const std::filesystem::path &path,
                        const SourceLocation &location, const char *message)
 {
-    output << path.generic_string() << ':' << location.line << ':' << location.column
-           << ": error: " << message;
+    append_escaped_path(output, path);
+    output << ':' << location.line << ':' << location.column << ": error: " << message;
 }
 
+/// @brief Formats a configuration file I/O failure without terminal control bytes.
+/// @param[in] path Configuration source associated with the failure.
+/// @param[in] failure Structured file I/O failure.
+/// @return Complete single-line diagnostic.
 [[nodiscard]] std::string format_failure(const std::filesystem::path &path,
                                          const ConfigFileError &failure)
 {
     std::ostringstream output;
-    output << "error: " << to_string(failure.code) << " '" << path.generic_string() << '\'';
+    output << "error: " << to_string(failure.code) << " '";
+    append_escaped_path(output, path);
+    output << '\'';
     return output.str();
 }
 
+/// @brief Formats one source-located lexer failure.
+/// @param[in] path Configuration source associated with the failure.
+/// @param[in] failure Structured lexer failure.
+/// @return Complete single-line diagnostic.
 [[nodiscard]] std::string format_failure(const std::filesystem::path &path,
                                          const ConfigLexerError &failure)
 {
@@ -64,6 +93,10 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
     return output.str();
 }
 
+/// @brief Formats one source-located parser failure and its expectation.
+/// @param[in] path Configuration source associated with the failure.
+/// @param[in] failure Structured parser failure.
+/// @return Complete single-line diagnostic.
 [[nodiscard]] std::string format_failure(const std::filesystem::path &path,
                                          const ConfigParserError &failure)
 {
@@ -76,6 +109,10 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
     return output.str();
 }
 
+/// @brief Formats every semantic validation failure as a separate diagnostic line.
+/// @param[in] path Configuration source associated with the failures.
+/// @param[in] failures Structured validation failures in source order.
+/// @return Complete possibly multi-line diagnostic.
 [[nodiscard]] std::string format_failure(const std::filesystem::path &path,
                                          const std::vector<ConfigValidationError> &failures)
 {

@@ -27,9 +27,9 @@ enum class ConsoleColorMode : std::uint8_t
 /// @param[in] diagnostic Preformatted text whose matching severity labels are highlighted.
 /// @param[in] severity Severity selecting both the textual label and terminal color.
 /// @param[in] color_mode Policy controlling ANSI severity colors.
-void write_console_diagnostic(
-    std::ostream &output, std::string_view diagnostic, LogSeverity severity,
-    ConsoleColorMode color_mode = ConsoleColorMode::automatic);
+void write_console_diagnostic(std::ostream &output, std::string_view diagnostic,
+                              LogSeverity severity,
+                              ConsoleColorMode color_mode = ConsoleColorMode::automatic);
 
 /// @brief Writes complete formatted records to one output stream without interleaving.
 class ConsoleLogSink final : public LogSink

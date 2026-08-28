@@ -30,8 +30,8 @@ int main(const int argc, const char *const argv[])
     {
         const std::string diagnostic =
             std::string("error: ") + sparenode::application::to_string(options.error().code);
-        sparenode::logging::write_console_diagnostic(
-            std::cerr, diagnostic, sparenode::logging::LogSeverity::error);
+        sparenode::logging::write_console_diagnostic(std::cerr, diagnostic,
+                                                     sparenode::logging::LogSeverity::error);
         std::cerr << "\nusage: sparenode --config <path-to-spnode.conf>\n";
         return 2;
     }
@@ -56,11 +56,11 @@ int main(const int argc, const char *const argv[])
         std::move(config_result).value(), std::move(handler));
     if (!application_result)
     {
-        const std::string diagnostic = std::string("error: ") +
-                                       sparenode::application::to_string(
-                                           application_result.error().code);
-        sparenode::logging::write_console_diagnostic(
-            std::cerr, diagnostic, sparenode::logging::LogSeverity::error);
+        const std::string diagnostic =
+            std::string("error: ") +
+            sparenode::application::to_string(application_result.error().code);
+        sparenode::logging::write_console_diagnostic(std::cerr, diagnostic,
+                                                     sparenode::logging::LogSeverity::error);
         std::cerr << "\nSpareNode was not started.\n";
         return 3;
     }

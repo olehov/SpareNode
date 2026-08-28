@@ -39,25 +39,39 @@ class RunningApplication final
     [[nodiscard]] static Result<RunningApplication, ApplicationStartError>
     start(configuration::runtime::AppConfig config, network::ConnectionHandler handler);
 
-    RunningApplication(RunningApplication &&) noexcept = default;
-    RunningApplication &operator=(RunningApplication &&) noexcept = default;
+    /// @brief Transfers ownership of validated settings and all running servers.
+    /// @param[in,out] other Application whose resources are transferred.
+    RunningApplication(RunningApplication &&other) noexcept = default;
+
+    /// @brief Stops currently owned servers before taking ownership from another application.
+    /// @param[in,out] other Application whose resources are transferred.
+    /// @return This application after the ownership transfer.
+    RunningApplication &operator=(RunningApplication &&other) noexcept = default;
     RunningApplication(const RunningApplication &) = delete;
     RunningApplication &operator=(const RunningApplication &) = delete;
 
     /// @brief Returns the immutable runtime settings retained by the application.
+    /// @return Validated configuration that produced the running servers.
     [[nodiscard]] const configuration::runtime::AppConfig &config() const noexcept;
 
     /// @brief Returns the RAII-owned running connection servers.
+    /// @return Servers in the same order as their runtime configuration entries.
     [[nodiscard]] const std::vector<network::ConnectionServer> &servers() const noexcept;
 
   private:
+    /// @brief Stores a successfully initialized application state.
+    /// @param[in] config Validated settings retained for application consumers.
+    /// @param[in] servers Running servers transferred into RAII ownership.
     RunningApplication(configuration::runtime::AppConfig config,
                        std::vector<network::ConnectionServer> servers) noexcept;
 
-    configuration::runtime::AppConfig config_;
-    std::vector<network::ConnectionServer> servers_;
+    configuration::runtime::AppConfig config_;       ///< Retained validated runtime settings.
+    std::vector<network::ConnectionServer> servers_; ///< RAII-owned servers in config order.
 };
 
+/// @brief Describes one portable application startup failure category.
+/// @param[in] code Failure category to describe.
+/// @return Static English diagnostic text.
 [[nodiscard]] const char *to_string(ApplicationStartErrorCode code) noexcept;
 
 } // namespace sparenode::application

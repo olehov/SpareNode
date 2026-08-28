@@ -66,6 +66,8 @@ cp config/spnode.conf.example config/spnode.conf
 ```bash
 cmake -S . -B build/clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/clang --parallel
+cp config/spnode.conf.example config/spnode.conf
+# Set an existing share path, then run:
 ./build/clang/bin/Debug/sparenode --config config/spnode.conf
 ```
 

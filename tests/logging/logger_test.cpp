@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "sparenode/logging/console_log_sink.hpp"
+#include "sparenode/logging/detail/console_color_detection.hpp"
 #include "sparenode/logging/logger.hpp"
 #include "sparenode/logging/network_logging.hpp"
 #include "sparenode/network/network_error.hpp"
@@ -45,6 +46,18 @@ class FailingSink final : public sparenode::logging::LogSink
     }
 };
 
+/// @brief Deterministically represents an interactive terminal in color-policy tests.
+[[nodiscard]] bool reports_interactive_terminal(const std::ostream &) noexcept
+{
+    return true;
+}
+
+/// @brief Deterministically represents a redirected stream in color-policy tests.
+[[nodiscard]] bool reports_redirected_stream(const std::ostream &) noexcept
+{
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("Log formatting preserves structure and escapes line injection", "[logging][format]")
@@ -60,8 +73,7 @@ TEST_CASE("Log formatting preserves structure and escapes line injection", "[log
 TEST_CASE("Console logging emits and flushes one complete line", "[logging][console]")
 {
     std::ostringstream output;
-    sparenode::logging::ConsoleLogSink sink(
-        output, sparenode::logging::ConsoleColorMode::disabled);
+    sparenode::logging::ConsoleLogSink sink(output, sparenode::logging::ConsoleColorMode::disabled);
     const sparenode::logging::LogRecord record{std::chrono::system_clock::time_point{},
                                                sparenode::logging::LogSeverity::info, "application",
                                                "started"};
@@ -74,16 +86,44 @@ TEST_CASE("Console logging emits and flushes one complete line", "[logging][cons
 TEST_CASE("Console logging colors only the severity marker", "[logging][console][color]")
 {
     std::ostringstream output;
-    sparenode::logging::ConsoleLogSink sink(output,
-                                            sparenode::logging::ConsoleColorMode::enabled);
-    const sparenode::logging::LogRecord record{
-        std::chrono::system_clock::time_point{}, sparenode::logging::LogSeverity::error,
-        "application", "startup failed"};
+    sparenode::logging::ConsoleLogSink sink(output, sparenode::logging::ConsoleColorMode::enabled);
+    const sparenode::logging::LogRecord record{std::chrono::system_clock::time_point{},
+                                               sparenode::logging::LogSeverity::error,
+                                               "application", "startup failed"};
 
     sink.write(record);
 
     CHECK(output.str() ==
           "[1970-01-01T00:00:00.000Z] \x1b[31m[ERROR]\x1b[0m [application] startup failed\n");
+}
+
+TEST_CASE("Automatic console coloring keeps redirected output plain", "[logging][console][color]")
+{
+    std::ostringstream output;
+    sparenode::logging::ConsoleLogSink sink(output);
+    const sparenode::logging::LogRecord record{std::chrono::system_clock::time_point{},
+                                               sparenode::logging::LogSeverity::error,
+                                               "application", "startup failed"};
+
+    sink.write(record);
+
+    CHECK(output.str() == "[1970-01-01T00:00:00.000Z] [ERROR] [application] startup failed\n");
+}
+
+TEST_CASE("Automatic console color policy follows platform terminal detection",
+          "[logging][console][color]")
+{
+    using sparenode::logging::ConsoleColorMode;
+    using sparenode::logging::detail::resolve_console_color_mode;
+    std::ostringstream output;
+
+    CHECK(resolve_console_color_mode(output, ConsoleColorMode::automatic,
+                                     reports_interactive_terminal));
+    CHECK_FALSE(
+        resolve_console_color_mode(output, ConsoleColorMode::automatic, reports_redirected_stream));
+    CHECK(resolve_console_color_mode(output, ConsoleColorMode::enabled, reports_redirected_stream));
+    CHECK_FALSE(resolve_console_color_mode(output, ConsoleColorMode::disabled,
+                                           reports_interactive_terminal));
 }
 
 TEST_CASE("Console diagnostics color every error label without changing their layout",
@@ -93,12 +133,10 @@ TEST_CASE("Console diagnostics color every error label without changing their la
 
     sparenode::logging::write_console_diagnostic(
         output, "config.conf:2:4: error: first\nconfig.conf:3:8: error: second",
-        sparenode::logging::LogSeverity::error,
-        sparenode::logging::ConsoleColorMode::enabled);
+        sparenode::logging::LogSeverity::error, sparenode::logging::ConsoleColorMode::enabled);
 
-    CHECK(output.str() ==
-          "config.conf:2:4: \x1b[31merror:\x1b[0m first\n"
-          "config.conf:3:8: \x1b[31merror:\x1b[0m second");
+    CHECK(output.str() == "config.conf:2:4: \x1b[31merror:\x1b[0m first\n"
+                          "config.conf:3:8: \x1b[31merror:\x1b[0m second");
 }
 
 TEST_CASE("Console sink serializes independent logger instances", "[logging][console][concurrency]")
