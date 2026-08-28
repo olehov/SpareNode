@@ -60,7 +60,8 @@ TEST_CASE("Log formatting preserves structure and escapes line injection", "[log
 TEST_CASE("Console logging emits and flushes one complete line", "[logging][console]")
 {
     std::ostringstream output;
-    sparenode::logging::ConsoleLogSink sink(output);
+    sparenode::logging::ConsoleLogSink sink(
+        output, sparenode::logging::ConsoleColorMode::disabled);
     const sparenode::logging::LogRecord record{std::chrono::system_clock::time_point{},
                                                sparenode::logging::LogSeverity::info, "application",
                                                "started"};
@@ -68,6 +69,36 @@ TEST_CASE("Console logging emits and flushes one complete line", "[logging][cons
     sink.write(record);
 
     CHECK(output.str() == "[1970-01-01T00:00:00.000Z] [INFO] [application] started\n");
+}
+
+TEST_CASE("Console logging colors only the severity marker", "[logging][console][color]")
+{
+    std::ostringstream output;
+    sparenode::logging::ConsoleLogSink sink(output,
+                                            sparenode::logging::ConsoleColorMode::enabled);
+    const sparenode::logging::LogRecord record{
+        std::chrono::system_clock::time_point{}, sparenode::logging::LogSeverity::error,
+        "application", "startup failed"};
+
+    sink.write(record);
+
+    CHECK(output.str() ==
+          "[1970-01-01T00:00:00.000Z] \x1b[31m[ERROR]\x1b[0m [application] startup failed\n");
+}
+
+TEST_CASE("Console diagnostics color every error label without changing their layout",
+          "[logging][console][color]")
+{
+    std::ostringstream output;
+
+    sparenode::logging::write_console_diagnostic(
+        output, "config.conf:2:4: error: first\nconfig.conf:3:8: error: second",
+        sparenode::logging::LogSeverity::error,
+        sparenode::logging::ConsoleColorMode::enabled);
+
+    CHECK(output.str() ==
+          "config.conf:2:4: \x1b[31merror:\x1b[0m first\n"
+          "config.conf:3:8: \x1b[31merror:\x1b[0m second");
 }
 
 TEST_CASE("Console sink serializes independent logger instances", "[logging][console][concurrency]")
