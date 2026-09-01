@@ -21,7 +21,8 @@ byte offset. Malformed input never causes body-sized allocation: headers are the
 only parser-owned collection and their count and source bytes are bounded.
 
 Only origin-form targets beginning with `/` are accepted. Raw spaces, ASCII
-control bytes, fragments, obsolete folded headers, duplicate `Host`, duplicate
-`Content-Length`, bare line feeds, and versions other than HTTP/1.1 are rejected.
+control bytes, fragments, malformed percent escapes, backslashes, bytes outside
+the RFC 3986 path/query grammar, obsolete folded headers, duplicate `Host`,
+duplicate `Content-Length`, bare line feeds, and versions other than HTTP/1.1 are rejected.
 Filesystem decoding and containment remain the responsibility of `SafePath` at
 the later routing/filesystem boundary.

@@ -36,6 +36,7 @@ namespace
 
 } // namespace
 
+/// @brief Stores parser-validated borrowed request components without exposing mutation.
 HttpRequestView::HttpRequestView(const HttpMethod method, const std::string_view target,
                                  std::vector<HttpHeaderView> headers,
                                  const std::span<const std::byte> body)
@@ -43,26 +44,31 @@ HttpRequestView::HttpRequestView(const HttpMethod method, const std::string_view
 {
 }
 
+/// @brief Returns the validated method stored by the parser.
 HttpMethod HttpRequestView::method() const noexcept
 {
     return method_;
 }
 
+/// @brief Returns the validated borrowed origin-form request target.
 std::string_view HttpRequestView::target() const noexcept
 {
     return target_;
 }
 
+/// @brief Returns the complete bounded header collection without exposing mutation.
 std::span<const HttpHeaderView> HttpRequestView::fields() const noexcept
 {
     return headers_;
 }
 
+/// @brief Returns exactly the body bytes declared by Content-Length.
 std::span<const std::byte> HttpRequestView::body() const noexcept
 {
     return body_;
 }
 
+/// @brief Finds the first case-insensitive header-name match.
 std::string_view HttpRequestView::header(const std::string_view name) const noexcept
 {
     const auto match =
@@ -71,6 +77,7 @@ std::string_view HttpRequestView::header(const std::string_view name) const noex
     return match == headers_.end() ? std::string_view{} : match->value;
 }
 
+/// @brief Collects every case-insensitive header-name match in source order.
 std::vector<std::string_view> HttpRequestView::headers(const std::string_view name) const
 {
     std::vector<std::string_view> values;
@@ -86,6 +93,7 @@ std::vector<std::string_view> HttpRequestView::headers(const std::string_view na
     return values;
 }
 
+/// @brief Converts a supported method into its canonical HTTP spelling.
 std::string_view to_string(const HttpMethod method) noexcept
 {
     switch (method)

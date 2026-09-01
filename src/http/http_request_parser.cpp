@@ -33,6 +33,9 @@ struct HttpRequestViewAccess
 namespace
 {
 
+/// @brief Number of bytes in one percent-encoded URI sequence (`%HH`).
+constexpr std::size_t percent_encoded_sequence_size = 3;
+
 /// @brief Stores the byte offset immediately before a validated CRLF delimiter.
 struct LineEnd
 {
@@ -242,17 +245,72 @@ find_header_line_end(const std::string_view input, const HeaderLineSearch &searc
     return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::unsupported_method, offset});
 }
 
-/// @brief Validates the deliberately narrow origin-form request-target subset.
+/// @brief Checks whether one byte is an ASCII hexadecimal digit.
+/// @param[in] byte Byte to classify without locale-dependent behavior.
+/// @return `true` for `0-9`, `A-F`, or `a-f`.
+[[nodiscard]] constexpr bool is_hexadecimal_digit(const unsigned char byte) noexcept
+{
+    return (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'F') ||
+           (byte >= 'a' && byte <= 'f');
+}
+
+/// @brief Checks whether one byte belongs to the RFC 3986 `pchar` set.
+/// @param[in] byte Unescaped request-target byte to classify.
+/// @return `true` for an unreserved, sub-delimiter, colon, or at-sign byte.
+[[nodiscard]] constexpr bool is_path_character(const unsigned char byte) noexcept
+{
+    const bool is_alpha_numeric = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') ||
+                                  (byte >= 'a' && byte <= 'z');
+    constexpr std::string_view punctuation = "-._~!$&'()*+,;=:@";
+    return is_alpha_numeric || punctuation.find(static_cast<char>(byte)) != std::string_view::npos;
+}
+
+/// @brief Validates an RFC 3986 origin-form path and optional query.
 /// @param[in] target Request-target bytes from the request line.
-/// @return `true` when the target begins with `/` and has no forbidden bytes or fragment.
+/// @return `true` when every path, query, and percent-encoded byte is grammatical.
 [[nodiscard]] bool valid_request_target(const std::string_view target) noexcept
 {
-    if (target.empty() || target.front() != '/' || target.find('#') != std::string_view::npos)
+    if (target.empty() || target.front() != '/')
     {
         return false;
     }
-    return std::ranges::none_of(target, [](const unsigned char byte)
-                                { return byte <= 0x20U || byte == 0x7FU; });
+
+    bool query_started = false;
+    for (std::size_t index = 0; index < target.size(); ++index)
+    {
+        const auto byte = static_cast<unsigned char>(target[index]);
+        if (byte == '%')
+        {
+            if (target.size() - index < percent_encoded_sequence_size)
+            {
+                return false;
+            }
+            const std::string_view encoded_digits =
+                target.substr(index + 1, percent_encoded_sequence_size - 1);
+            if (!std::ranges::all_of(
+                    encoded_digits, [](const char digit)
+                    { return is_hexadecimal_digit(static_cast<unsigned char>(digit)); }))
+            {
+                return false;
+            }
+            index += percent_encoded_sequence_size - 1;
+            continue;
+        }
+        if (!query_started && byte == '?')
+        {
+            query_started = true;
+            continue;
+        }
+        if (byte == '/' || (query_started && byte == '?'))
+        {
+            continue;
+        }
+        if (!is_path_character(byte))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 /// @brief Parses a strict unsigned decimal Content-Length value.
@@ -483,6 +541,7 @@ parse_header_section(const std::string_view input, const std::size_t header_star
 
 } // namespace
 
+/// @brief Parses one complete bounded HTTP/1.1 request when enough bytes are available.
 Result<HttpRequestParseResult, HttpRequestParseError>
 parse_http_request(const std::span<const std::byte> input, const HttpRequestParserLimits &limits)
 {
@@ -532,6 +591,7 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
             input.subspan(parsed_headers.body_start, parsed_headers.body_size))};
 }
 
+/// @brief Converts a portable HTTP parse failure into stable diagnostic text.
 const char *to_string(const HttpRequestParseErrorCode code) noexcept
 {
     switch (code)

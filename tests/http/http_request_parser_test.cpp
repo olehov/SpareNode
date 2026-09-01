@@ -33,7 +33,7 @@ void require_error(const std::string_view source,
 TEST_CASE("HTTP request parser returns a complete borrowed request and exact boundary",
           "[http][request][parser]")
 {
-    const std::string source = "POST /files/report.txt?replace=true HTTP/1.1\r\n"
+    const std::string source = "POST /files/report%20copy.txt?next=/a?b&replace=true HTTP/1.1\r\n"
                                "Host:\t node.local \t\r\n"
                                "Content-Type: text/plain\r\n"
                                "X-Tag: first\r\n"
@@ -46,7 +46,7 @@ TEST_CASE("HTTP request parser returns a complete borrowed request and exact bou
     REQUIRE(result.has_value());
     REQUIRE(result->complete);
     CHECK(result->request.method() == sparenode::http::HttpMethod::post);
-    CHECK(result->request.target() == "/files/report.txt?replace=true");
+    CHECK(result->request.target() == "/files/report%20copy.txt?next=/a?b&replace=true");
     CHECK(result->request.header("host") == "node.local");
     CHECK(result->request.header("CONTENT-TYPE") == "text/plain");
     CHECK(result->request.header("missing").empty());
@@ -112,6 +112,11 @@ TEST_CASE("HTTP request parser rejects malformed and ambiguous protocol syntax",
         {"PATCH / HTTP/1.1\r\nHost: local\r\n\r\n", Code::unsupported_method},
         {"GET http://local/ HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
         {"GET /doc#part HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
+        {"GET /% HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
+        {"GET /%A HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
+        {"GET /%GG HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
+        {"GET /a\\b HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
+        {"GET /?value=[x] HTTP/1.1\r\nHost: local\r\n\r\n", Code::invalid_request_target},
         {"GET / HTTP/1.0\r\nHost: local\r\n\r\n", Code::unsupported_http_version},
         {"GET / HTTP/1.1\r\nBroken\r\n\r\n", Code::malformed_header},
         {"GET / HTTP/1.1\r\n Host: local\r\n\r\n", Code::folded_header},
