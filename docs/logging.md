@@ -15,6 +15,17 @@ Each terminal record is one UTC line:
 The fields are timestamp, severity, subsystem, and message. Supported severity
 levels are `debug`, `info`, `warning`, and `error`.
 
+In automatic mode, `ConsoleLogSink` colors only the severity marker on an
+interactive terminal: `DEBUG` is cyan, `INFO` is green, `WARNING` is yellow, and
+`ERROR` is red. Redirected output remains plain text in this mode. Tests and
+specialized callers can explicitly disable coloring or force it for any stream
+through `ConsoleColorMode`; forced coloring may therefore emit ANSI escape
+sequences into redirected output.
+
+Startup failures can occur before the application constructs its configured
+`Logger`. `write_console_diagnostic()` preserves their source-oriented layout
+while applying the same color policy to labels such as `error:`.
+
 ## Configuration
 
 `SPARENODE_LOG_LEVEL` controls the minimum emitted severity:
