@@ -57,8 +57,8 @@ int main(const int argc, const char *const argv[])
     if (!application_result)
     {
         const std::string diagnostic =
-            std::string("error: ") +
-            sparenode::application::to_string(application_result.error().code);
+            "error: " +
+            sparenode::application::format_application_start_error(application_result.error());
         sparenode::logging::write_console_diagnostic(std::cerr, diagnostic,
                                                      sparenode::logging::LogSeverity::error);
         std::cerr << "\nSpareNode was not started.\n";

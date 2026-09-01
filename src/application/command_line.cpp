@@ -30,6 +30,11 @@ parse_command_line(const std::span<const std::string_view> arguments)
         {
             return unexpected(CommandLineError{CommandLineErrorCode::duplicate_config, "--config"});
         }
+        if (arguments[index + 1].empty())
+        {
+            return unexpected(
+                CommandLineError{CommandLineErrorCode::missing_config_path, "--config"});
+        }
         config_path = std::filesystem::path(arguments[++index]);
     }
     if (!config_path.has_value())

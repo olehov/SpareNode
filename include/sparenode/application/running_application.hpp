@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "sparenode/configuration/runtime/app_config.hpp"
@@ -73,5 +74,10 @@ class RunningApplication final
 /// @param[in] code Failure category to describe.
 /// @return Static English diagnostic text.
 [[nodiscard]] const char *to_string(ApplicationStartErrorCode code) noexcept;
+
+/// @brief Formats every structured application startup failure field.
+/// @param[in] error Startup failure whose server and native details must be preserved.
+/// @return Non-sensitive diagnostic text suitable for the startup error boundary.
+[[nodiscard]] std::string format_application_start_error(const ApplicationStartError &error);
 
 } // namespace sparenode::application

@@ -121,6 +121,12 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 [[nodiscard]] std::string colorize_severity(std::string formatted_record,
                                             const LogSeverity severity)
 {
+    const std::string_view color = severity_color(severity);
+    if (color.empty())
+    {
+        return formatted_record;
+    }
+
     const std::string marker = '[' + std::string(to_string(severity)) + ']';
     const std::size_t marker_position = formatted_record.find(marker);
     if (marker_position == std::string::npos)
@@ -128,7 +134,6 @@ constexpr std::string_view ansi_red = "\x1b[31m";
         return formatted_record;
     }
 
-    const std::string_view color = severity_color(severity);
     formatted_record.insert(marker_position + marker.size(), ansi_reset.data(), ansi_reset.size());
     formatted_record.insert(marker_position, color.data(), color.size());
     return formatted_record;
@@ -142,6 +147,11 @@ constexpr std::string_view ansi_red = "\x1b[31m";
 {
     const std::string_view label = diagnostic_label(severity);
     const std::string_view color = severity_color(severity);
+    if (label.empty() || color.empty())
+    {
+        return diagnostic;
+    }
+
     std::size_t search_position = 0;
     while ((search_position = diagnostic.find(label, search_position)) != std::string::npos)
     {

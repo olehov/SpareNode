@@ -1,6 +1,7 @@
 #include "sparenode/application/running_application.hpp"
 
 #include <new>
+#include <sstream>
 #include <utility>
 
 namespace sparenode::application
@@ -85,6 +86,38 @@ const char *to_string(const ApplicationStartErrorCode code) noexcept
         return "application server resources could not be allocated";
     }
     return "unknown application startup error";
+}
+
+std::string format_application_start_error(const ApplicationStartError &error)
+{
+    std::ostringstream output;
+    output << to_string(error.code) << " server_index=" << error.server_index;
+    if (!error.server_error.has_value())
+    {
+        return output.str();
+    }
+
+    const network::ConnectionServerStartError &server_error = error.server_error.value();
+    output << " server_error_code="
+           << static_cast<unsigned int>(std::to_underlying(server_error.code))
+           << " native_code=" << server_error.native_code;
+    if (server_error.network_error.has_value())
+    {
+        const network::NetworkError &network_error = server_error.network_error.value();
+        output << " network_operation="
+               << static_cast<unsigned int>(std::to_underlying(network_error.operation))
+               << " network_domain="
+               << static_cast<unsigned int>(std::to_underlying(network_error.domain))
+               << " network_code=" << network_error.code;
+    }
+    if (server_error.dispatch_error.has_value())
+    {
+        const network::DispatchError &dispatch_error = server_error.dispatch_error.value();
+        output << " dispatch_code="
+               << static_cast<unsigned int>(std::to_underlying(dispatch_error.code))
+               << " dispatch_native_code=" << dispatch_error.native_code;
+    }
+    return output.str();
 }
 
 } // namespace sparenode::application

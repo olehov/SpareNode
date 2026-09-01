@@ -30,6 +30,13 @@ TEST_CASE("Command line requires exactly one explicit configuration path", "[app
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == CommandLineErrorCode::missing_config_path);
     }
+    SECTION("empty path")
+    {
+        constexpr std::array arguments{std::string_view{"--config"}, std::string_view{}};
+        const auto result = sparenode::application::parse_command_line(arguments);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error().code == CommandLineErrorCode::missing_config_path);
+    }
     SECTION("duplicate option")
     {
         constexpr std::array arguments{std::string_view{"--config"}, std::string_view{"one.conf"},

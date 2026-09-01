@@ -49,3 +49,19 @@ TEST_CASE("Running application rejects an empty runtime server collection",
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == sparenode::application::ApplicationStartErrorCode::missing_server);
 }
+
+TEST_CASE("Application startup diagnostics preserve nested server failure details",
+          "[application][startup][errors]")
+{
+    const sparenode::application::ApplicationStartError error{
+        sparenode::application::ApplicationStartErrorCode::server_start_failed, 2,
+        sparenode::network::ConnectionServerStartError{
+            sparenode::network::ConnectionServerStartErrorCode::listener_start_failed,
+            sparenode::network::NetworkError{sparenode::network::NetworkOperation::bind,
+                                             sparenode::network::NetworkErrorDomain::socket, 42},
+            std::nullopt, 7}};
+
+    CHECK(sparenode::application::format_application_start_error(error) ==
+          "configured server could not be started server_index=2 server_error_code=0 "
+          "native_code=7 network_operation=4 network_domain=2 network_code=42");
+}
