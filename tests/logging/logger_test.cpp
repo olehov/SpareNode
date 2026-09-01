@@ -146,9 +146,9 @@ TEST_CASE("Console coloring leaves unsupported severity values unmodified",
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     constexpr auto unsupported_severity = static_cast<sparenode::logging::LogSeverity>(0xFFU);
     std::ostringstream diagnostic_output;
-    sparenode::logging::write_console_diagnostic(diagnostic_output, "config.conf:1:1: diagnostic",
-                                                 unsupported_severity,
-                                                 sparenode::logging::ConsoleColorMode::enabled);
+    sparenode::logging::write_console_diagnostic(
+        diagnostic_output, "config.conf:1:1: error: diagnostic", unsupported_severity,
+        sparenode::logging::ConsoleColorMode::enabled);
 
     std::ostringstream record_output;
     sparenode::logging::ConsoleLogSink sink(record_output,
@@ -156,7 +156,7 @@ TEST_CASE("Console coloring leaves unsupported severity values unmodified",
     sink.write({std::chrono::system_clock::time_point{}, unsupported_severity, "application",
                 "diagnostic"});
 
-    CHECK(diagnostic_output.str() == "config.conf:1:1: diagnostic");
+    CHECK(diagnostic_output.str() == "config.conf:1:1: error: diagnostic");
     CHECK(record_output.str() == "[1970-01-01T00:00:00.000Z] [UNKNOWN] [application] diagnostic\n");
 }
 

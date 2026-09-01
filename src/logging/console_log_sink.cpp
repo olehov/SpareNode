@@ -172,6 +172,10 @@ bool detail::resolve_console_color_mode(const std::ostream &output, const Consol
     case ConsoleColorMode::automatic:
         return detector != nullptr && detector(output);
     case ConsoleColorMode::enabled:
+        if (detector != nullptr)
+        {
+            static_cast<void>(detector(output));
+        }
         return true;
     case ConsoleColorMode::disabled:
         return false;

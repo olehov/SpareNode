@@ -65,3 +65,20 @@ TEST_CASE("Application startup diagnostics preserve nested server failure detail
           "configured server could not be started server_index=2 server_error_code=0 "
           "native_code=7 network_operation=4 network_domain=2 network_code=42");
 }
+
+TEST_CASE("Application startup diagnostics preserve dispatcher failure details",
+          "[application][startup][errors]")
+{
+    const sparenode::application::ApplicationStartError error{
+        sparenode::application::ApplicationStartErrorCode::server_start_failed, 3,
+        sparenode::network::ConnectionServerStartError{
+            sparenode::network::ConnectionServerStartErrorCode::dispatcher_start_failed,
+            std::nullopt,
+            sparenode::network::DispatchError{
+                sparenode::network::DispatchErrorCode::worker_start_failed, 87},
+            0}};
+
+    CHECK(sparenode::application::format_application_start_error(error) ==
+          "configured server could not be started server_index=3 server_error_code=1 "
+          "native_code=0 dispatch_code=6 dispatch_native_code=87");
+}
