@@ -12,11 +12,11 @@ transferred into the dispatcher's bounded queue and processed by its fixed
 server capacity, not on the number of connected clients.
 
 `ConnectionServerConfig::multithreading_enabled` is the runtime switch populated
-from `ApplicationConfig::multithreading_enabled()`. When it is `false`, the server
-forces the dispatcher to one worker. When it is `true`, the explicit configured
-worker count is used. The setting defaults to `false`, so additional worker
-threads require an explicit opt-in. This keeps resource capacity deterministic
-while providing the requested `.env` on/off control.
+from the validated `multithreading` directive in `spnode.conf`. When it is
+`false`, the server forces the dispatcher to one worker. When it is `true`, the
+explicit `worker_threads` value is used. The setting defaults to `false`, so
+additional worker threads require an explicit opt-in. This keeps resource
+capacity deterministic.
 
 A slow connection can occupy one worker without blocking the accept loop or other
 workers. When the bounded queue is full, the accept thread waits without polling,
