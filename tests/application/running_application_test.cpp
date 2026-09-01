@@ -19,11 +19,13 @@ TEST_CASE("Running application starts from runtime settings and retains shares",
     auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
 
-    sparenode::configuration::runtime::ServerConfig server;
-    server.endpoint = {"127.0.0.1", 0};
-    server.shares.push_back({"Documents", std::move(root_result).value(), {true, false, false}});
-    sparenode::configuration::runtime::AppConfig config;
-    config.servers.push_back(std::move(server));
+    std::vector<sparenode::configuration::runtime::ShareConfig> shares;
+    shares.emplace_back("Documents", std::move(root_result).value(),
+                        sparenode::configuration::runtime::SharePermissions{true, false, false});
+    std::vector<sparenode::configuration::runtime::ServerConfig> servers;
+    servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
+                         sparenode::logging::LogSeverity::info, std::move(shares));
+    sparenode::configuration::runtime::AppConfig config(std::move(servers));
 
     auto handler = [](sparenode::network::TcpConnection, const std::stop_token &)
         -> sparenode::Result<void, sparenode::network::NetworkError> { return {}; };
@@ -35,8 +37,8 @@ TEST_CASE("Running application starts from runtime settings and retains shares",
     const auto &local_endpoint = sparenode::test::require_optional(endpoint);
     CHECK(local_endpoint.address == "127.0.0.1");
     CHECK(local_endpoint.port != 0);
-    REQUIRE(result->config().servers.front().shares.size() == 1);
-    CHECK(result->config().servers.front().shares.front().root.path() ==
+    REQUIRE(result->config().servers().front().shares().size() == 1);
+    CHECK(result->config().servers().front().shares().front().root().path() ==
           std::filesystem::canonical(directory.path()));
 }
 

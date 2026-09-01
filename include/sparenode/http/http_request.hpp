@@ -39,9 +39,6 @@ struct HttpHeaderView
 class HttpRequestView
 {
   public:
-    /// @brief Creates the empty sentinel used while a request remains incomplete.
-    HttpRequestView() = default;
-
     /// @brief Returns the validated supported HTTP method.
     /// @return Parsed request method.
     [[nodiscard]] HttpMethod method() const noexcept;

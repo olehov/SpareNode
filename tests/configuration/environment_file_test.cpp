@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "sparenode/configuration/environment_file.hpp"
 #include "support/environment_file.hpp"
@@ -16,11 +18,9 @@ TEST_CASE("Environment file preserves every parsed assignment", "[configuration]
 
     REQUIRE(result);
     REQUIRE(result->size() == 2);
-    REQUIRE(result->find("FIRST") != nullptr);
-    REQUIRE(*result->find("FIRST") == "value");
-    REQUIRE(result->find("SECOND") != nullptr);
-    REQUIRE(*result->find("SECOND") == "value with spaces");
-    REQUIRE(result->find("MISSING") == nullptr);
+    CHECK(result->find("FIRST") == std::optional<std::string_view>{"value"});
+    CHECK(result->find("SECOND") == std::optional<std::string_view>{"value with spaces"});
+    CHECK_FALSE(result->find("MISSING").has_value());
 }
 
 TEST_CASE("Environment file accepts Windows line endings", "[configuration][env]")
@@ -33,10 +33,8 @@ TEST_CASE("Environment file accepts Windows line endings", "[configuration][env]
 
     REQUIRE(result);
     REQUIRE(result->size() == 2);
-    REQUIRE(result->find("FIRST") != nullptr);
-    REQUIRE(*result->find("FIRST") == "value");
-    REQUIRE(result->find("SECOND") != nullptr);
-    REQUIRE(*result->find("SECOND") == "another value");
+    CHECK(result->find("FIRST") == std::optional<std::string_view>{"value"});
+    CHECK(result->find("SECOND") == std::optional<std::string_view>{"another value"});
 }
 
 TEST_CASE("Environment file reports a missing source", "[configuration][env]")

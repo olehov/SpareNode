@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <utility>
 
 #include "sparenode/http/http_request.hpp"
 #include "sparenode/result.hpp"
@@ -48,19 +50,68 @@ struct HttpRequestParseError
     std::size_t byte_offset{};        ///< Zero-based position associated with the failure.
 };
 
-/// @brief Represents either an incomplete buffer or one complete borrowed request.
-struct HttpRequestParseResult
+/// @brief Represents immutable progress for one borrowed HTTP request.
+class HttpRequestParseResult final
 {
-    bool complete{};              ///< Whether `request` contains a complete request.
-    std::size_t consumed_bytes{}; ///< Exact bytes belonging to the completed request.
-    HttpRequestView request;      ///< Valid only when `complete` is true.
+  public:
+    /// @brief Creates the state returned while more input bytes are required.
+    /// @return Incomplete progress with no request and zero consumed bytes.
+    [[nodiscard]] static HttpRequestParseResult incomplete() noexcept
+    {
+        return HttpRequestParseResult();
+    }
+
+    /// @brief Creates progress containing one complete validated request.
+    /// @param[in] consumed_bytes Exact bytes belonging to the request.
+    /// @param[in] request Complete borrowed request view.
+    /// @return Complete internally consistent parse progress.
+    [[nodiscard]] static HttpRequestParseResult complete(std::size_t consumed_bytes,
+                                                         HttpRequestView request)
+    {
+        return HttpRequestParseResult(consumed_bytes, std::move(request));
+    }
+
+    /// @brief Reports whether a complete request is available.
+    /// @return `true` exactly when request() contains a value.
+    [[nodiscard]] bool is_complete() const noexcept
+    {
+        return request_.has_value();
+    }
+
+    /// @brief Returns the complete request when enough bytes were supplied.
+    /// @return Borrowed request wrapped in an optional, or no value while incomplete.
+    [[nodiscard]] const std::optional<HttpRequestView> &request() const noexcept
+    {
+        return request_;
+    }
+
+    /// @brief Returns the exact completed request boundary.
+    /// @return Request byte count, or zero while incomplete.
+    [[nodiscard]] std::size_t consumed_bytes() const noexcept
+    {
+        return consumed_bytes_;
+    }
+
+  private:
+    HttpRequestParseResult() = default;
+
+    /// @brief Stores one complete parse state.
+    /// @param[in] consumed_bytes Exact bytes belonging to the request.
+    /// @param[in] request Complete borrowed request view.
+    HttpRequestParseResult(const std::size_t consumed_bytes, HttpRequestView request)
+        : consumed_bytes_(consumed_bytes), request_(std::move(request))
+    {
+    }
+
+    std::size_t consumed_bytes_{};           ///< Zero or the complete request byte count.
+    std::optional<HttpRequestView> request_; ///< Present exactly for complete input.
 };
 
 /// @brief Parses one bounded HTTP/1.1 request from a caller-owned byte buffer.
 ///
-/// Incomplete input is not an error and returns `complete == false`. The caller
+/// Incomplete input is not an error and returns `is_complete() == false`. The caller
 /// may append more bytes and invoke the function again. On completion,
-/// `consumed_bytes` excludes any bytes belonging to a following pipelined request.
+/// `consumed_bytes()` excludes bytes belonging to a following pipelined request.
 /// @param[in] input Contiguous request bytes retained for every returned view.
 /// @param[in] limits Explicit request-line, header, count, and body boundaries.
 /// @return Parse progress or a structured terminal protocol failure.

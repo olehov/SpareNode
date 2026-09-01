@@ -68,10 +68,15 @@ EnvironmentFile::load(const std::filesystem::path &source_path)
     return EnvironmentFile(std::move(variables));
 }
 
-const std::string *EnvironmentFile::find(const std::string_view variable) const noexcept
+std::optional<std::string_view>
+EnvironmentFile::find(const std::string_view variable) const noexcept
 {
     const auto position = variables_.find(variable);
-    return position == variables_.end() ? nullptr : &position->second;
+    if (position == variables_.end())
+    {
+        return std::nullopt;
+    }
+    return position->second;
 }
 
 std::size_t EnvironmentFile::size() const noexcept

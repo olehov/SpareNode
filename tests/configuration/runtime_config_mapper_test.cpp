@@ -57,17 +57,17 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
 
     const auto runtime_config = sparenode::configuration::RuntimeConfigMapper::map(validated);
 
-    REQUIRE(runtime_config.servers.size() == 1);
-    const auto &server = runtime_config.servers.front();
-    CHECK(server.endpoint == sparenode::network::TcpEndpoint{"0.0.0.0", 8080});
-    CHECK_FALSE(server.multithreading_enabled);
-    CHECK(server.worker_threads == 1);
+    REQUIRE(runtime_config.servers().size() == 1);
+    const auto &server = runtime_config.servers().front();
+    CHECK(server.endpoint() == sparenode::network::TcpEndpoint{"0.0.0.0", 8080});
+    CHECK_FALSE(server.multithreading_enabled());
+    CHECK(server.worker_threads() == 1);
     CHECK(server.effective_worker_count() == 1);
-    CHECK(server.minimum_log_severity == sparenode::logging::LogSeverity::info);
-    REQUIRE(server.shares.size() == 1);
-    CHECK(server.shares.front().name == "Documents");
-    CHECK(server.shares.front().root.path() == std::filesystem::canonical(directory.path()));
-    CHECK(server.shares.front().permissions ==
+    CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::info);
+    REQUIRE(server.shares().size() == 1);
+    CHECK(server.shares().front().name() == "Documents");
+    CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
+    CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{true, false, false});
 }
 
@@ -84,14 +84,14 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
 
     const auto runtime_config = sparenode::configuration::RuntimeConfigMapper::map(validated);
 
-    REQUIRE(runtime_config.servers.size() == 1);
-    const auto &server = runtime_config.servers.front();
-    CHECK(server.endpoint == sparenode::network::TcpEndpoint{"::1", 8443});
-    CHECK(server.multithreading_enabled);
-    CHECK(server.worker_threads == 8);
+    REQUIRE(runtime_config.servers().size() == 1);
+    const auto &server = runtime_config.servers().front();
+    CHECK(server.endpoint() == sparenode::network::TcpEndpoint{"::1", 8443});
+    CHECK(server.multithreading_enabled());
+    CHECK(server.worker_threads() == 8);
     CHECK(server.effective_worker_count() == 8);
-    CHECK(server.minimum_log_severity == sparenode::logging::LogSeverity::warning);
-    REQUIRE(server.shares.size() == 1);
-    CHECK(server.shares.front().permissions ==
+    CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::warning);
+    REQUIRE(server.shares().size() == 1);
+    CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{false, true, true});
 }

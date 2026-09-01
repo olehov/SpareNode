@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
 #include "sparenode/configuration/directives/parsed_share_directive.hpp"
@@ -18,11 +19,28 @@ namespace
 using directives::ServerDirectiveKind;
 using directives::ShareDirectiveKind;
 
+/// @brief Holds mapper-local server values before immutable runtime construction.
+struct ServerValues
+{
+    network::TcpEndpoint endpoint{"0.0.0.0", 8080}; ///< Default listener endpoint.
+    bool multithreading_enabled{false};             ///< Default single-worker switch.
+    std::size_t worker_threads{1};                  ///< Default worker count.
+    logging::LogSeverity minimum_log_severity{logging::LogSeverity::info}; ///< Default threshold.
+};
+
+/// @brief Holds mapper-local permission values before immutable runtime construction.
+struct PermissionValues
+{
+    bool allow_read{true};    ///< Default read permission.
+    bool allow_write{false};  ///< Default write permission.
+    bool allow_delete{false}; ///< Default delete permission.
+};
+
 /// @brief Applies one validated server directive to its runtime destination.
 /// @param[in] directive Parsed directive whose semantic constraints already passed.
 /// @param[in,out] server Runtime server settings receiving the mapped value.
 void apply_server_directive(const directives::ParsedServerDirective &directive,
-                            runtime::ServerConfig &server)
+                            ServerValues &server)
 {
     switch (directive.kind)
     {
@@ -54,7 +72,7 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
 /// @param[in] directive Parsed directive whose semantic constraints already passed.
 /// @param[in,out] permissions Runtime permission flags receiving the mapped value.
 void apply_share_directive(const directives::ParsedShareDirective &directive,
-                           runtime::SharePermissions &permissions)
+                           PermissionValues &permissions)
 {
     switch (directive.kind)
     {
@@ -76,8 +94,7 @@ void apply_share_directive(const directives::ParsedShareDirective &directive,
 
 runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration)
 {
-    runtime::AppConfig result;
-    runtime::ServerConfig server;
+    ServerValues server;
     const auto &parsed_server = configuration.parsed().server;
     for (const auto &directive : parsed_server.directives)
     {
@@ -85,19 +102,25 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
     }
 
     const auto &roots = configuration.shared_roots();
-    server.shares.reserve(parsed_server.shares.size());
+    std::vector<runtime::ShareConfig> shares;
+    shares.reserve(parsed_server.shares.size());
     for (std::size_t index = 0; index < parsed_server.shares.size(); ++index)
     {
         const auto &parsed_share = parsed_server.shares[index];
-        runtime::SharePermissions permissions;
+        PermissionValues permissions;
         for (const auto &directive : parsed_share.directives)
         {
             apply_share_directive(directive, permissions);
         }
-        server.shares.push_back(runtime::ShareConfig{parsed_share.name, roots[index], permissions});
+        shares.emplace_back(parsed_share.name, roots[index],
+                            runtime::SharePermissions{permissions.allow_read,
+                                                      permissions.allow_write,
+                                                      permissions.allow_delete});
     }
-    result.servers.push_back(std::move(server));
-    return result;
+    std::vector<runtime::ServerConfig> servers;
+    servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
+                         server.worker_threads, server.minimum_log_severity, std::move(shares));
+    return runtime::AppConfig(std::move(servers));
 }
 
 } // namespace sparenode::configuration

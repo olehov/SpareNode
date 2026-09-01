@@ -17,7 +17,7 @@ Result<ApplicationConfig, ApplicationConfigError>
 ApplicationConfig::create(const EnvironmentFile &environment)
 {
     logging::LogSeverity minimum_log_severity = logging::LogSeverity::info;
-    if (const auto *value = environment.find(log_level_variable_name); value != nullptr)
+    if (const auto value = environment.find(log_level_variable_name); value.has_value())
     {
         const auto parsed_severity = logging::parse_log_severity(*value);
         if (!parsed_severity.has_value())
@@ -30,7 +30,7 @@ ApplicationConfig::create(const EnvironmentFile &environment)
     }
 
     bool multithreading_enabled = false;
-    if (const auto *value = environment.find(multithreading_variable_name); value != nullptr)
+    if (const auto value = environment.find(multithreading_variable_name); value.has_value())
     {
         if (value->empty())
         {
@@ -54,8 +54,8 @@ ApplicationConfig::create(const EnvironmentFile &environment)
         }
     }
 
-    const auto *shared_root_value = environment.find(shared_root_variable_name);
-    if (shared_root_value == nullptr)
+    const auto shared_root_value = environment.find(shared_root_variable_name);
+    if (!shared_root_value.has_value())
     {
         return unexpected(ApplicationConfigError{ApplicationConfigErrorCode::missing_shared_root,
                                                  std::string(shared_root_variable_name),

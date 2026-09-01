@@ -24,22 +24,22 @@ Result<RunningApplication, ApplicationStartError>
 RunningApplication::start(configuration::runtime::AppConfig config,
                           network::ConnectionHandler handler)
 {
-    if (config.servers.empty())
+    if (config.servers().empty())
     {
         return unexpected(ApplicationStartError{ApplicationStartErrorCode::missing_server, 0, {}});
     }
     try
     {
         std::vector<network::ConnectionServer> servers;
-        servers.reserve(config.servers.size());
-        for (std::size_t index = 0; index < config.servers.size(); ++index)
+        servers.reserve(config.servers().size());
+        for (std::size_t index = 0; index < config.servers().size(); ++index)
         {
-            const auto &settings = config.servers[index];
+            const auto &settings = config.servers()[index];
             network::ConnectionServerConfig server_config{
-                settings.endpoint,
+                settings.endpoint(),
                 listen_backlog,
-                settings.multithreading_enabled,
-                {{settings.worker_threads, pending_connection_limit}, handler, {}},
+                settings.multithreading_enabled(),
+                {{settings.worker_threads(), pending_connection_limit}, handler, {}},
                 {}};
             auto server_result = network::ConnectionServer::start(std::move(server_config));
             if (!server_result)

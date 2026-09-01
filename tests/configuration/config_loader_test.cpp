@@ -84,15 +84,15 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     const auto result = sparenode::configuration::ConfigLoader::load(path);
 
     REQUIRE(result.has_value());
-    REQUIRE(result->servers.size() == 1);
-    const auto &server = result->servers.front();
-    CHECK(server.endpoint.address == "127.0.0.1");
-    CHECK(server.endpoint.port == 8181);
+    REQUIRE(result->servers().size() == 1);
+    const auto &server = result->servers().front();
+    CHECK(server.endpoint().address == "127.0.0.1");
+    CHECK(server.endpoint().port == 8181);
     CHECK(server.effective_worker_count() == 3);
-    CHECK(server.minimum_log_severity == sparenode::logging::LogSeverity::warning);
-    REQUIRE(server.shares.size() == 1);
-    CHECK(server.shares.front().root.path() == std::filesystem::canonical(directory.path()));
-    CHECK(server.shares.front().permissions ==
+    CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::warning);
+    REQUIRE(server.shares().size() == 1);
+    CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
+    CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{false, true, true});
 }
 

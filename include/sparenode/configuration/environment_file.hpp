@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -47,9 +48,9 @@ class EnvironmentFile final
 
     /// @brief Finds a parsed environment variable without copying its value.
     /// @param[in] variable Variable name to look up exactly.
-    /// @return Pointer to the stored value, or `nullptr` when the variable is absent.
-    /// @warning The returned pointer remains valid only while this object is alive.
-    [[nodiscard]] const std::string *find(std::string_view variable) const noexcept;
+    /// @return Borrowed value, or no value when the variable is absent.
+    /// @warning A returned view remains valid only while this object is alive and unmoved.
+    [[nodiscard]] std::optional<std::string_view> find(std::string_view variable) const noexcept;
 
     /// @brief Reports how many distinct assignments were loaded.
     /// @return Number of stored environment variables.
