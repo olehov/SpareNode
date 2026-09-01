@@ -547,7 +547,7 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
 {
     if (input.empty())
     {
-        return HttpRequestParseResult{};
+        return HttpRequestParseResult::incomplete();
     }
     const std::string_view text(reinterpret_cast<const char *>(input.data()), input.size());
     auto request_line_end_result = find_request_line_end(text, limits.max_request_line_bytes);
@@ -557,7 +557,7 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
     }
     if (!request_line_end_result->has_value())
     {
-        return HttpRequestParseResult{};
+        return HttpRequestParseResult::incomplete();
     }
 
     const std::size_t request_line_end = request_line_end_result->value_or(LineEnd{}).offset;
@@ -576,19 +576,19 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
     }
     if (!header_result->has_value())
     {
-        return HttpRequestParseResult{};
+        return HttpRequestParseResult::incomplete();
     }
     ParsedHeaderSection parsed_headers = header_result->value_or(ParsedHeaderSection{});
     if (input.size() - parsed_headers.body_start < parsed_headers.body_size)
     {
-        return HttpRequestParseResult{};
+        return HttpRequestParseResult::incomplete();
     }
 
-    return HttpRequestParseResult{
-        true, parsed_headers.body_start + parsed_headers.body_size,
+    return HttpRequestParseResult::complete(
+        parsed_headers.body_start + parsed_headers.body_size,
         detail::HttpRequestViewAccess::create(
             method_result.value(), target, std::move(parsed_headers.headers),
-            input.subspan(parsed_headers.body_start, parsed_headers.body_size))};
+            input.subspan(parsed_headers.body_start, parsed_headers.body_size)));
 }
 
 /// @brief Converts a portable HTTP parse failure into stable diagnostic text.

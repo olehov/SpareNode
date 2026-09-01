@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "sparenode/http/http_request_parser.hpp"
+#include "support/optional.hpp"
 
 namespace
 {
@@ -44,21 +45,22 @@ TEST_CASE("HTTP request parser returns a complete borrowed request and exact bou
     const auto result = sparenode::http::parse_http_request(as_bytes(source));
 
     REQUIRE(result.has_value());
-    REQUIRE(result->complete);
-    CHECK(result->request.method() == sparenode::http::HttpMethod::post);
-    CHECK(result->request.target() == "/files/report%20copy.txt?next=/a?b&replace=true");
-    CHECK(result->request.header("host") == "node.local");
-    CHECK(result->request.header("CONTENT-TYPE") == "text/plain");
-    CHECK(result->request.header("missing").empty());
-    const auto tag_values = result->request.headers("X-TAG");
+    REQUIRE(result->is_complete());
+    const auto &request = sparenode::test::require_optional(result->request());
+    CHECK(request.method() == sparenode::http::HttpMethod::post);
+    CHECK(request.target() == "/files/report%20copy.txt?next=/a?b&replace=true");
+    CHECK(request.header("host") == "node.local");
+    CHECK(request.header("CONTENT-TYPE") == "text/plain");
+    CHECK(request.header("missing").empty());
+    const auto tag_values = request.headers("X-TAG");
     REQUIRE(tag_values.size() == 2);
     CHECK(tag_values[0] == "first");
     CHECK(tag_values[1] == "second");
-    const std::span body_bytes = result->request.body();
+    const std::span body_bytes = request.body();
     const std::string_view body(reinterpret_cast<const char *>(body_bytes.data()),
                                 body_bytes.size());
     CHECK(body == "hello");
-    CHECK(source.substr(result->consumed_bytes) == "NEXT");
+    CHECK(source.substr(result->consumed_bytes()) == "NEXT");
 }
 
 TEST_CASE("HTTP request parser accepts the documented method subset", "[http][request][parser]")
@@ -78,8 +80,9 @@ TEST_CASE("HTTP request parser accepts the documented method subset", "[http][re
             const std::string source = std::string(text) + " / HTTP/1.1\r\nHost: localhost\r\n\r\n";
             const auto result = sparenode::http::parse_http_request(as_bytes(source));
             REQUIRE(result.has_value());
-            REQUIRE(result->complete);
-            CHECK(result->request.method() == expected);
+            REQUIRE(result->is_complete());
+            const auto &request = sparenode::test::require_optional(result->request());
+            CHECK(request.method() == expected);
             CHECK(sparenode::http::to_string(expected) == text);
         }
     }
@@ -96,8 +99,9 @@ TEST_CASE("HTTP request parser distinguishes incomplete input from malformed inp
     {
         const auto result = sparenode::http::parse_http_request(as_bytes(source));
         REQUIRE(result.has_value());
-        CHECK(!result->complete);
-        CHECK(result->consumed_bytes == 0);
+        CHECK(!result->is_complete());
+        CHECK(!result->request().has_value());
+        CHECK(result->consumed_bytes() == 0);
     }
 }
 

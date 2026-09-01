@@ -47,7 +47,7 @@ int main(const int argc, const char *const argv[])
     }
 
     const auto console_sink = std::make_shared<sparenode::logging::ConsoleLogSink>(std::clog);
-    const auto minimum_severity = config_result->servers.front().minimum_log_severity;
+    const auto minimum_severity = config_result->servers().front().minimum_log_severity();
     const sparenode::logging::Logger logger(console_sink, minimum_severity);
 
     auto handler = [](sparenode::network::TcpConnection, const std::stop_token &)
