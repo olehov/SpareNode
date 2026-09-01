@@ -127,9 +127,7 @@ them.
 
 The persistent [`spnode.conf` format](docs/configuration-format.md) is the sole
 startup source of network, threading, logging, share, and permission settings.
-Legacy `.env` values are no longer read by the executable, so there is no ambiguous
-precedence between configuration sources. `config/spnode.conf.example` demonstrates
-the supported format.
+`config/spnode.conf.example` demonstrates the supported format.
 
 The first implementation stage is the platform-independent
 [`ConfigLexer`](docs/configuration-lexer.md), which produces source-located
@@ -139,10 +137,10 @@ semantics.
 ## Logging
 
 SpareNode emits structured, thread-safe lifecycle and failure diagnostics to the
-terminal. `SPARENODE_LOG_LEVEL` selects the minimum severity from `debug`, `info`,
-`warning`, or `error`, and defaults to `info` when omitted. Log records escape
-control characters and initial integration excludes configuration values, shared
-paths, credentials, tokens, session identifiers, and file contents. See the
+terminal. The `log_level` server directive selects the minimum severity from
+`debug`, `info`, `warning`, or `error`, and defaults to `info` when omitted. Log
+records escape control characters and initial integration excludes configuration
+values, shared paths, credentials, tokens, session identifiers, and file contents. See the
 [application logging guide](docs/logging.md) for the format, concurrency model,
 network observers, and testing contract.
 

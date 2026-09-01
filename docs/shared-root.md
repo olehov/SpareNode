@@ -1,36 +1,38 @@
 # Shared-root configuration
 
-SpareNode v0.1 exposes exactly one host directory. The directory is selected in
-a `.env` file in the process working directory:
+SpareNode v0.1 exposes exactly one host directory. The directory is selected by
+the required `path` directive inside the sole `share` block of `spnode.conf`:
 
-```dotenv
+```conf
 # Windows
-SPARENODE_SHARED_ROOT=D:\Share
+server {
+    share "Documents" {
+        path "D:\\Share";
+    }
+}
 ```
 
-```dotenv
+```conf
 # Linux
-SPARENODE_SHARED_ROOT=/home/user/share
+server {
+    share "Documents" {
+        path "/home/user/share";
+    }
+}
 ```
 
-Copy `.env.example` to `.env`, then replace the example value. Values containing
-spaces may be enclosed in matching single or double quotes. Blank lines,
-comments beginning with `#`, and unrelated variables are supported.
-
-`EnvironmentFile` parses and preserves every `KEY=VALUE` assignment without
-knowing which settings SpareNode currently uses. It rejects malformed lines and
-duplicates of any variable. `ApplicationConfig` then interprets the variables
-it understands, beginning with `SPARENODE_SHARED_ROOT`. Adding another setting
-therefore does not require extending the environment-file parser.
+Copy `config/spnode.conf.example` to `config/spnode.conf`, update the share path,
+and start SpareNode with `--config config/spnode.conf`. Configuration strings use
+double quotes; backslashes must be escaped, while forward slashes are also valid
+on Windows. See the [configuration format](configuration-format.md) for the full
+grammar and supported directives.
 
 The supplied path must already exist and identify a directory. SpareNode
-resolves it to a canonical absolute path before storing the configuration. A
-missing `.env`, malformed entry, duplicate variable, absent
-`SPARENODE_SHARED_ROOT`, regular file, or unresolvable path prevents startup and
-produces a diagnostic.
-
-The local `.env` is ignored by Git. `.env.example` documents the required key
-without committing a machine-specific filesystem path.
+resolves it to a canonical absolute path before creating runtime settings. A
+missing configuration file, absent or duplicate `path` directive, regular file,
+or unresolvable path prevents startup and produces a source-located diagnostic.
+The local `config/spnode.conf` is ignored by Git so machine-specific paths are
+not committed.
 
 ## Security boundary
 

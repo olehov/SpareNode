@@ -59,10 +59,11 @@ compile_commands.json
 *.bak
 *.swp
 
-# Local application configuration
+# Local environment files
 .env
 .env.*
-!.env.example
+
+# Local application configuration
 /config/spnode.conf
 /config/manual-tests/
 

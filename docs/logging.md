@@ -28,13 +28,19 @@ while applying the same color policy to labels such as `error:`.
 
 ## Configuration
 
-`SPARENODE_LOG_LEVEL` controls the minimum emitted severity:
+The `log_level` server directive controls the minimum emitted severity:
 
-```dotenv
-SPARENODE_LOG_LEVEL=info
+```conf
+server {
+    log_level "info";
+
+    share "Documents" {
+        path "/srv/documents";
+    }
+}
 ```
 
-Values are case-sensitive. Omitting the variable safely defaults to `info`.
+Values are case-sensitive. Omitting the directive safely defaults to `info`.
 An empty or unsupported value prevents startup with a structured configuration
 error. Records below the selected level are discarded before timestamp or
 message storage is allocated.
