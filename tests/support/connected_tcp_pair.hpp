@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -130,6 +131,17 @@ class TestClientSocket final
         return ::recv(socket_, &byte, 1, MSG_PEEK) == 0;
 #else
         return ::recv(socket_, &byte, sizeof(byte), MSG_PEEK) == 0;
+#endif
+    }
+
+    /// Receives one caller-bounded payload from the connected server socket.
+    [[nodiscard]] std::ptrdiff_t receive(const std::span<std::byte> bytes) const noexcept
+    {
+#ifdef _WIN32
+        return ::recv(socket_, reinterpret_cast<char *>(bytes.data()),
+                      static_cast<int>(bytes.size()), 0);
+#else
+        return ::recv(socket_, bytes.data(), bytes.size(), 0);
 #endif
     }
 

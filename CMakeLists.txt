@@ -50,6 +50,8 @@ add_library(sparenode_core STATIC
     src/filesystem/safe_path.cpp
     src/http/http_request.cpp
     src/http/http_request_parser.cpp
+    src/http/http_response.cpp
+    src/http/http_response_writer.cpp
     src/logging/console_log_sink.cpp
     src/logging/logger.cpp
     src/logging/log_severity.cpp
