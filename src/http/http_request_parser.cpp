@@ -1,5 +1,7 @@
 #include "sparenode/http/http_request_parser.hpp"
 
+#include "sparenode/http/detail/host_authority.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <optional>
@@ -424,13 +426,19 @@ parse_header_field(const std::string_view line, const std::size_t line_start)
         return unexpected(
             HttpRequestParseError{HttpRequestParseErrorCode::malformed_header, line_start});
     }
-    const std::string_view value = trim_optional_whitespace(line.substr(colon + 1));
+    const std::string_view untrimmed_value = line.substr(colon + 1);
+    const std::size_t leading_whitespace = untrimmed_value.find_first_not_of(" \t");
+    const std::string_view value = trim_optional_whitespace(untrimmed_value);
     if (!valid_header_value(value))
     {
         return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::malformed_header,
                                                 line_start + colon + 1});
     }
-    return ParsedHeaderField{{name, value}, line_start, line_start + colon + 1};
+    const std::size_t value_start =
+        line_start + colon + 1 +
+        (leading_whitespace == std::string_view::npos ? untrimmed_value.size()
+                                                      : leading_whitespace);
+    return ParsedHeaderField{{name, value}, line_start, value_start};
 }
 
 /// @brief Applies Host and message-framing rules to one syntactically valid field.
@@ -454,6 +462,11 @@ apply_header_field(const ParsedHeaderField &parsed, const HttpRequestParserLimit
         {
             return unexpected(
                 HttpRequestParseError{HttpRequestParseErrorCode::missing_host, parsed.value_start});
+        }
+        if (!detail::is_valid_host_authority(field.value))
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::invalid_host, parsed.value_start});
         }
         state.host_seen = true;
     }
@@ -624,6 +637,8 @@ const char *to_string(const HttpRequestParseErrorCode code) noexcept
         return "HTTP/1.1 Host header is missing";
     case HttpRequestParseErrorCode::duplicate_host:
         return "HTTP/1.1 Host header is repeated";
+    case HttpRequestParseErrorCode::invalid_host:
+        return "HTTP/1.1 Host header is invalid";
     case HttpRequestParseErrorCode::invalid_content_length:
         return "HTTP Content-Length is invalid";
     case HttpRequestParseErrorCode::duplicate_content_length:

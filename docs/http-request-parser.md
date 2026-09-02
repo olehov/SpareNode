@@ -2,7 +2,7 @@
 
 SpareNode implements a deliberately narrow HTTP/1.1 request subset. The parser
 accepts `GET`, `HEAD`, `POST`, `PUT`, `DELETE`, and `OPTIONS`, requires one
-non-empty `Host` header, supports one decimal `Content-Length`, and rejects
+syntactically valid `Host` header, supports one decimal `Content-Length`, and rejects
 `Transfer-Encoding`. Rejecting ambiguous length mechanisms prevents request
 smuggling between future protocol layers.
 
@@ -19,6 +19,16 @@ supply `HttpRequestParserLimits` appropriate to a configured server. Limit and
 syntax failures are represented by `HttpRequestParseErrorCode` with the source
 byte offset. Malformed input never causes body-sized allocation: headers are the
 only parser-owned collection and their count and source bytes are bounded.
+
+The required `Host` field uses a deliberately strict, allocation-free ASCII
+authority subset. It accepts DNS-style names of at most 253 bytes with labels
+of at most 63 bytes and an optional terminal root dot, strict four-octet
+dotted-decimal IPv4 addresses, and bracketed IPv6 literals. IPv6 literals may
+use zero compression and may end with an embedded IPv4 address. An optional
+decimal port must be between 0 and 65535, including after a terminal root dot.
+Whitespace, underscores, malformed labels or literals, unbracketed IPv6, IPv6
+zone identifiers, empty ports, and out-of-range numeric components are rejected
+as `invalid_host` before routing.
 
 Only origin-form targets beginning with `/` are accepted. Raw spaces, ASCII
 control bytes, fragments, malformed percent escapes, backslashes, bytes outside

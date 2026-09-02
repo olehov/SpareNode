@@ -105,6 +105,135 @@ TEST_CASE("HTTP request parser distinguishes incomplete input from malformed inp
     }
 }
 
+TEST_CASE("HTTP request parser accepts supported Host authority forms",
+          "[http][request][parser][host]")
+{
+    const std::array valid_hosts{
+        std::string_view{"localhost"},
+        std::string_view{"node.local"},
+        std::string_view{"sub-domain.example.com"},
+        std::string_view{"example.com."},
+        std::string_view{"example.com.:80"},
+        std::string_view{"EXAMPLE.COM:443"},
+        std::string_view{"example.com:0"},
+        std::string_view{"example.com:65535"},
+        std::string_view{"127.0.0.1"},
+        std::string_view{"192.168.1.10:8080"},
+        std::string_view{"[::1]"},
+        std::string_view{"[::]"},
+        std::string_view{"[2001:db8::1]:443"},
+        std::string_view{"[2001:0db8:85a3:0000:0000:8a2e:0370:7334]"},
+        std::string_view{"[1:2:3:4:5:6:1.2.3.4]"},
+        std::string_view{"[1:2:3:4:5:6:7::]"},
+        std::string_view{"[::ffff:192.0.2.128]:8080"},
+    };
+
+    for (const std::string_view host : valid_hosts)
+    {
+        DYNAMIC_SECTION(host)
+        {
+            const std::string source = "GET / HTTP/1.1\r\nHost: " + std::string(host) + "\r\n\r\n";
+            const auto result = sparenode::http::parse_http_request(as_bytes(source));
+            REQUIRE(result.has_value());
+            REQUIRE(result->is_complete());
+            const auto &request = sparenode::test::require_optional(result->request());
+            CHECK(request.header("Host") == host);
+        }
+    }
+}
+
+TEST_CASE("HTTP request parser rejects malformed Host authority forms",
+          "[http][request][parser][host][errors]")
+{
+    const std::array invalid_hosts{
+        std::string_view{"bad host"},
+        std::string_view{"bad\thost"},
+        std::string_view{"example..com"},
+        std::string_view{"example.com.."},
+        std::string_view{"-example.com"},
+        std::string_view{"example-.com"},
+        std::string_view{"under_score.example"},
+        std::string_view{"example.com:"},
+        std::string_view{"example.com:65536"},
+        std::string_view{"example.com:http"},
+        std::string_view{"example.com:80:90"},
+        std::string_view{"256.0.0.1"},
+        std::string_view{"1.2.3"},
+        std::string_view{"1.2.3.4."},
+        std::string_view{"01.2.3.4"},
+        std::string_view{"::1"},
+        std::string_view{"[::1"},
+        std::string_view{"[]"},
+        std::string_view{"[::1]extra"},
+        std::string_view{"[::1]:"},
+        std::string_view{"[::1]:65536"},
+        std::string_view{"[::1]:80:90"},
+        std::string_view{"[1::2::3]"},
+        std::string_view{"[1.2.3.4]"},
+        std::string_view{"[1:2:3:4:5:6:7:]"},
+        std::string_view{"[:1:2]"},
+        std::string_view{"[1:2:3:4:5:6:7]"},
+        std::string_view{"[1:2:3:4:5:6:7:8:9]"},
+        std::string_view{"[192.0.2.1::]"},
+        std::string_view{"1.2.3.4::"},
+        std::string_view{"[::ffff:999.0.0.1]"},
+    };
+
+    for (const std::string_view host : invalid_hosts)
+    {
+        DYNAMIC_SECTION(host)
+        {
+            const std::string source = "GET / HTTP/1.1\r\nHost: " + std::string(host) + "\r\n\r\n";
+            const auto result = sparenode::http::parse_http_request(as_bytes(source));
+            REQUIRE(!result.has_value());
+            CHECK(result.error().code == sparenode::http::HttpRequestParseErrorCode::invalid_host);
+            CHECK(result.error().byte_offset == source.find(host));
+        }
+    }
+}
+
+TEST_CASE("HTTP request parser trims Host whitespace and reports the value offset",
+          "[http][request][parser][host]")
+{
+    const std::string valid_source = "GET / HTTP/1.1\r\nHost:\t example.com \t\r\n\r\n";
+    const auto valid = sparenode::http::parse_http_request(as_bytes(valid_source));
+    REQUIRE(valid.has_value());
+    REQUIRE(valid->is_complete());
+    const auto &request = sparenode::test::require_optional(valid->request());
+    CHECK(request.header("Host") == "example.com");
+
+    const std::string invalid_source = "GET / HTTP/1.1\r\nHost:\t bad host \t\r\n\r\n";
+    const auto invalid = sparenode::http::parse_http_request(as_bytes(invalid_source));
+    REQUIRE(!invalid.has_value());
+    CHECK(invalid.error().code == sparenode::http::HttpRequestParseErrorCode::invalid_host);
+    CHECK(invalid.error().byte_offset == invalid_source.find("bad host"));
+}
+
+TEST_CASE("HTTP request parser enforces Host DNS length boundaries",
+          "[http][request][parser][host][limits]")
+{
+    const std::string maximum_label(63, 'a');
+    const std::string maximum_hostname =
+        maximum_label + '.' + maximum_label + '.' + maximum_label + '.' + std::string(61, 'a');
+    const std::string valid_source = "GET / HTTP/1.1\r\nHost: " + maximum_hostname + "\r\n\r\n";
+    const auto valid = sparenode::http::parse_http_request(as_bytes(valid_source));
+    REQUIRE(valid.has_value());
+    CHECK(valid->is_complete());
+
+    const std::array oversized_hosts{
+        std::string(64, 'a') + ".example",
+        maximum_label + '.' + maximum_label + '.' + maximum_label + '.' + std::string(62, 'a'),
+    };
+    for (const std::string &host : oversized_hosts)
+    {
+        DYNAMIC_SECTION(host.size())
+        {
+            const std::string source = "GET / HTTP/1.1\r\nHost: " + host + "\r\n\r\n";
+            require_error(source, sparenode::http::HttpRequestParseErrorCode::invalid_host);
+        }
+    }
+}
+
 TEST_CASE("HTTP request parser rejects malformed and ambiguous protocol syntax",
           "[http][request][parser][errors]")
 {
@@ -228,6 +357,7 @@ TEST_CASE("HTTP request parser error descriptions are stable", "[http][request][
         std::pair{Code::folded_header, std::string_view{"folded HTTP headers are not supported"}},
         std::pair{Code::missing_host, std::string_view{"HTTP/1.1 Host header is missing"}},
         std::pair{Code::duplicate_host, std::string_view{"HTTP/1.1 Host header is repeated"}},
+        std::pair{Code::invalid_host, std::string_view{"HTTP/1.1 Host header is invalid"}},
         std::pair{Code::invalid_content_length, std::string_view{"HTTP Content-Length is invalid"}},
         std::pair{Code::duplicate_content_length,
                   std::string_view{"HTTP Content-Length is repeated"}},
