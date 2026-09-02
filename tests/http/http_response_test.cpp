@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <future>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -39,6 +42,33 @@ using HttpStatusCode = sparenode::http::HttpStatusCode;
         offset += static_cast<std::size_t>(count);
     }
     return {reinterpret_cast<const char *>(received.data()), received.size()};
+}
+
+[[nodiscard]] std::optional<std::string>
+receive_exact_within(const sparenode::test::TestClientSocket &client,
+                     const std::size_t expected_size, const std::chrono::milliseconds timeout)
+{
+    std::vector<std::byte> received(expected_size);
+    std::size_t offset = 0;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (offset < received.size())
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+        {
+            return std::nullopt;
+        }
+        const auto remaining =
+            (std::max)(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now),
+                       std::chrono::milliseconds{1});
+        const auto count = client.receive_within(std::span(received).subspan(offset), remaining);
+        if (!count.has_value() || count.value() <= 0)
+        {
+            return std::nullopt;
+        }
+        offset += static_cast<std::size_t>(count.value());
+    }
+    return std::string(reinterpret_cast<const char *>(received.data()), received.size());
 }
 
 [[nodiscard]] sparenode::http::HttpResponse make_memory_response(const std::string_view body)
@@ -168,13 +198,37 @@ TEST_CASE("HTTP response writer streams through a fixed caller-bounded destinati
     auto response = std::move(response_result).value();
     const std::string expected = sparenode::http::serialize_http_response_head(response) + payload;
     auto pair = sparenode::test::create_connected_tcp_pair();
+    std::stop_source writer_stop_source;
+    constexpr auto test_timeout = std::chrono::seconds{5};
 
-    const auto result = sparenode::http::write_http_response(pair.server, response);
+    auto writer = std::async(std::launch::async,
+                             [&pair, &response, &writer_stop_source]
+                             {
+                                 return sparenode::http::write_http_response(
+                                     pair.server, response, writer_stop_source.get_token());
+                             });
+    const auto received = receive_exact_within(pair.client, expected.size(), test_timeout);
+    if (!received.has_value())
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+    }
 
+    bool writer_finished = writer.wait_for(test_timeout) == std::future_status::ready;
+    if (!writer_finished)
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+        writer_finished = writer.wait_for(test_timeout) == std::future_status::ready;
+    }
+
+    REQUIRE(writer_finished);
+    const auto result = writer.get();
     REQUIRE(result.has_value());
+    const auto &complete_response = sparenode::test::require_optional(received);
     CHECK(source_offset == payload.size());
     CHECK(largest_destination <= std::size_t{16} * 1024);
-    CHECK(receive_exact(pair.client, expected.size()) == expected);
+    CHECK(complete_response == expected);
 }
 
 TEST_CASE("HTTP response writer preserves body source failures", "[http][response][error]")

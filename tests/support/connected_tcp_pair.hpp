@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -142,6 +143,45 @@ class TestClientSocket final
                       static_cast<int>(bytes.size()), 0);
 #else
         return ::recv(socket_, bytes.data(), bytes.size(), 0);
+#endif
+    }
+
+    /// Waits for readability and then receives one caller-bounded payload.
+    /// @param[out] bytes Storage receiving available server bytes.
+    /// @param[in] timeout Maximum time spent waiting for readable data.
+    /// @return Native receive count, or no value when the wait does not become readable.
+    [[nodiscard]] std::optional<std::ptrdiff_t>
+    receive_within(const std::span<std::byte> bytes,
+                   const std::chrono::milliseconds timeout) const noexcept
+    {
+        fd_set readable{};
+        FD_ZERO(&readable);
+        FD_SET(socket_, &readable);
+
+        const auto total_milliseconds = timeout.count();
+        timeval native_timeout{
+            static_cast<long>(total_milliseconds / 1000),
+            static_cast<long>((total_milliseconds % 1000) * 1000),
+        };
+#ifdef _WIN32
+        const int ready = ::select(0, &readable, nullptr, nullptr, &native_timeout);
+#else
+        const int ready = ::select(socket_ + 1, &readable, nullptr, nullptr, &native_timeout);
+#endif
+        if (ready != 1)
+        {
+            return std::nullopt;
+        }
+        return receive(bytes);
+    }
+
+    /// Interrupts pending test I/O without releasing the native socket handle.
+    void shutdown() const noexcept
+    {
+#ifdef _WIN32
+        static_cast<void>(::shutdown(socket_, SD_BOTH));
+#else
+        static_cast<void>(::shutdown(socket_, SHUT_RDWR));
 #endif
     }
 
