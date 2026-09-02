@@ -24,6 +24,7 @@ add_executable(sparenode_tests
     configuration/shared_root_test.cpp
     filesystem/safe_path_test.cpp
     http/http_request_parser_test.cpp
+    http/http_response_test.cpp
     logging/logger_test.cpp
     network/accept_wait_test.cpp
     network/connection_dispatcher_test.cpp

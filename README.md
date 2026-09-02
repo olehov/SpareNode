@@ -115,6 +115,13 @@ connections can be scheduled through the
 [bounded connection dispatcher](docs/connection-dispatcher.md) without creating
 one permanent thread per client.
 
+## HTTP transport
+
+The bounded [HTTP request parser](docs/http-request-parser.md) validates the
+supported HTTP/1.1 request subset without owning request bytes. Outgoing messages
+use the [HTTP response and streaming layer](docs/http-response.md), which supports
+validated in-memory responses and fixed-buffer incremental body transmission.
+
 ## Shared directory
 
 SpareNode requires an explicit `--config <path>` argument selecting `spnode.conf`.
