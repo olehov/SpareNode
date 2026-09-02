@@ -113,6 +113,7 @@ TEST_CASE("HTTP request parser accepts supported Host authority forms",
         std::string_view{"node.local"},
         std::string_view{"sub-domain.example.com"},
         std::string_view{"example.com."},
+        std::string_view{"example.com.:80"},
         std::string_view{"EXAMPLE.COM:443"},
         std::string_view{"example.com:0"},
         std::string_view{"example.com:65535"},
@@ -122,6 +123,8 @@ TEST_CASE("HTTP request parser accepts supported Host authority forms",
         std::string_view{"[::]"},
         std::string_view{"[2001:db8::1]:443"},
         std::string_view{"[2001:0db8:85a3:0000:0000:8a2e:0370:7334]"},
+        std::string_view{"[1:2:3:4:5:6:1.2.3.4]"},
+        std::string_view{"[1:2:3:4:5:6:7::]"},
         std::string_view{"[::ffff:192.0.2.128]:8080"},
     };
 
@@ -166,9 +169,13 @@ TEST_CASE("HTTP request parser rejects malformed Host authority forms",
         std::string_view{"[::1]:65536"},
         std::string_view{"[::1]:80:90"},
         std::string_view{"[1::2::3]"},
+        std::string_view{"[1.2.3.4]"},
+        std::string_view{"[1:2:3:4:5:6:7:]"},
+        std::string_view{"[:1:2]"},
         std::string_view{"[1:2:3:4:5:6:7]"},
         std::string_view{"[1:2:3:4:5:6:7:8:9]"},
         std::string_view{"[192.0.2.1::]"},
+        std::string_view{"1.2.3.4::"},
         std::string_view{"[::ffff:999.0.0.1]"},
     };
 
@@ -183,6 +190,23 @@ TEST_CASE("HTTP request parser rejects malformed Host authority forms",
             CHECK(result.error().byte_offset == source.find(host));
         }
     }
+}
+
+TEST_CASE("HTTP request parser trims Host whitespace and reports the value offset",
+          "[http][request][parser][host]")
+{
+    const std::string valid_source = "GET / HTTP/1.1\r\nHost:\t example.com \t\r\n\r\n";
+    const auto valid = sparenode::http::parse_http_request(as_bytes(valid_source));
+    REQUIRE(valid.has_value());
+    REQUIRE(valid->is_complete());
+    const auto &request = sparenode::test::require_optional(valid->request());
+    CHECK(request.header("Host") == "example.com");
+
+    const std::string invalid_source = "GET / HTTP/1.1\r\nHost:\t bad host \t\r\n\r\n";
+    const auto invalid = sparenode::http::parse_http_request(as_bytes(invalid_source));
+    REQUIRE(!invalid.has_value());
+    CHECK(invalid.error().code == sparenode::http::HttpRequestParseErrorCode::invalid_host);
+    CHECK(invalid.error().byte_offset == invalid_source.find("bad host"));
 }
 
 TEST_CASE("HTTP request parser enforces Host DNS length boundaries",
