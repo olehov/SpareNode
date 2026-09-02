@@ -38,6 +38,7 @@ enum class HttpRequestParseErrorCode : std::uint8_t
     folded_header,                ///< Obsolete line folding was supplied.
     missing_host,                 ///< Required HTTP/1.1 Host field is absent or empty.
     duplicate_host,               ///< More than one Host field was supplied.
+    invalid_host,                 ///< Host does not match the supported authority grammar.
     invalid_content_length,       ///< Content-Length is empty, non-decimal, or overflowing.
     duplicate_content_length,     ///< More than one Content-Length field was supplied.
     unsupported_transfer_encoding ///< Transfer-Encoding is intentionally unsupported.
