@@ -70,8 +70,8 @@ class TcpConnection final
     /// @param[out] buffer Destination storage for received bytes.
     /// @param[in] options Stop token and optional absolute monotonic deadline.
     /// @return The transferred byte count, or a structured network error.
-    [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
-                                                            const NetworkIoOptions &options);
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    receive_with_options(std::span<std::byte> buffer, const NetworkIoOptions &options);
 
     /// @brief Waits for and sends at most one caller-provided buffer of bytes.
     ///
@@ -95,8 +95,8 @@ class TcpConnection final
     /// @param[in] buffer Bytes available for transmission.
     /// @param[in] options Stop token and optional absolute monotonic deadline.
     /// @return The transferred byte count, or a structured network error.
-    [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
-                                                         const NetworkIoOptions &options);
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    send_with_options(std::span<const std::byte> buffer, const NetworkIoOptions &options);
 
   private:
     /// @brief Platform-specific implementation hidden from the public API.

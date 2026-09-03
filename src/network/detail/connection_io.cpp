@@ -34,7 +34,7 @@ perform_io(const ConnectionIoContext &context, const SocketWaitRequest request,
 {
     while (true)
     {
-        const auto wait_result = wait_for_socket(context.wait, request, options);
+        const auto wait_result = wait_for_socket_with_options(context.wait, request, options);
         if (!wait_result)
         {
             return unexpected(wait_result.error());
@@ -94,11 +94,13 @@ ConnectionIo::ConnectionIo(const ConnectionIoContext &context) noexcept : contex
 Result<std::size_t, NetworkError> ConnectionIo::receive(const std::span<std::byte> buffer,
                                                         const std::stop_token &stop_token)
 {
-    return receive(buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+    return receive_with_options(
+        buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
 }
 
-Result<std::size_t, NetworkError> ConnectionIo::receive(const std::span<std::byte> buffer,
-                                                        const NetworkIoOptions &options)
+Result<std::size_t, NetworkError>
+ConnectionIo::receive_with_options(const std::span<std::byte> buffer,
+                                   const NetworkIoOptions &options)
 {
     return perform_io(
         context_,
@@ -109,11 +111,13 @@ Result<std::size_t, NetworkError> ConnectionIo::receive(const std::span<std::byt
 Result<std::size_t, NetworkError> ConnectionIo::send(const std::span<const std::byte> buffer,
                                                      const std::stop_token &stop_token)
 {
-    return send(buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+    return send_with_options(buffer,
+                             NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
 }
 
-Result<std::size_t, NetworkError> ConnectionIo::send(const std::span<const std::byte> buffer,
-                                                     const NetworkIoOptions &options)
+Result<std::size_t, NetworkError>
+ConnectionIo::send_with_options(const std::span<const std::byte> buffer,
+                                const NetworkIoOptions &options)
 {
     return perform_io(
         context_, {.interest = SocketWaitInterest::writable, .operation = NetworkOperation::send},

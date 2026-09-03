@@ -277,6 +277,15 @@ TEST_CASE("TCP connection I/O rejects moved-from state", "[network][tcp][io][sta
     REQUIRE_FALSE(sent.has_value());
     CHECK(sent.error().operation == sparenode::network::NetworkOperation::send);
     CHECK(sent.error().domain == sparenode::network::NetworkErrorDomain::state);
+
+    const auto received_with_empty_token = pair.server.receive(buffer, {});
+    REQUIRE_FALSE(received_with_empty_token.has_value());
+    CHECK(received_with_empty_token.error().domain ==
+          sparenode::network::NetworkErrorDomain::state);
+
+    const auto sent_with_empty_token = pair.server.send(std::span<const std::byte>(buffer), {});
+    REQUIRE_FALSE(sent_with_empty_token.has_value());
+    CHECK(sent_with_empty_token.error().domain == sparenode::network::NetworkErrorDomain::state);
     CHECK(connection.is_open());
 }
 
@@ -305,7 +314,8 @@ TEST_CASE("TCP receive expires through the native monotonic deadline",
     std::array<std::byte, 1> buffer{};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{25};
 
-    const auto received = pair.server.receive(buffer, {.stop_token = {}, .deadline = deadline});
+    const auto received =
+        pair.server.receive_with_options(buffer, {.stop_token = {}, .deadline = deadline});
 
     REQUIRE_FALSE(received.has_value());
     CHECK(received.error().operation == sparenode::network::NetworkOperation::receive);
@@ -314,7 +324,7 @@ TEST_CASE("TCP receive expires through the native monotonic deadline",
     CHECK(pair.server.is_open());
 
     constexpr std::string_view payload = "x";
-    const auto sent = pair.server.send(
+    const auto sent = pair.server.send_with_options(
         bytes_of(payload), {.stop_token = {}, .deadline = std::chrono::steady_clock::now()});
     REQUIRE_FALSE(sent.has_value());
     CHECK(sent.error().operation == sparenode::network::NetworkOperation::send);
@@ -330,7 +340,8 @@ TEST_CASE("TCP receive succeeds when data arrives before its deadline",
     std::array<std::byte, 8> buffer{};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
 
-    const auto received = pair.server.receive(buffer, {.stop_token = {}, .deadline = deadline});
+    const auto received =
+        pair.server.receive_with_options(buffer, {.stop_token = {}, .deadline = deadline});
 
     REQUIRE(received.has_value());
     CHECK(received.value() == payload.size());
@@ -345,8 +356,8 @@ TEST_CASE("TCP I/O gives pre-requested cancellation priority over an expired dea
     std::array<std::byte, 1> buffer{};
 
     const auto received =
-        pair.server.receive(buffer, {.stop_token = stop_source.get_token(),
-                                     .deadline = std::chrono::steady_clock::now()});
+        pair.server.receive_with_options(buffer, {.stop_token = stop_source.get_token(),
+                                                  .deadline = std::chrono::steady_clock::now()});
 
     REQUIRE_FALSE(received.has_value());
     check_cancelled(received.error(), sparenode::network::NetworkOperation::receive);

@@ -178,8 +178,10 @@ TEST_CASE("Connection I/O maps deadline expiry without attempting a transfer",
     auto result_future = result_promise.get_future();
 
     std::jthread transfer_thread(
-        [&] {
-            result_promise.set_value(io.receive(buffer, {.stop_token = {}, .deadline = deadline}));
+        [&]
+        {
+            result_promise.set_value(
+                io.receive_with_options(buffer, {.stop_token = {}, .deadline = deadline}));
         });
     poller.wait_until_entered();
     poller.complete_with_timeout();
@@ -197,8 +199,8 @@ TEST_CASE("Connection I/O maps deadline expiry without attempting a transfer",
     std::jthread send_thread(
         [&]
         {
-            send_promise.set_value(io.send(std::span<const std::byte>(buffer),
-                                           {.stop_token = {}, .deadline = deadline}));
+            send_promise.set_value(io.send_with_options(std::span<const std::byte>(buffer),
+                                                        {.stop_token = {}, .deadline = deadline}));
         });
     poller.wait_until_entered();
     poller.complete_with_timeout();

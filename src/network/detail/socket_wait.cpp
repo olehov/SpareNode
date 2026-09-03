@@ -295,13 +295,13 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &
                                                        const SocketWaitRequest request,
                                                        const std::stop_token &stop_token)
 {
-    return wait_for_socket(context, request,
-                           NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+    return wait_for_socket_with_options(
+        context, request, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
 }
 
-Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
-                                                       const SocketWaitRequest request,
-                                                       const NetworkIoOptions &options)
+Result<SocketWaitStatus, NetworkError>
+wait_for_socket_with_options(const SocketWaitContext &context, const SocketWaitRequest request,
+                             const NetworkIoOptions &options)
 {
     if (options.stop_token.stop_requested())
     {

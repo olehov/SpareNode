@@ -135,7 +135,7 @@ wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request,
 /// @param[in] options Stop token and optional absolute monotonic deadline.
 /// @return Readiness, cancellation, or timeout status; or a structured poll error.
 [[nodiscard]] Result<SocketWaitStatus, NetworkError>
-wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request,
-                const NetworkIoOptions &options);
+wait_for_socket_with_options(const SocketWaitContext &context, SocketWaitRequest request,
+                             const NetworkIoOptions &options);
 
 } // namespace sparenode::network::detail

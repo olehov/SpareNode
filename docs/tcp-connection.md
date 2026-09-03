@@ -60,7 +60,7 @@ const sparenode::network::NetworkIoOptions options{
     .stop_token = stop_token,
     .deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10},
 };
-const auto result = connection.receive(buffer, options);
+const auto result = connection.receive_with_options(buffer, options);
 ```
 
 Absolute monotonic deadlines remain stable across wall-clock adjustments and

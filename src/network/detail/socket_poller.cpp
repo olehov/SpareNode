@@ -109,11 +109,12 @@ native_timeout_milliseconds(const std::optional<NetworkDeadline> &deadline) noex
         return -1;
     }
 
-    const auto remaining = deadline.value() - std::chrono::steady_clock::now();
-    if (remaining <= NetworkDeadline::duration::zero())
+    const auto now = std::chrono::steady_clock::now();
+    if (deadline.value() <= now)
     {
         return 0;
     }
+    const auto remaining = deadline.value() - now;
 
     const auto remaining_milliseconds = std::chrono::ceil<std::chrono::milliseconds>(remaining);
     constexpr auto maximum_native_timeout =

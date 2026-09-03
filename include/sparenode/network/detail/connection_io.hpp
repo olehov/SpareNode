@@ -107,8 +107,8 @@ class ConnectionIo final
     /// @param[out] buffer Destination storage for received bytes.
     /// @param[in] options Stop token and optional absolute monotonic deadline.
     /// @return Transferred byte count, or a structured receive, cancellation, or timeout error.
-    [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
-                                                            const NetworkIoOptions &options);
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    receive_with_options(std::span<std::byte> buffer, const NetworkIoOptions &options);
 
     /// @brief Runs one cancellable, possibly partial send operation.
     /// @param[in] buffer Bytes available for transmission.
@@ -121,8 +121,8 @@ class ConnectionIo final
     /// @param[in] buffer Bytes available for transmission.
     /// @param[in] options Stop token and optional absolute monotonic deadline.
     /// @return Transferred byte count, or a structured send, cancellation, or timeout error.
-    [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
-                                                         const NetworkIoOptions &options);
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    send_with_options(std::span<const std::byte> buffer, const NetworkIoOptions &options);
 
   private:
     /// @brief Non-owning dependencies that must outlive this coordinator.
