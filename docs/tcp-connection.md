@@ -7,6 +7,7 @@ descriptor.
 
 ```cpp
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <stop_token>
 
@@ -51,13 +52,33 @@ and a native operation completes before the stop request is observed, the byte
 count is returned and the transfer wins that race. The caller can check its stop
 token before starting another operation.
 
+Deadline-aware calls use `NetworkIoOptions` with an absolute
+`std::chrono::steady_clock::time_point`:
+
+```cpp
+const sparenode::network::NetworkIoOptions options{
+    .stop_token = stop_token,
+    .deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10},
+};
+const auto result = connection.receive_with_options(buffer, options);
+```
+
+Absolute monotonic deadlines remain stable across wall-clock adjustments and
+allow callers to reuse one budget across retries. Expiry returns the original
+`receive` or `send` operation with the portable `timeout` domain and code zero.
+When cancellation and timeout are both observable at the same boundary,
+cancellation wins. Readiness already returned by the native poller is allowed to
+perform one transfer attempt; reaching the deadline immediately afterward does
+not discard a successful byte count.
+
 Internally, accepted sockets are nonblocking. SpareNode waits with `WSAPoll` on
 Windows or `poll` on Linux and uses a private authenticated loopback wake channel
 for stoppable waits. The channel is created lazily on the first cancellable
 operation and reused by later sequential operations on the same connection.
 `ConnectionIo` groups the socket, poller, wake channel, and native transfer
 operations behind one internal coordinator, so those stable dependencies are not
-passed separately through each call layer. There is no periodic timeout or
+passed separately through each call layer. Deadline expiry is implemented by the
+bounded native poll timeout; there is no timer thread, periodic polling, or
 busy-wait loop. POSIX sends suppress `SIGPIPE`, allowing peer disconnection to be
 returned as a structured socket error instead of terminating the process.
 

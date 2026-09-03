@@ -53,6 +53,8 @@ namespace
         return "state";
     case network::NetworkErrorDomain::cancellation:
         return "cancellation";
+    case network::NetworkErrorDomain::timeout:
+        return "timeout";
     }
     return "unknown";
 }

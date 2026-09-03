@@ -1,12 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <future>
 #include <stop_token>
 #include <thread>
 
+#include "sparenode/network/detail/native_socket_owner.hpp"
 #include "sparenode/network/detail/socket_wait.hpp"
 #include "support/fake_socket_poller.hpp"
+#include "support/optional.hpp"
 
 namespace
 {
@@ -332,4 +336,102 @@ TEST_CASE("Cancellable socket waits reuse their wake channel", "[network][tcp][i
     check_cancellable_wait(sparenode::network::detail::SocketWaitInterest::writable,
                            sparenode::network::NetworkOperation::send, wake_channel);
     CHECK(wake_channel.reader() == first_reader);
+}
+
+TEST_CASE("Socket wait forwards and reports an absolute deadline",
+          "[network][tcp][io][timeout][unit]")
+{
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours{1};
+    std::promise<WaitResult> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::jthread wait_thread(
+        [&]
+        {
+            result_promise.set_value(sparenode::network::detail::wait_for_socket_with_options(
+                wait_context(poller, wake_channel),
+                {.interest = sparenode::network::detail::SocketWaitInterest::readable,
+                 .operation = sparenode::network::NetworkOperation::receive},
+                {.stop_token = {}, .deadline = deadline}));
+        });
+
+    poller.wait_until_entered();
+    CHECK(sparenode::test::require_optional(poller.deadline()) == deadline);
+    poller.complete_with_timeout();
+
+    const auto result = result_future.get();
+    wait_thread.join();
+    REQUIRE(result.has_value());
+    CHECK(result.value() == sparenode::network::detail::SocketWaitStatus::timed_out);
+    CHECK_FALSE(wake_channel.is_initialized());
+}
+
+TEST_CASE("Socket wait gives observable cancellation priority over timeout",
+          "[network][tcp][io][timeout][cancel][unit]")
+{
+    const auto runtime_result = sparenode::network::detail::ensure_socket_runtime();
+    REQUIRE(runtime_result.has_value());
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    std::stop_source stop_source;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours{1};
+    std::promise<WaitResult> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::jthread wait_thread(
+        [&]
+        {
+            result_promise.set_value(sparenode::network::detail::wait_for_socket_with_options(
+                wait_context(poller, wake_channel),
+                {.interest = sparenode::network::detail::SocketWaitInterest::readable,
+                 .operation = sparenode::network::NetworkOperation::receive},
+                {.stop_token = stop_source.get_token(), .deadline = deadline}));
+        });
+
+    poller.wait_until_entered();
+    REQUIRE(stop_source.request_stop());
+    poller.complete_with_timeout();
+
+    const auto result = result_future.get();
+    wait_thread.join();
+    REQUIRE(result.has_value());
+    CHECK(result.value() == sparenode::network::detail::SocketWaitStatus::cancelled);
+}
+
+TEST_CASE("Socket wait rejects an already expired deadline without native resources",
+          "[network][tcp][io][timeout][unit]")
+{
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    const auto result = sparenode::network::detail::wait_for_socket_with_options(
+        wait_context(poller, wake_channel),
+        {.interest = sparenode::network::detail::SocketWaitInterest::readable,
+         .operation = sparenode::network::NetworkOperation::receive},
+        {.stop_token = {}, .deadline = std::chrono::steady_clock::now()});
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == sparenode::network::detail::SocketWaitStatus::timed_out);
+    CHECK_FALSE(wake_channel.is_initialized());
+}
+
+TEST_CASE("Native socket polling treats the minimum deadline as expired",
+          "[network][tcp][io][timeout][unit]")
+{
+    const auto runtime_result = sparenode::network::detail::ensure_socket_runtime();
+    REQUIRE(runtime_result.has_value());
+    sparenode::network::detail::NativeSocketOwner socket(
+        ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+    REQUIRE(socket.get() != sparenode::network::detail::invalid_socket);
+    sparenode::network::detail::NativeSocketPoller poller;
+    std::array<sparenode::network::detail::SocketPollEntry, 1> entries{{
+        {.socket = socket.get(), .watch_readable = true},
+    }};
+
+    const auto result = poller.wait(entries, sparenode::network::NetworkOperation::receive,
+                                    (sparenode::network::NetworkDeadline::min)());
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == sparenode::network::detail::SocketPollStatus::timed_out);
 }

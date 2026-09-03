@@ -29,6 +29,7 @@ enum class NetworkErrorDomain : std::uint8_t
     socket,             ///< The host socket API reported an error.
     state,              ///< The object is not open or is otherwise unusable.
     cancellation,       ///< A caller-provided stop token requested cancellation.
+    timeout,            ///< An absolute monotonic I/O deadline expired.
 };
 
 /// @brief A structured network failure without sensitive diagnostic text.
@@ -43,7 +44,7 @@ struct NetworkError
     /// @brief Native or SpareNode-defined numeric error code.
     ///
     /// Depending on domain, this is errno, WSAGetLastError(), getaddrinfo(), or
-    /// a SpareNode-defined state or cancellation code.
+    /// a SpareNode-defined validation, state, cancellation, or timeout code.
     int code{};
 
     /// @brief Compares every structured error field.

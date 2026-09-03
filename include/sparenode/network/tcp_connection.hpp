@@ -7,6 +7,7 @@
 #include <stop_token>
 
 #include "sparenode/network/network_error.hpp"
+#include "sparenode/network/network_io_options.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "sparenode/result.hpp"
 
@@ -65,6 +66,13 @@ class TcpConnection final
     [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
                                                             const std::stop_token &stop_token);
 
+    /// @brief Receives bytes with combined cancellation and deadline control.
+    /// @param[out] buffer Destination storage for received bytes.
+    /// @param[in] options Stop token and optional absolute monotonic deadline.
+    /// @return The transferred byte count, or a structured network error.
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    receive_with_options(std::span<std::byte> buffer, const NetworkIoOptions &options);
+
     /// @brief Waits for and sends at most one caller-provided buffer of bytes.
     ///
     /// A successful operation may send fewer bytes than supplied; callers that
@@ -82,6 +90,13 @@ class TcpConnection final
     /// @return The transferred byte count, or a structured network error.
     [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
                                                          const std::stop_token &stop_token);
+
+    /// @brief Sends bytes with combined cancellation and deadline control.
+    /// @param[in] buffer Bytes available for transmission.
+    /// @param[in] options Stop token and optional absolute monotonic deadline.
+    /// @return The transferred byte count, or a structured network error.
+    [[nodiscard]] Result<std::size_t, NetworkError>
+    send_with_options(std::span<const std::byte> buffer, const NetworkIoOptions &options);
 
   private:
     /// @brief Platform-specific implementation hidden from the public API.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <future>
 #include <span>
@@ -162,6 +163,55 @@ TEST_CASE("Blocked connection send cancellation is deterministic",
           "[network][tcp][io][unit][cancel]")
 {
     check_blocked_transfer_cancellation(false);
+}
+
+TEST_CASE("Connection I/O maps deadline expiry without attempting a transfer",
+          "[network][tcp][io][unit][timeout]")
+{
+    sparenode::test::FakeSocketPoller poller;
+    sparenode::test::FakeSocketOperations operations;
+    sparenode::network::detail::SocketWakeChannel wake_channel;
+    auto io = connection_io(poller, wake_channel, operations);
+    std::array<std::byte, 8> buffer{};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours{1};
+    std::promise<TransferResult> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::jthread transfer_thread(
+        [&]
+        {
+            result_promise.set_value(
+                io.receive_with_options(buffer, {.stop_token = {}, .deadline = deadline}));
+        });
+    poller.wait_until_entered();
+    poller.complete_with_timeout();
+
+    const auto result = result_future.get();
+    transfer_thread.join();
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(result.error().code == 0);
+    CHECK(operations.receive_calls() == 0);
+
+    std::promise<TransferResult> send_promise;
+    auto send_future = send_promise.get_future();
+    std::jthread send_thread(
+        [&]
+        {
+            send_promise.set_value(io.send_with_options(std::span<const std::byte>(buffer),
+                                                        {.stop_token = {}, .deadline = deadline}));
+        });
+    poller.wait_until_entered();
+    poller.complete_with_timeout();
+
+    const auto sent = send_future.get();
+    send_thread.join();
+    REQUIRE_FALSE(sent.has_value());
+    CHECK(sent.error().operation == sparenode::network::NetworkOperation::send);
+    CHECK(sent.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(sent.error().code == 0);
+    CHECK(operations.send_calls() == 0);
 }
 
 TEST_CASE("Connection receive does not retry would-block after hangup readiness",

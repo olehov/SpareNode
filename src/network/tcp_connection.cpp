@@ -53,6 +53,15 @@ Result<std::size_t, NetworkError> TcpConnection::receive(const std::span<std::by
 Result<std::size_t, NetworkError> TcpConnection::receive(const std::span<std::byte> buffer,
                                                          const std::stop_token &stop_token)
 {
+    return receive_with_options(
+        buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+}
+
+// Receives with caller-provided cancellation and absolute-deadline control.
+Result<std::size_t, NetworkError>
+TcpConnection::receive_with_options(const std::span<std::byte> buffer,
+                                    const NetworkIoOptions &options)
+{
     if (!is_open())
     {
         return unexpected(NetworkError{NetworkOperation::receive, NetworkErrorDomain::state, 1});
@@ -63,7 +72,7 @@ Result<std::size_t, NetworkError> TcpConnection::receive(const std::span<std::by
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::validation, 1});
     }
 
-    return impl_->io.receive(buffer, stop_token);
+    return impl_->io.receive_with_options(buffer, options);
 }
 
 // Sends bytes without allocating a cancellation wake channel.
@@ -76,6 +85,15 @@ Result<std::size_t, NetworkError> TcpConnection::send(const std::span<const std:
 Result<std::size_t, NetworkError> TcpConnection::send(const std::span<const std::byte> buffer,
                                                       const std::stop_token &stop_token)
 {
+    return send_with_options(buffer,
+                             NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+}
+
+// Sends with caller-provided cancellation and absolute-deadline control.
+Result<std::size_t, NetworkError>
+TcpConnection::send_with_options(const std::span<const std::byte> buffer,
+                                 const NetworkIoOptions &options)
+{
     if (!is_open())
     {
         return unexpected(NetworkError{NetworkOperation::send, NetworkErrorDomain::state, 1});
@@ -85,7 +103,7 @@ Result<std::size_t, NetworkError> TcpConnection::send(const std::span<const std:
         return unexpected(NetworkError{NetworkOperation::send, NetworkErrorDomain::validation, 1});
     }
 
-    return impl_->io.send(buffer, stop_token);
+    return impl_->io.send_with_options(buffer, options);
 }
 
 } // namespace sparenode::network

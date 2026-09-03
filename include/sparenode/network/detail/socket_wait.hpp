@@ -6,6 +6,7 @@
 
 #include "sparenode/network/detail/native_socket.hpp"
 #include "sparenode/network/detail/socket_poller.hpp"
+#include "sparenode/network/network_io_options.hpp"
 
 namespace sparenode::network::detail
 {
@@ -24,6 +25,7 @@ enum class SocketWaitStatus : std::uint8_t
     socket_error,  ///< The poller reported a socket error.
     socket_hangup, ///< The poller reported a peer hangup.
     cancelled,     ///< The stop token requested cancellation.
+    timed_out,     ///< The absolute monotonic deadline expired.
 };
 
 /// @brief Describes the readiness event and public operation represented by one wait.
@@ -122,5 +124,18 @@ wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request);
 [[nodiscard]] Result<SocketWaitStatus, NetworkError>
 wait_for_socket(const SocketWaitContext &context, SocketWaitRequest request,
                 const std::stop_token &stop_token);
+
+/// @brief Waits for one socket with combined cancellation and deadline control.
+///
+/// Cancellation wins when it is already observable at the same boundary as timeout.
+/// Socket readiness returned by the native poller is not rejected merely because the
+/// clock reaches the deadline immediately afterward.
+/// @param[in] context Borrowed stable socket and wait collaborators.
+/// @param[in] request Readiness interest and public operation metadata.
+/// @param[in] options Stop token and optional absolute monotonic deadline.
+/// @return Readiness, cancellation, or timeout status; or a structured poll error.
+[[nodiscard]] Result<SocketWaitStatus, NetworkError>
+wait_for_socket_with_options(const SocketWaitContext &context, SocketWaitRequest request,
+                             const NetworkIoOptions &options);
 
 } // namespace sparenode::network::detail
