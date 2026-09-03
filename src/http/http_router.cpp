@@ -11,12 +11,18 @@ namespace
 
 constexpr std::size_t percent_encoded_sequence_size = 3;
 
+/// @brief Checks one ASCII byte for hexadecimal digit syntax.
+/// @param[in] byte Byte to classify.
+/// @return `true` for an ASCII decimal digit or `A` through `F` in either case.
 [[nodiscard]] constexpr bool is_hexadecimal_digit(const unsigned char byte) noexcept
 {
     return (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'F') ||
            (byte >= 'a' && byte <= 'f');
 }
 
+/// @brief Checks one unescaped byte against the supported RFC 3986 path character set.
+/// @param[in] byte Byte to classify.
+/// @return `true` when the byte may appear within one registered path segment.
 [[nodiscard]] constexpr bool is_route_path_character(const unsigned char byte) noexcept
 {
     const bool is_alpha_numeric = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') ||
@@ -25,6 +31,9 @@ constexpr std::size_t percent_encoded_sequence_size = 3;
     return is_alpha_numeric || punctuation.contains(static_cast<char>(byte));
 }
 
+/// @brief Validates one exact or terminal-wildcard route pattern.
+/// @param[in] pattern Candidate absolute origin path.
+/// @return `true` when the complete pattern belongs to the supported route grammar.
 [[nodiscard]] bool is_valid_pattern(const std::string_view pattern) noexcept
 {
     if (pattern.empty() || pattern.front() != '/' || pattern.contains('?') || pattern.contains('#'))
@@ -66,24 +75,43 @@ constexpr std::size_t percent_encoded_sequence_size = 3;
     return true;
 }
 
+/// @brief Removes the optional query component from a validated request target.
+/// @param[in] target Complete origin-form request target.
+/// @return Borrowed path component including its leading slash.
 [[nodiscard]] std::string_view request_path(const std::string_view target) noexcept
 {
     const std::size_t query = target.find('?');
     return target.substr(0, query);
 }
 
+/// @brief Tests one request path against a normalized route prefix.
+/// @param[in] wildcard Whether the prefix captures every remaining byte.
+/// @param[in] prefix Exact route path or wildcard prefix.
+/// @param[in] path Request path to test.
+/// @return `true` when the route accepts the complete path.
 [[nodiscard]] bool path_matches(const bool wildcard, const std::string_view prefix,
                                 const std::string_view path) noexcept
 {
     return wildcard ? path.starts_with(prefix) : path == prefix;
 }
 
+/// @brief Extracts the request bytes captured by a matching wildcard route.
+/// @param[in] wildcard Whether the selected route has a terminal wildcard.
+/// @param[in] prefix Normalized route prefix.
+/// @param[in] path Matched request path.
+/// @return Borrowed suffix, or an empty view for an exact route.
 [[nodiscard]] std::string_view captured_suffix(const bool wildcard, const std::string_view prefix,
                                                const std::string_view path) noexcept
 {
     return wildcard ? path.substr(prefix.size()) : std::string_view{};
 }
 
+/// @brief Orders two matching routes by exactness and prefix length.
+/// @param[in] candidate_wildcard Whether the candidate uses a wildcard.
+/// @param[in] candidate_prefix_size Candidate prefix length.
+/// @param[in] current_wildcard Whether the current selection uses a wildcard.
+/// @param[in] current_prefix_size Current selection prefix length.
+/// @return `true` when the candidate must replace the current selection.
 [[nodiscard]] bool is_more_specific(const bool candidate_wildcard,
                                     const std::size_t candidate_prefix_size,
                                     const bool current_wildcard,
@@ -96,6 +124,11 @@ constexpr std::size_t percent_encoded_sequence_size = 3;
     return candidate_prefix_size > current_prefix_size;
 }
 
+/// @brief Constructs one router-owned empty response through the validated response API.
+/// @param[in] status_code Standard routing status.
+/// @param[in] reason_phrase Standard routing reason phrase.
+/// @param[in] headers Optional response fields transferred into the response.
+/// @return Valid response or an internal response-validation failure.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
 make_routing_response(const HttpStatusCode status_code, std::string reason_phrase,
                       std::vector<HttpResponseHeader> headers = {})
@@ -109,6 +142,9 @@ make_routing_response(const HttpStatusCode status_code, std::string reason_phras
     return std::move(response).value();
 }
 
+/// @brief Converts a supported method into its dense route-table index.
+/// @param[in] method Validated method enumeration.
+/// @return Zero-based method index.
 [[nodiscard]] constexpr std::size_t method_index(const HttpMethod method) noexcept
 {
     return static_cast<std::size_t>(method);
@@ -116,16 +152,19 @@ make_routing_response(const HttpStatusCode status_code, std::string reason_phras
 
 } // namespace
 
+/// @brief Stores one wildcard suffix borrowed from the current request path.
 HttpRouteParameters::HttpRouteParameters(const std::string_view wildcard_suffix) noexcept
     : wildcard_suffix_(wildcard_suffix)
 {
 }
 
+/// @brief Returns the wildcard suffix captured for the selected route.
 std::string_view HttpRouteParameters::wildcard_suffix() const noexcept
 {
     return wildcard_suffix_;
 }
 
+/// @brief Validates and stores one bounded method-and-path route.
 Result<void, HttpRouteRegistrationError>
 HttpRouter::register_route(const HttpMethod method, std::string pattern, HttpRouteHandler handler)
 {
@@ -165,6 +204,7 @@ HttpRouter::register_route(const HttpMethod method, std::string pattern, HttpRou
     return {};
 }
 
+/// @brief Selects the most specific method-and-path handler for one request.
 Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView &request) const
 {
     const std::string_view path = request_path(request.target());
@@ -221,11 +261,13 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
                                  std::move(headers));
 }
 
+/// @brief Returns the number of registered routes.
 std::size_t HttpRouter::size() const noexcept
 {
     return routes_.size();
 }
 
+/// @brief Converts one registration failure category into stable diagnostic text.
 const char *to_string(const HttpRouteRegistrationErrorCode code) noexcept
 {
     switch (code)

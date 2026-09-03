@@ -17,11 +17,17 @@
 namespace
 {
 
+/// @brief Exposes string storage as immutable bytes for parser tests.
+/// @param[in] source Test request text.
+/// @return Borrowed byte view over the same storage.
 [[nodiscard]] std::span<const std::byte> as_bytes(const std::string_view source)
 {
     return std::as_bytes(std::span(source.data(), source.size()));
 }
 
+/// @brief Parses one complete valid request fixture.
+/// @param[in] source Request text whose storage outlives the returned view.
+/// @return Complete borrowed request view.
 [[nodiscard]] sparenode::http::HttpRequestView parse_request(const std::string_view source)
 {
     auto parsed = sparenode::http::parse_http_request(as_bytes(source));
@@ -30,6 +36,10 @@ namespace
     return sparenode::test::require_optional(parsed->request());
 }
 
+/// @brief Creates one empty validated response for router handler tests.
+/// @param[in] status Response status.
+/// @param[in] reason Response reason phrase.
+/// @return Valid response or a structured invariant failure.
 [[nodiscard]] sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
 make_response(const sparenode::http::HttpStatusCode status, std::string reason)
 {
@@ -42,6 +52,10 @@ make_response(const sparenode::http::HttpStatusCode status, std::string reason)
     return std::move(response).value();
 }
 
+/// @brief Builds a handler that returns one fixed empty response.
+/// @param[in] status Response status returned by the handler.
+/// @param[in] reason Response reason phrase returned by the handler.
+/// @return Const-callable move-only test handler.
 [[nodiscard]] sparenode::http::HttpRouteHandler
 respond_with(const sparenode::http::HttpStatusCode status, std::string reason)
 {
