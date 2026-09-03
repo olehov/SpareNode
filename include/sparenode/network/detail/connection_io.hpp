@@ -7,6 +7,7 @@
 #include "sparenode/network/detail/native_socket.hpp"
 #include "sparenode/network/detail/socket_poller.hpp"
 #include "sparenode/network/detail/socket_wait.hpp"
+#include "sparenode/network/network_io_options.hpp"
 
 namespace sparenode::network::detail
 {
@@ -102,12 +103,26 @@ class ConnectionIo final
     [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
                                                             const std::stop_token &stop_token);
 
+    /// @brief Runs one receive with combined cancellation and deadline control.
+    /// @param[out] buffer Destination storage for received bytes.
+    /// @param[in] options Stop token and optional absolute monotonic deadline.
+    /// @return Transferred byte count, or a structured receive, cancellation, or timeout error.
+    [[nodiscard]] Result<std::size_t, NetworkError> receive(std::span<std::byte> buffer,
+                                                            const NetworkIoOptions &options);
+
     /// @brief Runs one cancellable, possibly partial send operation.
     /// @param[in] buffer Bytes available for transmission.
     /// @param[in] stop_token Token observed while waiting for write readiness.
     /// @return Transferred byte count, or a structured send or cancellation error.
     [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
                                                          const std::stop_token &stop_token);
+
+    /// @brief Runs one send with combined cancellation and deadline control.
+    /// @param[in] buffer Bytes available for transmission.
+    /// @param[in] options Stop token and optional absolute monotonic deadline.
+    /// @return Transferred byte count, or a structured send, cancellation, or timeout error.
+    [[nodiscard]] Result<std::size_t, NetworkError> send(std::span<const std::byte> buffer,
+                                                         const NetworkIoOptions &options);
 
   private:
     /// @brief Non-owning dependencies that must outlive this coordinator.

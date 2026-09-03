@@ -15,9 +15,9 @@ class FakeSocketPoller final : public network::detail::SocketPoller
 {
   public:
     /// Records that polling started, then waits until the test releases it.
-    [[nodiscard]] Result<void, network::NetworkError>
-    wait(std::span<network::detail::SocketPollEntry> entries,
-         network::NetworkOperation operation) override
+    [[nodiscard]] Result<network::detail::SocketPollStatus, network::NetworkError>
+    wait(std::span<network::detail::SocketPollEntry> entries, network::NetworkOperation operation,
+         std::optional<network::NetworkDeadline> deadline = std::nullopt) override
     {
         for (auto &entry : entries)
         {
@@ -34,6 +34,7 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         invalid_index_ = (std::numeric_limits<std::size_t>::max)();
         error_.reset();
         operation_ = operation;
+        deadline_ = deadline;
         entry_count_ = entries.size();
         if (!entries.empty())
         {
@@ -45,6 +46,11 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         if (error_.has_value())
         {
             return unexpected(error_.value());
+        }
+        if (timed_out_)
+        {
+            timed_out_ = false;
+            return network::detail::SocketPollStatus::timed_out;
         }
         if (readable_index_ < entries.size())
         {
@@ -70,7 +76,7 @@ class FakeSocketPoller final : public network::detail::SocketPoller
             // cppcheck-suppress unreadVariable
             entries[invalid_index_].invalid = true;
         }
-        return {};
+        return network::detail::SocketPollStatus::events;
     }
 
     /// Blocks the test until production code reaches the poll abstraction.
@@ -128,6 +134,19 @@ class FakeSocketPoller final : public network::detail::SocketPoller
         resume_.release();
     }
 
+    /// Returns from the fake wait as though its absolute deadline expired.
+    void complete_with_timeout()
+    {
+        timed_out_ = true;
+        resume_.release();
+    }
+
+    /// Returns the deadline supplied to the current fake poll operation.
+    [[nodiscard]] std::optional<network::NetworkDeadline> deadline() const noexcept
+    {
+        return deadline_;
+    }
+
     /// Returns the operation supplied by the code under test.
     [[nodiscard]] network::NetworkOperation operation() const noexcept
     {
@@ -165,6 +184,8 @@ class FakeSocketPoller final : public network::detail::SocketPoller
     std::size_t hangup_index_{(std::numeric_limits<std::size_t>::max)()};
     std::size_t invalid_index_{(std::numeric_limits<std::size_t>::max)()};
     std::optional<network::NetworkError> error_;
+    std::optional<network::NetworkDeadline> deadline_;
+    bool timed_out_{false};
 };
 
 } // namespace sparenode::test

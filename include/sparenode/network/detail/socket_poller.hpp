@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <span>
 
 #include "sparenode/network/detail/native_socket.hpp"
+#include "sparenode/network/network_io_options.hpp"
 
 namespace sparenode::network::detail
 {
@@ -29,6 +32,13 @@ struct SocketPollEntry
     bool invalid{false};
 };
 
+/// @brief Describes why a successful native polling call returned.
+enum class SocketPollStatus : std::uint8_t
+{
+    events,   ///< At least one descriptor reported an event.
+    timed_out ///< The absolute deadline expired before an event arrived.
+};
+
 /// @brief Waits for readiness without exposing a platform-specific polling API.
 ///
 /// Higher-level networking code depends on this interface, while platform code
@@ -51,14 +61,15 @@ class SocketPoller
     /// @brief Blocks until native polling completes or fails.
     /// @param[in,out] entries Requested events on input and reported events on output.
     /// @param[in] operation Public operation to record if polling fails.
-    /// @return Success when polling completes, including when error, hangup, or
-    /// invalid flags are reported; a validation error for an empty span; or a
-    /// structured socket error when the native polling call fails.
+    /// @param[in] deadline Optional absolute monotonic expiry for the native wait.
+    /// @return Event or timeout completion; a validation error for an empty span;
+    /// or a structured socket error when the native polling call fails.
     /// @pre The span storage and every socket must remain valid and unmodified for
     /// the entire call. Callers must not close, reuse, or mutate them concurrently.
     /// @post On success, callers must inspect every output flag in each entry.
-    [[nodiscard]] virtual Result<void, NetworkError> wait(std::span<SocketPollEntry> entries,
-                                                          NetworkOperation operation) = 0;
+    [[nodiscard]] virtual Result<SocketPollStatus, NetworkError>
+    wait(std::span<SocketPollEntry> entries, NetworkOperation operation,
+         std::optional<NetworkDeadline> deadline = std::nullopt) = 0;
 
   protected:
     /// @brief Constructs the interface for a concrete poller implementation.
@@ -72,16 +83,18 @@ class NativeSocketPoller final : public SocketPoller
     /// @brief Constructs a stateless native poller.
     NativeSocketPoller() = default;
 
-    /// @brief Translates portable entries to native descriptors and waits indefinitely.
+    /// @brief Translates portable entries to native descriptors and waits until event or expiry.
     /// @param[in,out] entries Requested events on input and reported events on output.
     /// @param[in] operation Public operation to record if polling fails.
-    /// @return Success when polling completes, including terminal event flags;
-    /// a validation error for an empty span; or a native socket polling error.
+    /// @param[in] deadline Optional absolute monotonic expiry for the native wait.
+    /// @return Event or timeout completion, a validation error for an empty span,
+    /// or a native socket polling error.
     /// @pre The span storage and every socket must remain valid and unmodified for
     /// the entire call. Callers must not close, reuse, or mutate them concurrently.
     /// @post On success, callers must inspect every output flag in each entry.
-    [[nodiscard]] Result<void, NetworkError> wait(std::span<SocketPollEntry> entries,
-                                                  NetworkOperation operation) override;
+    [[nodiscard]] Result<SocketPollStatus, NetworkError>
+    wait(std::span<SocketPollEntry> entries, NetworkOperation operation,
+         std::optional<NetworkDeadline> deadline = std::nullopt) override;
 };
 
 } // namespace sparenode::network::detail

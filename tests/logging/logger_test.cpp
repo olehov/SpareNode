@@ -282,6 +282,12 @@ TEST_CASE("Network logging preserves structured operation domain and code", "[lo
 
     CHECK(sparenode::logging::format_network_error(error) ==
           "operation=receive domain=socket code=42");
+
+    const sparenode::network::NetworkError timeout{sparenode::network::NetworkOperation::receive,
+                                                   sparenode::network::NetworkErrorDomain::timeout,
+                                                   0};
+    CHECK(sparenode::logging::format_network_error(timeout) ==
+          "operation=receive domain=timeout code=0");
 }
 
 TEST_CASE("Network observers report worker and server failure boundaries", "[logging][network]")

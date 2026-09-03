@@ -1,6 +1,7 @@
 #include "sparenode/network/detail/connection_io.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <utility>
@@ -29,11 +30,11 @@ namespace
 template <typename Transfer>
 [[nodiscard]] Result<std::size_t, NetworkError>
 perform_io(const ConnectionIoContext &context, const SocketWaitRequest request,
-           const std::stop_token &stop_token, Transfer transfer)
+           const NetworkIoOptions &options, Transfer transfer)
 {
     while (true)
     {
-        const auto wait_result = wait_for_socket(context.wait, request, stop_token);
+        const auto wait_result = wait_for_socket(context.wait, request, options);
         if (!wait_result)
         {
             return unexpected(wait_result.error());
@@ -41,6 +42,10 @@ perform_io(const ConnectionIoContext &context, const SocketWaitRequest request,
         if (wait_result.value() == SocketWaitStatus::cancelled)
         {
             return unexpected(NetworkError{request.operation, NetworkErrorDomain::cancellation, 0});
+        }
+        if (wait_result.value() == SocketWaitStatus::timed_out)
+        {
+            return unexpected(NetworkError{request.operation, NetworkErrorDomain::timeout, 0});
         }
 
         const std::ptrdiff_t transferred = transfer();
@@ -89,20 +94,30 @@ ConnectionIo::ConnectionIo(const ConnectionIoContext &context) noexcept : contex
 Result<std::size_t, NetworkError> ConnectionIo::receive(const std::span<std::byte> buffer,
                                                         const std::stop_token &stop_token)
 {
+    return receive(buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+}
+
+Result<std::size_t, NetworkError> ConnectionIo::receive(const std::span<std::byte> buffer,
+                                                        const NetworkIoOptions &options)
+{
     return perform_io(
         context_,
-        {.interest = SocketWaitInterest::readable, .operation = NetworkOperation::receive},
-        stop_token,
+        {.interest = SocketWaitInterest::readable, .operation = NetworkOperation::receive}, options,
         [this, buffer] { return context_.operations.receive(context_.wait.socket, buffer); });
 }
 
 Result<std::size_t, NetworkError> ConnectionIo::send(const std::span<const std::byte> buffer,
                                                      const std::stop_token &stop_token)
 {
+    return send(buffer, NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+}
+
+Result<std::size_t, NetworkError> ConnectionIo::send(const std::span<const std::byte> buffer,
+                                                     const NetworkIoOptions &options)
+{
     return perform_io(
         context_, {.interest = SocketWaitInterest::writable, .operation = NetworkOperation::send},
-        stop_token,
-        [this, buffer] { return context_.operations.send(context_.wait.socket, buffer); });
+        options, [this, buffer] { return context_.operations.send(context_.wait.socket, buffer); });
 }
 
 } // namespace sparenode::network::detail

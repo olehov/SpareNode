@@ -1,6 +1,7 @@
 #include "sparenode/network/detail/socket_wait.hpp"
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -240,44 +241,81 @@ inspect_wake_entry(const SocketWaitContext &context, const SocketPollEntry &entr
     return entry.readable ? WakeEntryStatus::retry : WakeEntryStatus::inspect_operation;
 }
 
+/// @brief Interprets one completed operation-socket descriptor.
+/// @param[in] entry Completed operation entry.
+/// @param[in] request Requested interest and public operation metadata.
+/// @return Readiness status or a structured invalid-result error.
+[[nodiscard]] Result<SocketWaitStatus, NetworkError>
+inspect_operation_entry(const SocketPollEntry &entry, const SocketWaitRequest request)
+{
+    if (entry.invalid)
+    {
+        return unexpected(invalid_wait_result(request.operation));
+    }
+    if (const auto status = ready_status(entry, request.interest); status.has_value())
+    {
+        return status.value();
+    }
+    return unexpected(invalid_wait_result(request.operation));
+}
+
+/// @brief Waits for one operation socket without allocating a cancellation channel.
+/// @param[in] context Stable socket wait resources.
+/// @param[in] request Requested interest and public operation metadata.
+/// @param[in] deadline Optional absolute monotonic expiry.
+/// @return Readiness or timeout status, or a structured poll error.
+[[nodiscard]] Result<SocketWaitStatus, NetworkError>
+wait_for_operation(const SocketWaitContext &context, const SocketWaitRequest request,
+                   const std::optional<NetworkDeadline> deadline)
+{
+    std::array<SocketPollEntry, 1> descriptors{{
+        operation_entry(context.socket, request.interest),
+    }};
+    const auto poll_result = context.poller.wait(descriptors, request.operation, deadline);
+    if (!poll_result)
+    {
+        return unexpected(poll_result.error());
+    }
+    if (poll_result.value() == SocketPollStatus::timed_out)
+    {
+        return SocketWaitStatus::timed_out;
+    }
+    return inspect_operation_entry(descriptors[0], request);
+}
+
 } // namespace
 
 Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
                                                        const SocketWaitRequest request)
 {
-    std::array<SocketPollEntry, 1> descriptors{{
-        operation_entry(context.socket, request.interest),
-    }};
-    const auto poll_result = context.poller.wait(descriptors, request.operation);
-    if (!poll_result)
-    {
-        return unexpected(poll_result.error());
-    }
-
-    if (descriptors[0].invalid)
-    {
-        return unexpected(invalid_wait_result(request.operation));
-    }
-    if (const auto status = ready_status(descriptors[0], request.interest); status.has_value())
-    {
-        return status.value();
-    }
-
-    return unexpected(invalid_wait_result(request.operation));
+    return wait_for_operation(context, request, std::nullopt);
 }
 
 Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
                                                        const SocketWaitRequest request,
                                                        const std::stop_token &stop_token)
 {
-    if (stop_token.stop_requested())
+    return wait_for_socket(context, request,
+                           NetworkIoOptions{.stop_token = stop_token, .deadline = std::nullopt});
+}
+
+Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &context,
+                                                       const SocketWaitRequest request,
+                                                       const NetworkIoOptions &options)
+{
+    if (options.stop_token.stop_requested())
     {
         return SocketWaitStatus::cancelled;
     }
-
-    if (!stop_token.stop_possible())
+    if (options.deadline.has_value() &&
+        std::chrono::steady_clock::now() >= options.deadline.value())
     {
-        return wait_for_socket(context, request);
+        return SocketWaitStatus::timed_out;
+    }
+
+    if (!options.stop_token.stop_possible())
+    {
+        return wait_for_operation(context, request, options.deadline);
     }
 
     if (auto initialized = context.wake_channel.ensure_initialized(request.operation); !initialized)
@@ -285,7 +323,7 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &
         return unexpected(initialized.error());
     }
 
-    const std::stop_callback wake_on_stop(stop_token,
+    const std::stop_callback wake_on_stop(options.stop_token,
                                           [&context] { context.wake_channel.notify(); });
     std::array<SocketPollEntry, 2> descriptors{{
         operation_entry(context.socket, request.interest),
@@ -294,14 +332,20 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &
 
     while (true)
     {
-        const auto poll_result = context.poller.wait(descriptors, request.operation);
+        const auto poll_result =
+            context.poller.wait(descriptors, request.operation, options.deadline);
         if (!poll_result)
         {
             return unexpected(poll_result.error());
         }
+        if (poll_result.value() == SocketPollStatus::timed_out)
+        {
+            return options.stop_token.stop_requested() ? SocketWaitStatus::cancelled
+                                                       : SocketWaitStatus::timed_out;
+        }
 
         const auto wake_status =
-            inspect_wake_entry(context, descriptors[1], request.operation, stop_token);
+            inspect_wake_entry(context, descriptors[1], request.operation, options.stop_token);
         if (!wake_status)
         {
             return unexpected(wake_status.error());
@@ -317,16 +361,7 @@ Result<SocketWaitStatus, NetworkError> wait_for_socket(const SocketWaitContext &
             break;
         }
 
-        if (descriptors[0].invalid)
-        {
-            return unexpected(invalid_wait_result(request.operation));
-        }
-        if (const auto status = ready_status(descriptors[0], request.interest); status.has_value())
-        {
-            return status.value();
-        }
-
-        return unexpected(invalid_wait_result(request.operation));
+        return inspect_operation_entry(descriptors[0], request);
     }
 }
 

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <span>
 #include <stop_token>
@@ -295,4 +296,58 @@ TEST_CASE("TCP connection I/O honours cancellation requested before waiting",
     REQUIRE_FALSE(sent.has_value());
     check_cancelled(sent.error(), sparenode::network::NetworkOperation::send);
     CHECK(pair.server.is_open());
+}
+
+TEST_CASE("TCP receive expires through the native monotonic deadline",
+          "[network][tcp][io][timeout]")
+{
+    auto pair = create_connected_pair();
+    std::array<std::byte, 1> buffer{};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{25};
+
+    const auto received = pair.server.receive(buffer, {.stop_token = {}, .deadline = deadline});
+
+    REQUIRE_FALSE(received.has_value());
+    CHECK(received.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(received.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(received.error().code == 0);
+    CHECK(pair.server.is_open());
+
+    constexpr std::string_view payload = "x";
+    const auto sent = pair.server.send(
+        bytes_of(payload), {.stop_token = {}, .deadline = std::chrono::steady_clock::now()});
+    REQUIRE_FALSE(sent.has_value());
+    CHECK(sent.error().operation == sparenode::network::NetworkOperation::send);
+    CHECK(sent.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+}
+
+TEST_CASE("TCP receive succeeds when data arrives before its deadline",
+          "[network][tcp][io][timeout]")
+{
+    auto pair = create_connected_pair();
+    constexpr std::string_view payload = "ready";
+    REQUIRE(pair.client.send(bytes_of(payload)) == static_cast<std::ptrdiff_t>(payload.size()));
+    std::array<std::byte, 8> buffer{};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+
+    const auto received = pair.server.receive(buffer, {.stop_token = {}, .deadline = deadline});
+
+    REQUIRE(received.has_value());
+    CHECK(received.value() == payload.size());
+}
+
+TEST_CASE("TCP I/O gives pre-requested cancellation priority over an expired deadline",
+          "[network][tcp][io][timeout][cancel]")
+{
+    auto pair = create_connected_pair();
+    std::stop_source stop_source;
+    REQUIRE(stop_source.request_stop());
+    std::array<std::byte, 1> buffer{};
+
+    const auto received =
+        pair.server.receive(buffer, {.stop_token = stop_source.get_token(),
+                                     .deadline = std::chrono::steady_clock::now()});
+
+    REQUIRE_FALSE(received.has_value());
+    check_cancelled(received.error(), sparenode::network::NetworkOperation::receive);
 }
