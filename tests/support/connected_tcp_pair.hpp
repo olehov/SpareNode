@@ -146,6 +146,19 @@ class TestClientSocket final
 #endif
     }
 
+    /// Sends one caller-bounded payload to the connected server socket.
+    /// @param[in] bytes Bytes available for transmission.
+    /// @return Native send count or failure sentinel.
+    [[nodiscard]] std::ptrdiff_t send(const std::span<const std::byte> bytes) const noexcept
+    {
+#ifdef _WIN32
+        return ::send(socket_, reinterpret_cast<const char *>(bytes.data()),
+                      static_cast<int>(bytes.size()), 0);
+#else
+        return ::send(socket_, bytes.data(), bytes.size(), 0);
+#endif
+    }
+
     /// Waits for readability and then receives one caller-bounded payload.
     /// @param[out] bytes Storage receiving available server bytes.
     /// @param[in] timeout Maximum time spent waiting for readable data.

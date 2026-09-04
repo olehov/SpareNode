@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <optional>
+#include <semaphore>
 #include <stop_token>
 #include <utility>
 
@@ -9,6 +12,7 @@
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
 #include "sparenode/result.hpp"
+#include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -50,6 +54,50 @@ TEST_CASE("Running application rejects an empty runtime server collection",
     const auto result = sparenode::application::RunningApplication::start({}, handler);
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == sparenode::application::ApplicationStartErrorCode::missing_server);
+}
+
+TEST_CASE("Running application installs connection failure observers on its dispatchers",
+          "[application][startup][logging]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-application-observer");
+    auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
+    REQUIRE(root_result.has_value());
+    std::vector<sparenode::configuration::runtime::ShareConfig> shares;
+    shares.emplace_back("Documents", std::move(root_result).value(),
+                        sparenode::configuration::runtime::SharePermissions{true, false, false});
+    std::vector<sparenode::configuration::runtime::ServerConfig> servers;
+    servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
+                         sparenode::logging::LogSeverity::info, std::move(shares));
+
+    constexpr sparenode::network::NetworkError expected_error{
+        sparenode::network::NetworkOperation::receive,
+        sparenode::network::NetworkErrorDomain::state, 37};
+    auto handler = [expected_error](sparenode::network::TcpConnection, const std::stop_token &)
+        -> sparenode::Result<void, sparenode::network::NetworkError>
+    { return sparenode::unexpected(expected_error); };
+    std::binary_semaphore observed_signal{0};
+    std::optional<sparenode::network::ConnectionFailure> observed_failure;
+    auto observer =
+        [&observed_signal, &observed_failure](const sparenode::network::ConnectionFailure &failure)
+    {
+        observed_failure = failure;
+        observed_signal.release();
+    };
+    auto result = sparenode::application::RunningApplication::start(
+        sparenode::configuration::runtime::AppConfig(std::move(servers)), std::move(handler),
+        {std::move(observer), {}});
+    REQUIRE(result.has_value());
+    const auto endpoint = result->servers().front().local_endpoint();
+    auto client = sparenode::test::connect_test_client(sparenode::test::require_optional(endpoint));
+
+    REQUIRE(observed_signal.try_acquire_for(std::chrono::seconds{1}));
+    const auto &failure = sparenode::test::require_optional(observed_failure);
+    CHECK(failure.kind == sparenode::network::ConnectionFailureKind::handler_error);
+    const auto &network_error = sparenode::test::require_optional(failure.network_error);
+    CHECK(network_error.operation == expected_error.operation);
+    CHECK(network_error.domain == expected_error.domain);
+    CHECK(network_error.code == expected_error.code);
+    CHECK(client.peer_closes_within(std::chrono::seconds{1}));
 }
 
 TEST_CASE("Application startup diagnostics preserve nested server failure details",
