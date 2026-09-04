@@ -127,7 +127,7 @@ TEST_CASE("HTTP connection session returns a bounded parser error response",
                 sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
         });
 
-    send_all(pair.client, "GET / HTTP/1.1\nHost: localhost\n\n");
+    send_all(pair.client, "GET /%GG HTTP/1.1\r\nHost: localhost\r\n\r\n");
     const std::string response = receive_until_closed(pair.client);
     const auto result = future.get();
     worker.join();
@@ -142,6 +142,10 @@ TEST_CASE("HTTP connection session handles one request and discards pipelined by
 {
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/one",
+        [](const sparenode::http::HttpRequestView &, const sparenode::http::HttpRouteParameters &)
+        { return ok_response(); }));
     std::promise<SessionResult> promise;
     auto future = promise.get_future();
     std::jthread worker(
@@ -158,8 +162,27 @@ TEST_CASE("HTTP connection session handles one request and discards pipelined by
     worker.join();
 
     REQUIRE(result.has_value());
-    CHECK(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
     CHECK(response.find("HTTP/1.1", 1) == std::string::npos);
+}
+
+TEST_CASE("HTTP connection session applies its default deadline policy",
+          "[http][session][integration][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .request_timeout = std::chrono::milliseconds{20},
+        .deadline_provider = {},
+    };
+
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(pair.client.peer_closes_within(std::chrono::seconds{1}));
 }
 
 TEST_CASE("HTTP connection session injects deadline policy into request reads",

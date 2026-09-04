@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -35,7 +36,8 @@ struct HttpConnectionHandlerConfig
 {
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
-    HttpRequestDeadlineProvider deadline_provider;           ///< Optional per-read deadline policy.
+    std::chrono::milliseconds request_timeout{std::chrono::seconds{30}}; ///< Total fallback budget.
+    HttpRequestDeadlineProvider deadline_provider; ///< Optional per-read deadline override.
 };
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.

@@ -26,6 +26,9 @@ enum class HttpSessionFailureCode : std::uint8_t
     internal_exception ///< An injected policy or route unexpectedly threw.
 };
 
+/// Internal session details occupy 1 through 4; response-writer details occupy 100 through 106.
+constexpr int response_writer_error_detail_base = 100;
+
 /// @brief Converts one internal failure to the numeric network detail field.
 [[nodiscard]] constexpr int error_detail(const HttpSessionFailureCode code) noexcept
 {
@@ -75,7 +78,6 @@ enum class HttpSessionFailureCode : std::uint8_t
     switch (code)
     {
     case HttpRequestParseErrorCode::request_line_too_large:
-    case HttpRequestParseErrorCode::invalid_request_target:
         return HttpStatusCode::uri_too_long;
     case HttpRequestParseErrorCode::headers_too_large:
     case HttpRequestParseErrorCode::too_many_headers:
@@ -89,6 +91,7 @@ enum class HttpSessionFailureCode : std::uint8_t
         return HttpStatusCode::not_implemented;
     case HttpRequestParseErrorCode::invalid_line_ending:
     case HttpRequestParseErrorCode::malformed_request_line:
+    case HttpRequestParseErrorCode::invalid_request_target:
     case HttpRequestParseErrorCode::invalid_method:
     case HttpRequestParseErrorCode::malformed_header:
     case HttpRequestParseErrorCode::folded_header:
@@ -155,7 +158,7 @@ make_error_response(const HttpStatusCode status)
         return error.network_error.value();
     }
     return {network::NetworkOperation::send, network::NetworkErrorDomain::state,
-            static_cast<int>(error.code) + 1};
+            response_writer_error_detail_base + static_cast<int>(error.code)};
 }
 
 /// @brief Sends one session-owned error response.
@@ -183,7 +186,7 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 /// @param[in] config Session configuration and optional provider.
 /// @param[in] phase Incomplete request section awaiting input.
 /// @param[in] stop_token Dispatcher cancellation token.
-/// @return Provider result or cancellation-only fallback.
+/// @return Provider result or the bounded total-request fallback deadline.
 [[nodiscard]] network::NetworkIoOptions read_options(const HttpConnectionHandlerConfig &config,
                                                      const HttpRequestReadPhase phase,
                                                      const network::NetworkDeadline session_started,
@@ -191,10 +194,13 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 {
     if (config.deadline_provider)
     {
-        return {.stop_token = stop_token,
-                .deadline = config.deadline_provider(phase, session_started)};
+        const auto provided_deadline = config.deadline_provider(phase, session_started);
+        if (provided_deadline.has_value())
+        {
+            return {.stop_token = stop_token, .deadline = provided_deadline};
+        }
     }
-    return {.stop_token = stop_token, .deadline = std::nullopt};
+    return {.stop_token = stop_token, .deadline = session_started + config.request_timeout};
 }
 
 /// @brief Dispatches one complete request and writes its response.
@@ -226,7 +232,8 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     const std::size_t request_limit = maximum_request_bytes(config.parser_limits);
-    if (request_limit == 0 || config.receive_chunk_bytes == 0)
+    if (request_limit == 0 || config.receive_chunk_bytes == 0 ||
+        config.request_timeout.count() <= 0)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::validation,

@@ -31,9 +31,12 @@ Network receive/send failures remain structured `NetworkError` values.
 
 ## Cancellation and deadlines
 
-Every receive always carries the dispatcher worker's stop token. An optional
-`HttpRequestDeadlineProvider` may add an absolute steady-clock deadline for the
-next read but cannot replace cancellation. It receives the current read phase
+Every receive always carries the dispatcher worker's stop token and an absolute
+steady-clock deadline. By default, a request has a 30-second total budget so a
+slow client cannot retain a dispatcher worker indefinitely. An optional
+`HttpRequestDeadlineProvider` may replace that deadline for the next read but
+cannot replace cancellation. Returning no deadline selects the bounded fallback.
+The provider receives the current read phase
 (`headers` or `body`) and the session start time. This is the injection boundary
 for SN-089 to combine header inactivity, body inactivity, and total-request
 budgets without placing HTTP policy in the socket layer.
