@@ -48,6 +48,7 @@ add_library(sparenode_core STATIC
     src/configuration/shared_root.cpp
     src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/safe_path.cpp
+    src/http/http_connection_handler.cpp
     src/http/http_request.cpp
     src/http/http_request_parser.cpp
     src/http/detail/host_authority.cpp
