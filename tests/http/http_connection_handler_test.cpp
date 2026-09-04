@@ -270,6 +270,49 @@ TEST_CASE("HTTP connection session rejects an invalid receive boundary", "[http]
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::validation);
 }
 
+TEST_CASE("HTTP connection session accepts a timeout near the deadline representation limit",
+          "[http][session][limits][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const auto remaining = (sparenode::network::NetworkDeadline::max)().time_since_epoch() -
+                           std::chrono::steady_clock::now().time_since_epoch();
+    const auto request_timeout =
+        std::chrono::duration_cast<std::chrono::milliseconds>(remaining) - std::chrono::seconds{1};
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .request_timeout = request_timeout,
+        .deadline_provider = {},
+    };
+
+    send_all(pair.client, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+
+    REQUIRE(result.has_value());
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 404 Not Found\r\n"));
+}
+
+TEST_CASE("HTTP connection session rejects the first timeout beyond its deadline range",
+          "[http][session][limits][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const auto remaining = (sparenode::network::NetworkDeadline::max)().time_since_epoch() -
+                           std::chrono::steady_clock::now().time_since_epoch();
+    const auto request_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(remaining) +
+                                 std::chrono::milliseconds{1};
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .request_timeout = request_timeout,
+        .deadline_provider = {},
+    };
+
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::validation);
+}
+
 TEST_CASE("HTTP connection handler runs through the TCP dispatcher",
           "[http][session][integration][dispatcher]")
 {

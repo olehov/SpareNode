@@ -29,6 +29,13 @@ enum class HttpSessionFailureCode : std::uint8_t
 /// Internal session details occupy 1 through 4; response-writer details occupy 100 through 106.
 constexpr int response_writer_error_detail_base = 100;
 
+/// @brief Groups immutable deadline state shared by every read in one session.
+struct RequestDeadlineContext
+{
+    network::NetworkDeadline session_started;   ///< Monotonic start supplied to custom policies.
+    network::NetworkDeadline fallback_deadline; ///< Validated total-request deadline.
+};
+
 /// @brief Converts one internal failure to the numeric network detail field.
 [[nodiscard]] constexpr int error_detail(const HttpSessionFailureCode code) noexcept
 {
@@ -68,6 +75,38 @@ constexpr int response_writer_error_detail_base = 100;
                                     std::byte{'\n'}};
     return std::ranges::search(input, terminator).empty() ? HttpRequestReadPhase::headers
                                                           : HttpRequestReadPhase::body;
+}
+
+/// @brief Forms a fallback deadline without overflowing duration conversion or time-point addition.
+/// @param[in] session_started Monotonic start of the current session.
+/// @param[in] timeout Positive total request budget expressed in milliseconds.
+/// @return Absolute deadline, or no value when the timeout cannot be represented safely.
+[[nodiscard]] std::optional<network::NetworkDeadline>
+request_deadline(const network::NetworkDeadline session_started,
+                 const std::chrono::milliseconds timeout) noexcept
+{
+    using DeadlineDuration = network::NetworkDeadline::duration;
+
+    if (timeout.count() <= 0 || session_started < network::NetworkDeadline{})
+    {
+        return std::nullopt;
+    }
+
+    const DeadlineDuration remaining =
+        network::NetworkDeadline::max().time_since_epoch() - session_started.time_since_epoch();
+    const auto maximum_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
+    if (timeout > maximum_timeout)
+    {
+        return std::nullopt;
+    }
+
+    const DeadlineDuration converted_timeout =
+        std::chrono::duration_cast<DeadlineDuration>(timeout);
+    if (converted_timeout <= DeadlineDuration::zero() || converted_timeout > remaining)
+    {
+        return std::nullopt;
+    }
+    return session_started + converted_timeout;
 }
 
 /// @brief Selects the standard response status for one parser failure.
@@ -185,22 +224,23 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 /// @brief Resolves cancellation and deadline options for the next request read.
 /// @param[in] config Session configuration and optional provider.
 /// @param[in] phase Incomplete request section awaiting input.
+/// @param[in] deadlines Validated session start and fallback deadline.
 /// @param[in] stop_token Dispatcher cancellation token.
 /// @return Provider result or the bounded total-request fallback deadline.
 [[nodiscard]] network::NetworkIoOptions read_options(const HttpConnectionHandlerConfig &config,
                                                      const HttpRequestReadPhase phase,
-                                                     const network::NetworkDeadline session_started,
+                                                     const RequestDeadlineContext &deadlines,
                                                      const std::stop_token &stop_token)
 {
     if (config.deadline_provider)
     {
-        const auto provided_deadline = config.deadline_provider(phase, session_started);
+        const auto provided_deadline = config.deadline_provider(phase, deadlines.session_started);
         if (provided_deadline.has_value())
         {
             return {.stop_token = stop_token, .deadline = provided_deadline};
         }
     }
-    return {.stop_token = stop_token, .deadline = session_started + config.request_timeout};
+    return {.stop_token = stop_token, .deadline = deadlines.fallback_deadline};
 }
 
 /// @brief Dispatches one complete request and writes its response.
@@ -232,19 +272,20 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     const std::size_t request_limit = maximum_request_bytes(config.parser_limits);
-    if (request_limit == 0 || config.receive_chunk_bytes == 0 ||
-        config.request_timeout.count() <= 0)
+    const auto session_started = std::chrono::steady_clock::now();
+    const auto fallback_deadline = request_deadline(session_started, config.request_timeout);
+    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !fallback_deadline.has_value())
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::validation,
             error_detail(HttpSessionFailureCode::invalid_config)});
     }
+    const RequestDeadlineContext deadlines{session_started, fallback_deadline.value()};
 
     try
     {
         std::vector<std::byte> input;
         input.reserve((std::min)(request_limit, config.receive_chunk_bytes));
-        const auto session_started = std::chrono::steady_clock::now();
         while (true)
         {
             auto parsed = parse_http_request(input, config.parser_limits);
@@ -268,9 +309,9 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
             const std::size_t requested = (std::min)(available, config.receive_chunk_bytes);
             const std::size_t previous_size = input.size();
             input.resize(previous_size + requested);
-            auto received = connection.receive_with_options(
-                std::span(input).subspan(previous_size),
-                read_options(config, phase, session_started, stop_token));
+            auto received =
+                connection.receive_with_options(std::span(input).subspan(previous_size),
+                                                read_options(config, phase, deadlines, stop_token));
             if (!received)
             {
                 return unexpected(received.error());
