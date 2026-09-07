@@ -223,6 +223,10 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &route
 
 } // namespace
 
+/// @brief Receives one bounded request, then routes it and sends its response.
+/// @return Success after response or peer EOF; otherwise a structured session failure.
+/// @details Nonempty receives renew inactivity but never the total receive deadline.
+/// Timeout returns immediately without attempting an HTTP error response.
 Result<void, network::NetworkError>
 handle_http_connection(network::TcpConnection connection, const HttpRouter &router,
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)

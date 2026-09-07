@@ -35,6 +35,8 @@ checked_deadline(const network::NetworkDeadline started,
 
 } // namespace
 
+/// @brief Creates deadline state only when all three budgets can be added safely.
+/// @return Initialized state, or no value for an invalid or overflowing budget.
 std::optional<RequestDeadlines>
 RequestDeadlines::create(const HttpRequestTimeouts &timeouts,
                          const network::NetworkDeadline started) noexcept
@@ -48,6 +50,7 @@ RequestDeadlines::create(const HttpRequestTimeouts &timeouts,
     return RequestDeadlines(started, timeouts, total.value());
 }
 
+/// @brief Stores validated budgets and anchors initial inactivity at session entry.
 RequestDeadlines::RequestDeadlines(const network::NetworkDeadline started,
                                    const HttpRequestTimeouts &timeouts,
                                    const network::NetworkDeadline total_deadline) noexcept
@@ -55,11 +58,14 @@ RequestDeadlines::RequestDeadlines(const network::NetworkDeadline started,
 {
 }
 
+/// @brief Advances the inactivity anchor without moving it backwards or renewing total time.
 void RequestDeadlines::record_progress(const network::NetworkDeadline received_at) noexcept
 {
     last_progress_ = (std::max)(last_progress_, received_at);
 }
 
+/// @brief Clamps phase inactivity to the total deadline, including on addition overflow.
+/// @return Earlier of the representable inactivity deadline and the total deadline.
 network::NetworkDeadline RequestDeadlines::next(const bool reading_body) const noexcept
 {
     const auto inactivity =
@@ -67,6 +73,8 @@ network::NetworkDeadline RequestDeadlines::next(const bool reading_body) const n
     return inactivity.has_value() ? (std::min)(inactivity.value(), total_) : total_;
 }
 
+/// @brief Exposes the immutable deadline established at session creation.
+/// @return Absolute end of the total request receive budget.
 network::NetworkDeadline RequestDeadlines::total() const noexcept
 {
     return total_;

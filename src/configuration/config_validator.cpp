@@ -387,6 +387,8 @@ ConfigValidator::validate(ParsedConfiguration configuration)
                                   std::move(validation).release_shared_roots());
 }
 
+/// @brief Describes a validation failure, including the accepted receive-timeout range.
+/// @return Static diagnostic text suitable for configuration error reporting.
 const char *to_string(const ConfigValidationErrorCode code) noexcept
 {
     switch (code)

@@ -108,6 +108,8 @@ void apply_share_directive(const directives::ParsedShareDirective &directive,
 
 } // namespace
 
+/// @brief Applies validated directives over defaults, preserving HTTP receive budgets.
+/// @return Runtime servers and shares without parser metadata.
 runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration)
 {
     ServerValues server;
