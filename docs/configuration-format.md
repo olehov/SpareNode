@@ -19,6 +19,9 @@ server {
     multithreading true;
     worker_threads 4;
     log_level "info";
+    header_timeout_ms 10000;
+    body_timeout_ms 10000;
+    request_timeout_ms 30000;
 
     share "Documents" {
         path "/home/user/Documents";
@@ -71,7 +74,8 @@ identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 ```
 
 Version 1 reserves `server`, `share`, `bind`, `port`, `multithreading`,
-`worker_threads`, `log_level`, `path`, `read`, `write`, `delete`, `true`, and
+`worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
+`request_timeout_ms`, `path`, `read`, `write`, `delete`, `true`, and
 `false` according to their grammatical positions. Keywords must be written in
 lowercase.
 
@@ -129,6 +133,9 @@ server-item              = bind-directive
                          | threading-directive
                          | worker-threads-directive
                          | log-level-directive
+                         | header-timeout-directive
+                         | body-timeout-directive
+                         | request-timeout-directive
                          | share-block ;
 
 bind-directive           = "bind", string, ";" ;
@@ -136,6 +143,9 @@ port-directive           = "port", integer, ";" ;
 threading-directive      = "multithreading", boolean, ";" ;
 worker-threads-directive = "worker_threads", integer, ";" ;
 log-level-directive      = "log_level", string, ";" ;
+header-timeout-directive = "header_timeout_ms", integer, ";" ;
+body-timeout-directive   = "body_timeout_ms", integer, ";" ;
+request-timeout-directive = "request_timeout_ms", integer, ";" ;
 
 share-block              = "share", string, "{", { share-directive }, "}" ;
 share-directive          = path-directive
@@ -168,10 +178,25 @@ user-facing label and is not a filesystem path.
 | `multithreading` | zero or one | `false` | Enables the configured worker pool when `true` |
 | `worker_threads` | conditional | none | Required with `multithreading true`; integer from 2 through 64 |
 | `log_level` | zero or one | `"info"` | One of `"debug"`, `"info"`, `"warning"`, or `"error"` |
+| `header_timeout_ms` | zero or one | `10000` | Header receive inactivity, 1 through 86400000 milliseconds |
+| `body_timeout_ms` | zero or one | `10000` | Body receive inactivity, 1 through 86400000 milliseconds |
+| `request_timeout_ms` | zero or one | `30000` | Total request receive time, 1 through 86400000 milliseconds |
 | `share` | exactly one | none | Defines the sole MVP shared directory |
 
 Hostnames are not accepted by `bind` in version 1. IPv6 addresses remain quoted
 strings, for example `bind "::";` or `bind "::1";`.
+
+Receive timeouts use unsigned integer milliseconds without a unit suffix. Zero,
+negative values, quoted numbers, and values above 24 hours are rejected before
+startup. Omitting these directives preserves the defaults. An inactivity budget
+may exceed the total budget; the earlier deadline always wins.
+
+The header budget starts when a dispatcher worker begins handling the connection.
+Each nonempty receive renews inactivity. When the header terminator arrives, the
+body budget applies from that receive timestamp. The total budget is never renewed,
+so a client cannot keep a worker forever by sending occasional bytes. These limits
+cover receiving the request, not queue residence, route execution, or response
+transmission. See [HTTP connection deadlines](http-connection-handler.md#cancellation-and-deadlines).
 
 When `multithreading` is omitted or `false`, `worker_threads` must be omitted and
 the effective worker count is exactly one. When `multithreading` is `true`,

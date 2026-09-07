@@ -332,6 +332,18 @@ class ParserState final
         {
             return directives::ServerDirectiveKind::worker_threads;
         }
+        if (name == "header_timeout_ms")
+        {
+            return directives::ServerDirectiveKind::header_timeout_ms;
+        }
+        if (name == "body_timeout_ms")
+        {
+            return directives::ServerDirectiveKind::body_timeout_ms;
+        }
+        if (name == "request_timeout_ms")
+        {
+            return directives::ServerDirectiveKind::request_timeout_ms;
+        }
         if (name == "log_level")
         {
             return directives::ServerDirectiveKind::log_level;
@@ -377,6 +389,9 @@ class ParserState final
             return ConfigParserExpectation::string_literal;
         case directives::ServerDirectiveKind::port:
         case directives::ServerDirectiveKind::worker_threads:
+        case directives::ServerDirectiveKind::header_timeout_ms:
+        case directives::ServerDirectiveKind::body_timeout_ms:
+        case directives::ServerDirectiveKind::request_timeout_ms:
             return ConfigParserExpectation::integer_literal;
         case directives::ServerDirectiveKind::multithreading:
             return ConfigParserExpectation::boolean_literal;

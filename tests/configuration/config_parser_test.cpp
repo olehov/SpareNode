@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -42,6 +44,25 @@ require_parser_error(const std::string_view input)
 }
 
 } // namespace
+
+TEST_CASE("Configuration receive timeouts require server-scoped unsigned integers",
+          "[configuration][parser][timeout]")
+{
+    const std::string directive =
+        GENERATE("header_timeout_ms", "body_timeout_ms", "request_timeout_ms");
+    SECTION("incorrect scalar syntax")
+    {
+        const std::string value = GENERATE("true", "\"1000\"", "-1", "1.5", "10ms");
+        const auto error = require_parser_error("server { " + directive + " " + value + "; }");
+        CHECK(error.code != sparenode::configuration::ConfigParserErrorCode::integer_out_of_range);
+    }
+    SECTION("wrong block")
+    {
+        const auto error =
+            require_parser_error("server { share \"docs\" { " + directive + " 1000; } }");
+        CHECK(error.code == sparenode::configuration::ConfigParserErrorCode::unexpected_token);
+    }
+}
 
 TEST_CASE("Configuration parser accepts an empty server block", "[configuration][parser]")
 {

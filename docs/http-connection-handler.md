@@ -31,15 +31,41 @@ Network receive/send failures remain structured `NetworkError` values.
 
 ## Cancellation and deadlines
 
-Every receive always carries the dispatcher worker's stop token and an absolute
-steady-clock deadline. By default, a request has a 30-second total budget so a
-slow client cannot retain a dispatcher worker indefinitely. An optional
-`HttpRequestDeadlineProvider` may replace that deadline for the next read but
-cannot replace cancellation. Returning no deadline selects the bounded fallback.
-The provider receives the current read phase
-(`headers` or `body`) and the session start time. This is the injection boundary
-for SN-089 to combine header inactivity, body inactivity, and total-request
-budgets without placing HTTP policy in the socket layer.
+Every receive carries the dispatcher worker's stop token and an absolute
+steady-clock deadline. `HttpRequestTimeouts` groups header inactivity (10 seconds),
+body inactivity (10 seconds), and total receive time (30 seconds). Runtime server
+settings carry these budgets from the validated `header_timeout_ms`,
+`body_timeout_ms`, and `request_timeout_ms` directives into the application handler.
+
+Inactivity starts at session entry and renews only after a nonempty receive. The
+body phase begins once the complete header terminator arrives; its inactivity
+anchor is the timestamp of that receive. Parsing and buffer preparation do not
+renew the timer. Each read uses the earlier of its phase deadline and the immutable
+total deadline. A shorter total budget is valid and prevents trickle traffic from
+extending a session indefinitely.
+
+An optional `HttpRequestDeadlineProvider` receives the phase and session start;
+its result can only shorten the configured deadline. Returning no value leaves
+the built-in policy in effect. Provider exceptions remain contained at the session
+boundary. Direct C++ configurations reject nonpositive or unrepresentable budgets
+before I/O; persistent configuration additionally caps each value at 24 hours.
+
+Expiry returns `NetworkErrorDomain::timeout` with the receive operation, closes
+the owned connection, and releases the dispatcher worker. The configured failure
+observer logs the structured error without request contents. No HTTP error response
+is attempted after a receive timeout. Cancellation remains a distinct failure and
+wins if already observable at the same wait boundary as timeout.
+
+These are request-receive deadlines. They start when the worker begins the session,
+not at TCP accept, and do not interrupt route execution or response writes. Native
+readiness already reported by the poller may complete a receive at the deadline
+boundary, consistent with the socket I/O contract.
 
 There are no session timer threads and no active polling loops. Deadlines are
 enforced by the deadline-aware native socket wait introduced by SN-094.
+
+Deadline arithmetic and renewal are tested using explicit timestamps, including
+exact representable boundaries. Loopback tests cover idle clients, partial headers,
+partial bodies, total expiry despite repeated receive progress, provider clamping,
+cancellation, logging, and worker reuse. A timeout closes the connection; unread
+input may make the peer observe a TCP reset instead of an orderly EOF.

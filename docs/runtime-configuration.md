@@ -21,6 +21,7 @@ if a later grammar permits multiple server blocks. Each server configuration con
   non-zero `std::uint16_t` range check;
 - the multithreading switch and configured worker count;
 - the minimum `logging::LogSeverity`;
+- grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
 - an ordered collection of `runtime::ShareConfig` values.
 
 Each share contains its decoded display name, a canonical `SharedRoot`, and independent
@@ -43,6 +44,9 @@ Omitted directives map to these values:
 | multithreading | `false` |
 | worker threads | `1` |
 | log level | `info` |
+| header timeout | `10000 ms` |
+| body timeout | `10000 ms` |
+| total request timeout | `30000 ms` |
 | read permission | `true` |
 | write permission | `false` |
 | delete permission | `false` |

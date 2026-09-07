@@ -11,11 +11,14 @@ namespace sparenode::configuration::directives
 /// @brief Identifies a directive permitted directly inside a version-one `server` block.
 enum class ServerDirectiveKind : std::uint8_t
 {
-    bind,           ///< Server address string.
-    port,           ///< Server port integer.
-    multithreading, ///< Worker-pool enable switch.
-    worker_threads, ///< Requested worker count.
-    log_level,      ///< Minimum logging severity string.
+    bind,               ///< Server address string.
+    port,               ///< Server port integer.
+    multithreading,     ///< Worker-pool enable switch.
+    worker_threads,     ///< Requested worker count.
+    log_level,          ///< Minimum logging severity string.
+    header_timeout_ms,  ///< Header read inactivity budget in milliseconds.
+    body_timeout_ms,    ///< Body read inactivity budget in milliseconds.
+    request_timeout_ms, ///< Total request receive budget in milliseconds.
 };
 
 /// @brief Represents one syntactically valid directive inside a `server` block.

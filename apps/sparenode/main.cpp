@@ -51,7 +51,9 @@ int main(const int argc, const char *const argv[])
     const sparenode::logging::Logger logger(console_sink, minimum_severity);
 
     const auto router = std::make_shared<const sparenode::http::HttpRouter>();
-    auto handler = sparenode::http::make_http_connection_handler(router);
+    auto handler = sparenode::http::make_http_connection_handler(
+        router,
+        {.timeouts = config_result->servers().front().http_timeouts(), .deadline_provider = {}});
     sparenode::application::RunningApplicationObservers observers{
         sparenode::logging::make_connection_failure_log_observer(logger),
         sparenode::logging::make_connection_server_failure_log_observer(logger)};

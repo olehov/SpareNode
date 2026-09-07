@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -70,6 +71,37 @@ require_validation_errors(const std::string_view input)
 }
 
 } // namespace
+
+TEST_CASE("Configuration timeout directives enforce bounds and singleton semantics",
+          "[configuration][validator][timeout]")
+{
+    const std::string directive =
+        GENERATE("header_timeout_ms", "body_timeout_ms", "request_timeout_ms");
+    const sparenode::test::TemporaryDirectory directory("sparenode-timeout-validator");
+    SECTION("inclusive valid boundaries")
+    {
+        const std::string value = GENERATE("1", "86400000");
+        const auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), directive + " " + value + ";")));
+        REQUIRE(result.has_value());
+    }
+    SECTION("zero overflow and excessive durations")
+    {
+        const std::string value = GENERATE("0", "86400001", "18446744073709551615");
+        const auto errors = require_validation_errors(
+            make_configuration(directory.path(), directive + " " + value + ";"));
+        REQUIRE(errors.size() == 1);
+        CHECK(errors.front().code == ConfigValidationErrorCode::timeout_out_of_range);
+        CHECK(errors.front().server_directive.has_value());
+    }
+    SECTION("duplicates")
+    {
+        const auto errors = require_validation_errors(
+            make_configuration(directory.path(), directive + " 1000; " + directive + " 2000;"));
+        REQUIRE(errors.size() == 1);
+        CHECK(errors.front().code == ConfigValidationErrorCode::duplicate_server_directive);
+    }
+}
 
 TEST_CASE("Configuration validator accepts version one defaults and independent permissions",
           "[configuration][validator]")
