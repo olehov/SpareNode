@@ -22,6 +22,7 @@ using directives::ShareDirectiveKind;
 /// @brief Holds mapper-local server values before immutable runtime construction.
 struct ServerValues
 {
+    http::HttpRequestTimeouts http_timeouts{};      ///< Default HTTP receive budgets.
     network::TcpEndpoint endpoint{"0.0.0.0", 8080}; ///< Default listener endpoint.
     bool multithreading_enabled{false};             ///< Default single-worker switch.
     std::size_t worker_threads{1};                  ///< Default worker count.
@@ -65,6 +66,21 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
             server.minimum_log_severity = *severity;
         }
         break;
+    case ServerDirectiveKind::header_timeout_ms:
+        server.http_timeouts.headers =
+            std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
+                std::get<std::uint64_t>(directive.value.scalar))};
+        break;
+    case ServerDirectiveKind::body_timeout_ms:
+        server.http_timeouts.body =
+            std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
+                std::get<std::uint64_t>(directive.value.scalar))};
+        break;
+    case ServerDirectiveKind::request_timeout_ms:
+        server.http_timeouts.total =
+            std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
+                std::get<std::uint64_t>(directive.value.scalar))};
+        break;
     }
 }
 
@@ -92,6 +108,8 @@ void apply_share_directive(const directives::ParsedShareDirective &directive,
 
 } // namespace
 
+/// @brief Applies validated directives over defaults, preserving HTTP receive budgets.
+/// @return Runtime servers and shares without parser metadata.
 runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration)
 {
     ServerValues server;
@@ -119,7 +137,8 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
     }
     std::vector<runtime::ServerConfig> servers;
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
-                         server.worker_threads, server.minimum_log_severity, std::move(shares));
+                         server.worker_threads, server.minimum_log_severity, std::move(shares),
+                         server.http_timeouts);
     return runtime::AppConfig(std::move(servers));
 }
 

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/share_config.hpp"
+#include "sparenode/http/http_request_timeouts.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 
@@ -21,12 +22,13 @@ class ServerConfig final
     /// @param[in] worker_threads Configured worker count.
     /// @param[in] minimum_log_severity Minimum emitted log severity.
     /// @param[in] shares Validated filesystem shares in configuration order.
+    /// @param[in] http_timeouts Validated HTTP receive budgets.
     ServerConfig(network::TcpEndpoint endpoint, bool multithreading_enabled,
                  std::size_t worker_threads, logging::LogSeverity minimum_log_severity,
-                 std::vector<ShareConfig> shares)
+                 std::vector<ShareConfig> shares, http::HttpRequestTimeouts http_timeouts = {})
         : endpoint_(std::move(endpoint)), multithreading_enabled_(multithreading_enabled),
           worker_threads_(worker_threads), minimum_log_severity_(minimum_log_severity),
-          shares_(std::move(shares))
+          shares_(std::move(shares)), http_timeouts_(http_timeouts)
     {
     }
 
@@ -72,12 +74,20 @@ class ServerConfig final
         return multithreading_enabled_ ? worker_threads_ : 1;
     }
 
+    /// @brief Returns the validated HTTP receive policy.
+    /// @return Header/body inactivity and total receive budgets.
+    [[nodiscard]] const http::HttpRequestTimeouts &http_timeouts() const noexcept
+    {
+        return http_timeouts_;
+    }
+
   private:
     network::TcpEndpoint endpoint_;             ///< Numeric listener address and TCP port.
     bool multithreading_enabled_;               ///< Enables the configured fixed worker pool.
     std::size_t worker_threads_;                ///< Configured worker count.
     logging::LogSeverity minimum_log_severity_; ///< Minimum emitted log severity.
     std::vector<ShareConfig> shares_;           ///< Validated shares in configuration order.
+    http::HttpRequestTimeouts http_timeouts_;   ///< Immutable HTTP receive budgets.
 };
 
 } // namespace sparenode::configuration::runtime

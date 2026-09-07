@@ -26,6 +26,7 @@ enum class ConfigValidationErrorCode : std::uint8_t
     unexpected_worker_threads,   ///< A worker count is present while multithreading is disabled.
     worker_threads_out_of_range, ///< The enabled worker count is outside 2 through 64.
     invalid_log_level,           ///< `log_level` is not a supported severity.
+    timeout_out_of_range,        ///< A receive timeout is outside 1 through 86400000 milliseconds.
     empty_share_name,            ///< A share display name decodes to an empty string.
     duplicate_share_name,        ///< Two share blocks use the same display name.
     duplicate_share_directive,   ///< A singleton share directive appears more than once.

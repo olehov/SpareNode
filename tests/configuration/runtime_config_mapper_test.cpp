@@ -64,6 +64,9 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
     CHECK(server.worker_threads() == 1);
     CHECK(server.effective_worker_count() == 1);
     CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::info);
+    CHECK(server.http_timeouts().headers == std::chrono::seconds{10});
+    CHECK(server.http_timeouts().body == std::chrono::seconds{10});
+    CHECK(server.http_timeouts().total == std::chrono::seconds{30});
     REQUIRE(server.shares().size() == 1);
     CHECK(server.shares().front().name() == "Documents");
     CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
@@ -78,7 +81,8 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     const std::string input =
         make_configuration(directory.path(),
                            "bind \"::1\";\nport 8443;\nmultithreading true;\nworker_threads 8;\n"
-                           "log_level \"warning\";\n",
+                           "log_level \"warning\";\nheader_timeout_ms 1500;\n"
+                           "body_timeout_ms 2500;\nrequest_timeout_ms 90000;\n",
                            "read false;\nwrite true;\ndelete true;\n");
     const auto validated = validate_configuration(input);
 
@@ -91,6 +95,9 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     CHECK(server.worker_threads() == 8);
     CHECK(server.effective_worker_count() == 8);
     CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::warning);
+    CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1500});
+    CHECK(server.http_timeouts().body == std::chrono::milliseconds{2500});
+    CHECK(server.http_timeouts().total == std::chrono::seconds{90});
     REQUIRE(server.shares().size() == 1);
     CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{false, true, true});

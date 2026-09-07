@@ -44,6 +44,9 @@ write_config(const sparenode::test::TemporaryDirectory &directory, const std::st
            "multithreading true;\n"
            "worker_threads 3;\n"
            "log_level \"warning\";\n"
+           "header_timeout_ms 1200;\n"
+           "body_timeout_ms 2400;\n"
+           "request_timeout_ms 3600;\n"
            "share \"Documents\" {\n"
            "path \"" +
            shared_root.generic_string() + "\";\nread false;\nwrite true;\ndelete true;\n}\n}";
@@ -90,6 +93,9 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     CHECK(server.endpoint().port == 8181);
     CHECK(server.effective_worker_count() == 3);
     CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::warning);
+    CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1200});
+    CHECK(server.http_timeouts().body == std::chrono::milliseconds{2400});
+    CHECK(server.http_timeouts().total == std::chrono::milliseconds{3600});
     REQUIRE(server.shares().size() == 1);
     CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
     CHECK(server.shares().front().permissions() ==

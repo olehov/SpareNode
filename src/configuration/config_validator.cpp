@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "sparenode/http/http_request_timeouts.hpp"
 #include "sparenode/logging/log_severity.hpp"
 
 #ifdef _WIN32
@@ -119,6 +120,24 @@ class ValidationState final
         case ServerDirectiveKind::log_level:
             validate_log_level(directive);
             break;
+        case ServerDirectiveKind::header_timeout_ms:
+        case ServerDirectiveKind::body_timeout_ms:
+        case ServerDirectiveKind::request_timeout_ms:
+            validate_timeout(directive);
+            break;
+        }
+    }
+
+    /// @brief Bounds a receive timeout before conversion to a signed chrono duration.
+    /// @param[in] directive Integer timeout directive with a retained source location.
+    void validate_timeout(const ParsedServerDirective &directive)
+    {
+        const auto value = std::get<std::uint64_t>(directive.value.scalar);
+        if (value == 0 || value > static_cast<std::uint64_t>(
+                                      http::HttpRequestTimeouts::maximum_config_timeout.count()))
+        {
+            add_server_error(ConfigValidationErrorCode::timeout_out_of_range, directive,
+                             directive.value.location);
         }
     }
 
@@ -368,6 +387,8 @@ ConfigValidator::validate(ParsedConfiguration configuration)
                                   std::move(validation).release_shared_roots());
 }
 
+/// @brief Describes a validation failure, including the accepted receive-timeout range.
+/// @return Static diagnostic text suitable for configuration error reporting.
 const char *to_string(const ConfigValidationErrorCode code) noexcept
 {
     switch (code)
@@ -390,6 +411,8 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
         return "worker_threads must be between 2 and 64";
     case ConfigValidationErrorCode::invalid_log_level:
         return "log_level is not supported";
+    case ConfigValidationErrorCode::timeout_out_of_range:
+        return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
     case ConfigValidationErrorCode::empty_share_name:
         return "share name must not be empty";
     case ConfigValidationErrorCode::duplicate_share_name:

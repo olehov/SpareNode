@@ -9,6 +9,7 @@
 #include <stop_token>
 
 #include "sparenode/http/http_request_parser.hpp"
+#include "sparenode/http/http_request_timeouts.hpp"
 #include "sparenode/http/http_router.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_io_options.hpp"
@@ -25,8 +26,8 @@ enum class HttpRequestReadPhase : std::uint8_t
 
 /// @brief Supplies an optional absolute deadline for each blocking request read.
 ///
-/// SN-089 can provide phase-specific inactivity deadlines without coupling HTTP
-/// configuration policy to the socket layer. Implementations are invoked on a
+/// Returned deadlines may shorten but never extend configured receive budgets.
+/// A missing deadline retains the configured limits. Implementations are invoked on a
 /// dispatcher worker and must be safe for concurrent calls.
 using HttpRequestDeadlineProvider = std::function<std::optional<network::NetworkDeadline>(
     HttpRequestReadPhase phase, network::NetworkDeadline session_started)>;
@@ -36,8 +37,8 @@ struct HttpConnectionHandlerConfig
 {
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
-    std::chrono::milliseconds request_timeout{std::chrono::seconds{30}}; ///< Total fallback budget.
-    HttpRequestDeadlineProvider deadline_provider; ///< Optional per-read deadline override.
+    HttpRequestTimeouts timeouts{}; ///< Header/body inactivity and total receive budgets.
+    HttpRequestDeadlineProvider deadline_provider; ///< Optional earlier per-read deadline.
 };
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.

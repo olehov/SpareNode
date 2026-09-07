@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <chrono>
@@ -6,6 +7,7 @@
 #include <future>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -15,6 +17,8 @@
 #include "sparenode/http/http_connection_handler.hpp"
 #include "sparenode/http/http_response.hpp"
 #include "sparenode/http/http_status_code.hpp"
+#include "sparenode/logging/console_log_sink.hpp"
+#include "sparenode/logging/network_logging.hpp"
 #include "sparenode/network/connection_server.hpp"
 #include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
@@ -172,7 +176,7 @@ TEST_CASE("HTTP connection session applies its default deadline policy",
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     const sparenode::http::HttpConnectionHandlerConfig config{
-        .request_timeout = std::chrono::milliseconds{20},
+        .timeouts = {.total = std::chrono::milliseconds{20}},
         .deadline_provider = {},
     };
 
@@ -282,7 +286,7 @@ TEST_CASE("HTTP connection session accepts a timeout near the deadline represent
     const auto request_timeout =
         std::chrono::duration_cast<std::chrono::milliseconds>(remaining) - clock_sample_margin;
     const sparenode::http::HttpConnectionHandlerConfig config{
-        .request_timeout = request_timeout,
+        .timeouts = {.total = request_timeout},
         .deadline_provider = {},
     };
 
@@ -304,7 +308,7 @@ TEST_CASE("HTTP connection session rejects the first timeout beyond its deadline
     const auto request_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(remaining) +
                                  std::chrono::milliseconds{1};
     const sparenode::http::HttpConnectionHandlerConfig config{
-        .request_timeout = request_timeout,
+        .timeouts = {.total = request_timeout},
         .deadline_provider = {},
     };
 
@@ -354,4 +358,134 @@ TEST_CASE("HTTP connection session observes dispatcher cancellation",
     CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
     CHECK(pair.client.peer_closes_within(std::chrono::seconds{1}));
+}
+
+TEST_CASE("HTTP sessions expire idle partial headers and partial bodies",
+          "[http][session][integration][timeout]")
+{
+    const std::string_view prefix =
+        GENERATE("", "GET / HTTP/1.1\r\nHost: loc",
+                 "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\nx");
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const bool reading_body = prefix.ends_with("\r\n\r\nx");
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.headers =
+                         reading_body ? std::chrono::seconds{30} : std::chrono::milliseconds{30},
+                     .body =
+                         reading_body ? std::chrono::milliseconds{30} : std::chrono::seconds{30},
+                     .total = std::chrono::seconds{30}},
+        .deadline_provider = {}};
+    send_all(pair.client, prefix);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+    // A broad watchdog distinguishes phase expiry from the much later total cap.
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{5});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(pair.client.peer_closes_within(std::chrono::seconds{1}));
+}
+
+TEST_CASE("A custom HTTP deadline cannot extend the configured total budget",
+          "[http][session][integration][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.total = std::chrono::milliseconds{20}},
+        .deadline_provider =
+            [](sparenode::http::HttpRequestReadPhase, sparenode::network::NetworkDeadline started)
+        { return started + std::chrono::seconds{10}; }};
+    const auto started = std::chrono::steady_clock::now();
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{5});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+}
+
+TEST_CASE("HTTP total deadline expires despite repeated receive progress",
+          "[http][session][integration][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::size_t reads = 0;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .receive_chunk_bytes = 1,
+        .timeouts = {.headers = std::chrono::seconds{2},
+                     .body = std::chrono::seconds{2},
+                     .total = std::chrono::milliseconds{200}},
+        .deadline_provider =
+            [&](sparenode::http::HttpRequestReadPhase, sparenode::network::NetworkDeadline)
+        {
+            // Keep an incomplete request line readable across successive receives.
+            send_all(pair.client, "G");
+            ++reads;
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            return std::nullopt;
+        }};
+    const auto started = std::chrono::steady_clock::now();
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{5});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(reads > 1);
+    // Unread trickle bytes may cause a reset instead of orderly EOF on close.
+    std::array<std::byte, 1> buffer{};
+    const auto closed = pair.client.receive_within(buffer, std::chrono::seconds{1});
+    CHECK(sparenode::test::require_optional(closed) <= 0);
+}
+
+TEST_CASE("HTTP cancellation wins when the supplied deadline has already expired",
+          "[http][session][integration][timeout][cancel]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::stop_source stop;
+    stop.request_stop();
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .deadline_provider =
+            [](sparenode::http::HttpRequestReadPhase, sparenode::network::NetworkDeadline)
+        { return sparenode::network::NetworkDeadline{}; }};
+    const auto result = sparenode::http::handle_http_connection(std::move(pair.server), router,
+                                                                stop.get_token(), config);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
+}
+
+TEST_CASE("An HTTP timeout is logged and releases the sole worker for another request",
+          "[http][session][integration][timeout][logging]")
+{
+    std::ostringstream output;
+    const sparenode::logging::Logger logger(std::make_shared<sparenode::logging::ConsoleLogSink>(
+        output, sparenode::logging::ConsoleColorMode::disabled));
+    auto router = std::make_shared<sparenode::http::HttpRouter>();
+    auto handler = sparenode::http::make_http_connection_handler(
+        router, {.timeouts = {.headers = std::chrono::seconds{1}}, .deadline_provider = {}});
+    std::promise<sparenode::network::ConnectionFailure> failure;
+    auto observed = failure.get_future();
+    auto observer = [log_failure = sparenode::logging::make_connection_failure_log_observer(logger),
+                     &failure](const sparenode::network::ConnectionFailure &value)
+    {
+        log_failure(value);
+        failure.set_value(value);
+    };
+    auto started = sparenode::network::ConnectionServer::start(
+        {{"127.0.0.1", 0}, 128, false, {{1, 4}, std::move(handler), observer}, {}});
+    REQUIRE(started.has_value());
+    auto server = std::move(started).value();
+    const auto endpoint = server.local_endpoint();
+    auto idle = sparenode::test::connect_test_client(sparenode::test::require_optional(endpoint));
+    auto active = sparenode::test::connect_test_client(sparenode::test::require_optional(endpoint));
+    send_all(active, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    REQUIRE(observed.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+    const auto error = observed.get();
+    CHECK(sparenode::test::require_optional(error.network_error).domain ==
+          sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(receive_until_closed(active).starts_with("HTTP/1.1 404 Not Found\r\n"));
+    server.request_stop();
+    CHECK(output.str().contains("domain=timeout"));
 }

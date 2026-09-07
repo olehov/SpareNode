@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/http/detail/request_deadlines.hpp"
 #include "sparenode/http/http_response_writer.hpp"
 
 namespace sparenode::http
@@ -20,7 +21,7 @@ namespace
 enum class HttpSessionFailureCode : std::uint8_t
 {
     unknown = 0,       ///< No specific internal session failure was identified.
-    invalid_config,    ///< A zero or overflowing storage boundary was supplied.
+    invalid_config,    ///< An invalid storage boundary or receive budget was supplied.
     resource_failure,  ///< Bounded request storage could not be allocated.
     response_failure,  ///< A session-generated response violated its invariant.
     internal_exception ///< An injected policy or route unexpectedly threw.
@@ -28,13 +29,6 @@ enum class HttpSessionFailureCode : std::uint8_t
 
 /// Internal session details occupy 1 through 4; response-writer details occupy 100 through 106.
 constexpr int response_writer_error_detail_base = 100;
-
-/// @brief Groups immutable deadline state shared by every read in one session.
-struct RequestDeadlineContext
-{
-    network::NetworkDeadline session_started;   ///< Monotonic start supplied to custom policies.
-    network::NetworkDeadline fallback_deadline; ///< Validated total-request deadline.
-};
 
 /// @brief Converts one internal failure to the numeric network detail field.
 [[nodiscard]] constexpr int error_detail(const HttpSessionFailureCode code) noexcept
@@ -75,38 +69,6 @@ struct RequestDeadlineContext
                                     std::byte{'\n'}};
     return std::ranges::search(input, terminator).empty() ? HttpRequestReadPhase::headers
                                                           : HttpRequestReadPhase::body;
-}
-
-/// @brief Forms a fallback deadline without overflowing duration conversion or time-point addition.
-/// @param[in] session_started Monotonic start of the current session.
-/// @param[in] timeout Positive total request budget expressed in milliseconds.
-/// @return Absolute deadline, or no value when the timeout cannot be represented safely.
-[[nodiscard]] std::optional<network::NetworkDeadline>
-request_deadline(const network::NetworkDeadline session_started,
-                 const std::chrono::milliseconds timeout) noexcept
-{
-    using DeadlineDuration = network::NetworkDeadline::duration;
-
-    if (timeout.count() <= 0 || session_started < network::NetworkDeadline{})
-    {
-        return std::nullopt;
-    }
-
-    const DeadlineDuration remaining =
-        network::NetworkDeadline::max().time_since_epoch() - session_started.time_since_epoch();
-    const auto maximum_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
-    if (timeout > maximum_timeout)
-    {
-        return std::nullopt;
-    }
-
-    const DeadlineDuration converted_timeout =
-        std::chrono::duration_cast<DeadlineDuration>(timeout);
-    if (converted_timeout <= DeadlineDuration::zero() || converted_timeout > remaining)
-    {
-        return std::nullopt;
-    }
-    return session_started + converted_timeout;
 }
 
 /// @brief Selects the standard response status for one parser failure.
@@ -224,23 +186,17 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 /// @brief Resolves cancellation and deadline options for the next request read.
 /// @param[in] config Session configuration and optional provider.
 /// @param[in] phase Incomplete request section awaiting input.
-/// @param[in] deadlines Validated session start and fallback deadline.
+/// @param[in] session_started Monotonic session start supplied to custom policies.
 /// @param[in] stop_token Dispatcher cancellation token.
-/// @return Provider result or the bounded total-request fallback deadline.
+/// @return Optional custom deadline; built-in limits are applied by the receive loop.
 [[nodiscard]] network::NetworkIoOptions read_options(const HttpConnectionHandlerConfig &config,
                                                      const HttpRequestReadPhase phase,
-                                                     const RequestDeadlineContext &deadlines,
+                                                     const network::NetworkDeadline session_started,
                                                      const std::stop_token &stop_token)
 {
-    if (config.deadline_provider)
-    {
-        const auto provided_deadline = config.deadline_provider(phase, deadlines.session_started);
-        if (provided_deadline.has_value())
-        {
-            return {.stop_token = stop_token, .deadline = provided_deadline};
-        }
-    }
-    return {.stop_token = stop_token, .deadline = deadlines.fallback_deadline};
+    return {.stop_token = stop_token,
+            .deadline = config.deadline_provider ? config.deadline_provider(phase, session_started)
+                                                 : std::nullopt};
 }
 
 /// @brief Dispatches one complete request and writes its response.
@@ -267,20 +223,24 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &route
 
 } // namespace
 
+/// @brief Receives one bounded request, then routes it and sends its response.
+/// @return Success after response or peer EOF; otherwise a structured session failure.
+/// @details Nonempty receives renew inactivity but never the total receive deadline.
+/// Timeout returns immediately without attempting an HTTP error response.
 Result<void, network::NetworkError>
 handle_http_connection(network::TcpConnection connection, const HttpRouter &router,
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     const std::size_t request_limit = maximum_request_bytes(config.parser_limits);
     const auto session_started = std::chrono::steady_clock::now();
-    const auto fallback_deadline = request_deadline(session_started, config.request_timeout);
-    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !fallback_deadline.has_value())
+    auto deadline_state = detail::RequestDeadlines::create(config.timeouts, session_started);
+    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value())
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::validation,
             error_detail(HttpSessionFailureCode::invalid_config)});
     }
-    const RequestDeadlineContext deadlines{session_started, fallback_deadline.value()};
+    auto &deadlines = deadline_state.value();
 
     try
     {
@@ -309,9 +269,13 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
             const std::size_t requested = (std::min)(available, config.receive_chunk_bytes);
             const std::size_t previous_size = input.size();
             input.resize(previous_size + requested);
+            auto options = read_options(config, phase, session_started, stop_token);
+            const auto bounded_deadline = deadlines.next(phase == HttpRequestReadPhase::body);
+            options.deadline = options.deadline.has_value()
+                                   ? (std::min)(options.deadline.value(), bounded_deadline)
+                                   : bounded_deadline;
             auto received =
-                connection.receive_with_options(std::span(input).subspan(previous_size),
-                                                read_options(config, phase, deadlines, stop_token));
+                connection.receive_with_options(std::span(input).subspan(previous_size), options);
             if (!received)
             {
                 return unexpected(received.error());
@@ -320,6 +284,7 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
             {
                 return {};
             }
+            deadlines.record_progress(std::chrono::steady_clock::now());
             input.resize(previous_size + received.value());
         }
     }
