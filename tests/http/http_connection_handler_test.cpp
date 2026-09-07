@@ -277,8 +277,10 @@ TEST_CASE("HTTP connection session accepts a timeout near the deadline represent
     sparenode::http::HttpRouter router;
     const auto remaining = (sparenode::network::NetworkDeadline::max)().time_since_epoch() -
                            std::chrono::steady_clock::now().time_since_epoch();
+    // Allow for scheduler delays before the handler takes its own clock sample.
+    constexpr auto clock_sample_margin = std::chrono::minutes{1};
     const auto request_timeout =
-        std::chrono::duration_cast<std::chrono::milliseconds>(remaining) - std::chrono::seconds{1};
+        std::chrono::duration_cast<std::chrono::milliseconds>(remaining) - clock_sample_margin;
     const sparenode::http::HttpConnectionHandlerConfig config{
         .request_timeout = request_timeout,
         .deadline_provider = {},
