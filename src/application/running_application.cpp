@@ -22,7 +22,7 @@ constexpr std::size_t pending_connection_limit = 128;
 
 Result<RunningApplication, ApplicationStartError>
 RunningApplication::start(configuration::runtime::AppConfig config,
-                          network::ConnectionHandler handler)
+                          network::ConnectionHandler handler, RunningApplicationObservers observers)
 {
     if (config.servers().empty())
     {
@@ -39,8 +39,10 @@ RunningApplication::start(configuration::runtime::AppConfig config,
                 settings.endpoint(),
                 listen_backlog,
                 settings.multithreading_enabled(),
-                {{settings.worker_threads(), pending_connection_limit}, handler, {}},
-                {}};
+                {{settings.worker_threads(), pending_connection_limit},
+                 handler,
+                 observers.connection_failure},
+                observers.server_failure};
             auto server_result = network::ConnectionServer::start(std::move(server_config));
             if (!server_result)
             {

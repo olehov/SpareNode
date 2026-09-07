@@ -29,6 +29,16 @@ struct ApplicationStartError
     std::optional<network::ConnectionServerStartError> server_error; ///< Network detail.
 };
 
+/// @brief Groups optional runtime failure observers installed on every configured server.
+struct RunningApplicationObservers
+{
+    /// @brief Receives isolated connection-handler failures from dispatcher workers.
+    network::ConnectionFailureObserver connection_failure;
+
+    /// @brief Receives fatal accept or dispatch failures from server accept threads.
+    network::ConnectionServerFailureObserver server_failure;
+};
+
 /// @brief Owns validated settings and every connection server started from them.
 class RunningApplication final
 {
@@ -36,9 +46,11 @@ class RunningApplication final
     /// @brief Starts all configured servers using one shared connection handler.
     /// @param[in] config Validated parser-independent application settings.
     /// @param[in] handler Handler copied into each configured server.
+    /// @param[in] observers Failure observers copied into each configured server.
     /// @return Fully running RAII owner, or a structured startup failure.
     [[nodiscard]] static Result<RunningApplication, ApplicationStartError>
-    start(configuration::runtime::AppConfig config, network::ConnectionHandler handler);
+    start(configuration::runtime::AppConfig config, network::ConnectionHandler handler,
+          RunningApplicationObservers observers = {});
 
     /// @brief Transfers ownership of validated settings and all running servers.
     /// @param[in,out] other Application whose resources are transferred.

@@ -66,7 +66,13 @@ formatting, filtering, concurrency, and failure-containment tests deterministic.
 numeric code. `make_connection_failure_log_observer()` and
 `make_connection_server_failure_log_observer()` adapt the existing dispatcher
 and server observer APIs to logging without adding logger dependencies to the
-network domain interfaces.
+network domain interfaces. Production startup installs both adapters on every
+server through `RunningApplicationObservers`, so isolated HTTP handler failures
+and fatal accept or dispatch failures reach the configured console logger.
+
+HTTP protocol rejections that are successfully answered with a bounded `4xx`
+response are not server failures and are not logged. This avoids allowing
+malformed client traffic to flood the operational error log.
 
 ## Security and privacy
 

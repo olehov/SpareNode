@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -139,10 +141,27 @@ class TestClientSocket final
     [[nodiscard]] std::ptrdiff_t receive(const std::span<std::byte> bytes) const noexcept
     {
 #ifdef _WIN32
+        const std::size_t native_size =
+            (std::min)(bytes.size(), static_cast<std::size_t>((std::numeric_limits<int>::max)()));
         return ::recv(socket_, reinterpret_cast<char *>(bytes.data()),
-                      static_cast<int>(bytes.size()), 0);
+                      static_cast<int>(native_size), 0);
 #else
         return ::recv(socket_, bytes.data(), bytes.size(), 0);
+#endif
+    }
+
+    /// Sends one caller-bounded payload to the connected server socket.
+    /// @param[in] bytes Bytes available for transmission.
+    /// @return Native send count or failure sentinel.
+    [[nodiscard]] std::ptrdiff_t send(const std::span<const std::byte> bytes) const noexcept
+    {
+#ifdef _WIN32
+        const std::size_t native_size =
+            (std::min)(bytes.size(), static_cast<std::size_t>((std::numeric_limits<int>::max)()));
+        return ::send(socket_, reinterpret_cast<const char *>(bytes.data()),
+                      static_cast<int>(native_size), 0);
+#else
+        return ::send(socket_, bytes.data(), bytes.size(), 0);
 #endif
     }
 
