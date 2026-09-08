@@ -50,7 +50,7 @@ HttpMethod HttpRequestView::method() const noexcept
     return method_;
 }
 
-/// @brief Returns the validated borrowed origin-form request target.
+/// @brief Returns the normalized path/query or server-wide asterisk target.
 std::string_view HttpRequestView::target() const noexcept
 {
     return target_;

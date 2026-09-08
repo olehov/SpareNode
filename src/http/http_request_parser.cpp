@@ -3,6 +3,7 @@
 #include "sparenode/http/detail/body_decode_buffer.hpp"
 #include "sparenode/http/detail/host_authority.hpp"
 #include "sparenode/http/detail/http_request_view_access.hpp"
+#include "sparenode/http/detail/request_target.hpp"
 #include "sparenode/http/http_body_decoder.hpp"
 
 #include <algorithm>
@@ -16,9 +17,6 @@ namespace sparenode::http
 {
 namespace
 {
-
-/// @brief Number of bytes in one percent-encoded URI sequence (`%HH`).
-constexpr std::size_t percent_encoded_sequence_size = 3;
 
 /// @brief Stores the byte offset immediately before a validated CRLF delimiter.
 struct LineEnd
@@ -233,74 +231,6 @@ find_header_line_end(const std::string_view input, const HeaderLineSearch &searc
     return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::unsupported_method, offset});
 }
 
-/// @brief Checks whether one byte is an ASCII hexadecimal digit.
-/// @param[in] byte Byte to classify without locale-dependent behavior.
-/// @return `true` for `0-9`, `A-F`, or `a-f`.
-[[nodiscard]] constexpr bool is_hexadecimal_digit(const unsigned char byte) noexcept
-{
-    return (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'F') ||
-           (byte >= 'a' && byte <= 'f');
-}
-
-/// @brief Checks whether one byte belongs to the RFC 3986 `pchar` set.
-/// @param[in] byte Unescaped request-target byte to classify.
-/// @return `true` for an unreserved, sub-delimiter, colon, or at-sign byte.
-[[nodiscard]] constexpr bool is_path_character(const unsigned char byte) noexcept
-{
-    const bool is_alpha_numeric = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') ||
-                                  (byte >= 'a' && byte <= 'z');
-    constexpr std::string_view punctuation = "-._~!$&'()*+,;=:@";
-    return is_alpha_numeric || punctuation.find(static_cast<char>(byte)) != std::string_view::npos;
-}
-
-/// @brief Validates an RFC 3986 origin-form path and optional query.
-/// @param[in] target Request-target bytes from the request line.
-/// @return `true` when every path, query, and percent-encoded byte is grammatical.
-[[nodiscard]] bool valid_request_target(const std::string_view target) noexcept
-{
-    if (target.empty() || target.front() != '/')
-    {
-        return false;
-    }
-
-    bool query_started = false;
-    for (std::size_t index = 0; index < target.size(); ++index)
-    {
-        const auto byte = static_cast<unsigned char>(target[index]);
-        if (byte == '%')
-        {
-            if (target.size() - index < percent_encoded_sequence_size)
-            {
-                return false;
-            }
-            const std::string_view encoded_digits =
-                target.substr(index + 1, percent_encoded_sequence_size - 1);
-            if (!std::ranges::all_of(
-                    encoded_digits, [](const char digit)
-                    { return is_hexadecimal_digit(static_cast<unsigned char>(digit)); }))
-            {
-                return false;
-            }
-            index += percent_encoded_sequence_size - 1;
-            continue;
-        }
-        if (!query_started && byte == '?')
-        {
-            query_started = true;
-            continue;
-        }
-        if (byte == '/' || (query_started && byte == '?'))
-        {
-            continue;
-        }
-        if (!is_path_character(byte))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 /// @brief Parses a strict unsigned decimal Content-Length value.
 /// @param[in] value Trimmed header value to convert.
 /// @param[in] offset Source offset associated with a conversion failure.
@@ -323,12 +253,12 @@ parse_content_length(const std::string_view value, const std::size_t offset)
     return length;
 }
 
-/// @brief Parses the method, origin-form target, and HTTP version from one request line.
+/// @brief Parses the method, supported target form, and HTTP version from one request line.
 /// @param[in] line Request line excluding its CRLF terminator.
-/// @param[out] target Borrowed validated request target.
+/// @param[out] target Validated routing target and optional absolute authority.
 /// @return Supported method or a structured request-line failure.
 [[nodiscard]] Result<HttpMethod, HttpRequestParseError>
-parse_request_line(const std::string_view line, std::string_view &target)
+parse_request_line(const std::string_view line, detail::ParsedRequestTarget &target)
 {
     const std::size_t first_space = line.find(' ');
     if (first_space == std::string_view::npos)
@@ -349,17 +279,20 @@ parse_request_line(const std::string_view line, std::string_view &target)
     {
         return unexpected(method_result.error());
     }
-    target = line.substr(first_space + 1, second_space - first_space - 1);
-    if (!valid_request_target(target))
+    auto target_result =
+        detail::parse_request_target(line.substr(first_space + 1, second_space - first_space - 1),
+                                     method_result.value(), first_space + 1);
+    if (!target_result)
     {
-        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::invalid_request_target,
-                                                first_space + 1});
+        return unexpected(target_result.error());
     }
-    if (line.substr(second_space + 1) != "HTTP/1.1")
+    if (const auto version =
+            detail::validate_request_version(line.substr(second_space + 1), second_space + 1);
+        !version)
     {
-        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::unsupported_http_version,
-                                                second_space + 1});
+        return unexpected(version.error());
     }
+    target = std::move(target_result.value());
     return method_result;
 }
 
@@ -597,7 +530,7 @@ parse_http_request_head(const std::span<const std::byte> input,
     }
 
     const std::size_t request_line_end = request_line_end_result->value_or(LineEnd{}).offset;
-    std::string_view target;
+    detail::ParsedRequestTarget target;
     auto method_result = parse_request_line(text.substr(0, request_line_end), target);
     if (!method_result)
     {
@@ -615,9 +548,21 @@ parse_http_request_head(const std::span<const std::byte> input,
         return std::optional<HttpRequestHead>{};
     }
     ParsedHeaderSection parsed_headers = header_result->value_or(ParsedHeaderSection{});
+    // RFC 9112 absolute-form authority overrides Host for all downstream consumers.
+    if (!target.authority.empty())
+    {
+        for (auto &field : parsed_headers.headers)
+        {
+            if (ascii_case_insensitive_equal(field.name, "Host"))
+            {
+                field.value = target.authority;
+            }
+        }
+    }
     return std::optional<HttpRequestHead>{HttpRequestHead{
-        method_result.value(), target, std::move(parsed_headers.headers), parsed_headers.body_start,
-        parsed_headers.body_size, parsed_headers.chunked}};
+        method_result.value(), target.routing_target, std::move(parsed_headers.headers),
+        parsed_headers.body_start, parsed_headers.body_size, parsed_headers.chunked,
+        std::move(target.storage)}};
 }
 
 /// @brief Parses a bounded complete request; chunked payload owns decoded storage.
@@ -694,6 +639,8 @@ const char *to_string(const HttpRequestParseErrorCode code) noexcept
         return "HTTP request target is invalid";
     case HttpRequestParseErrorCode::unsupported_http_version:
         return "HTTP version is not supported";
+    case HttpRequestParseErrorCode::malformed_http_version:
+        return "HTTP version is malformed";
     case HttpRequestParseErrorCode::malformed_header:
         return "HTTP header is malformed";
     case HttpRequestParseErrorCode::folded_header:

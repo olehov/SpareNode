@@ -36,8 +36,8 @@ enum class HttpRequestParseErrorCode : std::uint8_t
     malformed_request_line,        ///< Request line does not contain exactly three components.
     invalid_method,                ///< Method is not a valid HTTP token.
     unsupported_method,            ///< Valid method is outside the SpareNode v0.1 subset.
-    invalid_request_target,        ///< Target is not a safe origin-form target.
-    unsupported_http_version,      ///< Version is not HTTP/1.1.
+    invalid_request_target,        ///< Target is outside the supported URI forms.
+    unsupported_http_version,      ///< Well-formed version is outside HTTP/1.1 through 1.9.
     malformed_header,              ///< Header name or value violates HTTP field syntax.
     folded_header,                 ///< Obsolete line folding was supplied.
     missing_host,                  ///< Required HTTP/1.1 Host field is absent or empty.
@@ -52,7 +52,8 @@ enum class HttpRequestParseErrorCode : std::uint8_t
     chunk_metadata_too_large,      ///< Chunk framing exceeds a line or cumulative bound.
     invalid_trailer,               ///< Trailer syntax or a forbidden trailer field was supplied.
     trailers_too_large,            ///< Trailer count or bytes exceed their configured limit.
-    incomplete_body                ///< EOF occurred before the declared body framing completed.
+    incomplete_body,               ///< EOF occurred before the declared body framing completed.
+    malformed_http_version         ///< Version token violates HTTP/DIGIT.DIGIT syntax.
 };
 
 /// @brief Preserves the portable HTTP parse failure and its input byte offset.
@@ -67,10 +68,11 @@ struct HttpRequestHead
 {
     HttpMethod method{};                  ///< Validated supported method.
     std::string_view target{};            ///< Borrowed validated target.
-    std::vector<HttpHeaderView> fields{}; ///< Borrowed original fields, never merged with trailers.
+    std::vector<HttpHeaderView> fields{}; ///< Effective fields; absolute authority replaces Host.
     std::size_t consumed_bytes{};         ///< Wire offset immediately after the head.
     std::size_t content_length{};         ///< Validated fixed length, zero when absent.
     bool chunked{}; ///< Selects chunked decoding instead of fixed-length ingestion.
+    std::shared_ptr<const std::string> target_storage{}; ///< Optional normalized target owner.
 };
 
 /// @brief Parses only request metadata so the body can be ingested incrementally.

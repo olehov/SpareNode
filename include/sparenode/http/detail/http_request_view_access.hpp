@@ -18,6 +18,7 @@ struct HttpRequestViewAccess
     {
         HttpRequestView request(head.method, head.target, std::move(head.fields), body);
         request.body_storage_ = std::move(storage);
+        request.target_storage_ = std::move(head.target_storage);
         return request;
     }
 };

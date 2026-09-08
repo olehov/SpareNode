@@ -77,9 +77,37 @@ Whitespace, underscores, malformed labels or literals, unbracketed IPv6, IPv6
 zone identifiers, empty ports, and out-of-range numeric components are rejected
 as `invalid_host` before routing.
 
-Only origin-form targets beginning with `/` are accepted. Raw spaces, ASCII
-control bytes, fragments, malformed percent escapes, backslashes, bytes outside
-the RFC 3986 path/query grammar, obsolete folded headers, duplicate `Host`,
-duplicate `Content-Length`, bare line feeds, and versions other than HTTP/1.1 are rejected.
-Filesystem decoding and containment remain the responsibility of `SafePath` at
-the later routing/filesystem boundary.
+## Request targets and versions
+
+Origin-form paths beginning with `/` remain unchanged. Absolute-form targets with
+the case-insensitive `http://` scheme are validated and exposed to the router as
+origin-form path/query bytes. An empty path becomes `/`; a query without a path
+becomes `/?query`. The latter retains shared immutable synthetic storage in both
+the parsed head and complete request, including across copies and moves.
+
+Following [RFC 9112 section 3.2.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.2),
+absolute-form authority is authoritative even when the received Host names a
+different destination. Its syntax uses the same supported authority grammar as
+Host. Every exposed Host value (`fields()`, `header()`, and `headers()`) is replaced
+with the URL authority before body ingestion or routing. The source bytes are not
+modified. A single syntactically valid Host field is still required by the
+HTTP/1.1 request validation rules; missing, duplicate, or invalid fields fail 400.
+No DNS lookup, listener-address comparison, or forwarding is performed.
+
+Only OPTIONS accepts `*`. The router handles it as a server-wide availability
+request, returning an empty 204 response without invoking resource handlers or
+claiming per-resource capabilities. Ordinary OPTIONS paths still use registered
+routes. Authority-form CONNECT, userinfo, unsupported schemes (including HTTPS on
+this cleartext-only transport), invalid authorities, and fragments are rejected.
+
+Raw spaces, controls, malformed percent escapes, backslashes, and bytes outside
+the supported RFC 3986 path/query grammar remain invalid. Percent escapes, dot
+segments, repeated slashes, and query bytes are not decoded or rewritten. Wire
+request-line limits apply before stripping an absolute authority. Filesystem
+decoding and containment remain the responsibility of `SafePath`.
+
+Version syntax is case-sensitive `HTTP/DIGIT.DIGIT`, with single decimal digits.
+HTTP/1.1 through HTTP/1.9 use HTTP/1.1 semantics and receive HTTP/1.1 responses.
+Well-formed unsupported versions (including HTTP/1.0 and other major versions)
+produce 505. Malformed versions, such as HTTP/1.10 or HTTP/1.x, produce 400.
+This policy does not implement HTTP/2, HTTP/3, TLS, or Upgrade negotiation.

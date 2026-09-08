@@ -551,3 +551,38 @@ TEST_CASE("HTTP chunked body wait remains cancellable", "[http][session][chunked
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
 }
+
+TEST_CASE("HTTP session applies target and version policy on the wire", "[http][session][target]")
+{
+    const auto fixture =
+        GENERATE(std::pair{"GET http://local?x=1 HTTP/1.9", "HTTP/1.1 200 OK\r\n"},
+                 std::pair{"OPTIONS * HTTP/1.2", "HTTP/1.1 204 No Content\r\n"},
+                 std::pair{"GET / HTTP/2.0", "HTTP/1.1 505 HTTP Version Not Supported\r\n"},
+                 std::pair{"GET / HTTP/1.10", "HTTP/1.1 400 Bad Request\r\n"},
+                 std::pair{"GET * HTTP/1.1", "HTTP/1.1 400 Bad Request\r\n"});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::string routed_target;
+    std::string routed_host;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::get, "/",
+                                  [&](const sparenode::http::HttpRequestView &request,
+                                      const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      routed_target = request.target();
+                                      routed_host = request.header("Host");
+                                      return ok_response();
+                                  }));
+    send_all(pair.client, std::string(fixture.first) + "\r\nHost: other\r\n\r\n");
+    const auto result = sparenode::http::handle_http_connection(std::move(pair.server), router, {});
+    REQUIRE(result.has_value());
+    CHECK(receive_until_closed(pair.client).starts_with(fixture.second));
+    if (std::string_view(fixture.first).starts_with("GET http:"))
+    {
+        CHECK(routed_target == "/?x=1");
+        CHECK(routed_host == "local");
+    }
+    else
+    {
+        CHECK(routed_target.empty());
+    }
+}
