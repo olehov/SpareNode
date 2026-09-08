@@ -9,6 +9,10 @@ Windows and Linux.
 SpareNode is in early development. The current repository provides the initial
 C++23 project foundation and a minimal `sparenode` executable.
 
+The current HTTP transport implements a restricted subset. Its supported behavior,
+limits, and tracked compatibility gaps are recorded in the
+[HTTP/1.1 conformance profile v1](docs/http-conformance-v1.md).
+
 ## Repository layout
 
 ```text
