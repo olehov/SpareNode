@@ -26,6 +26,7 @@ add_executable(sparenode_tests
     http/http_connection_handler_test.cpp
     http/request_deadlines_test.cpp
     http/http_request_parser_test.cpp
+    http/http_body_decoder_test.cpp
     http/http_router_test.cpp
     http/http_response_test.cpp
     logging/logger_test.cpp

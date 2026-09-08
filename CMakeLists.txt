@@ -51,8 +51,10 @@ add_library(sparenode_core STATIC
     src/http/http_connection_handler.cpp
     src/http/http_request.cpp
     src/http/http_request_parser.cpp
+    src/http/http_body_decoder.cpp
     src/http/detail/host_authority.cpp
     src/http/detail/request_deadlines.cpp
+    src/http/detail/buffered_request.cpp
     src/http/http_router.cpp
     src/http/http_response.cpp
     src/http/http_response_writer.cpp

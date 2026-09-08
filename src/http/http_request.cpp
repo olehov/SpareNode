@@ -62,7 +62,7 @@ std::span<const HttpHeaderView> HttpRequestView::fields() const noexcept
     return headers_;
 }
 
-/// @brief Returns exactly the body bytes declared by Content-Length.
+/// @brief Returns payload bytes after fixed-length ingestion or chunked decoding.
 std::span<const std::byte> HttpRequestView::body() const noexcept
 {
     return body_;

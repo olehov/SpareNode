@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -35,7 +36,7 @@ struct HttpHeaderView
 /// @brief Borrows a complete parsed HTTP/1.1 request without copying its bytes.
 ///
 /// Every view remains valid only while the original input buffer remains alive,
-/// unmoved, and unmodified. `body` contains exactly the declared Content-Length.
+/// unmoved, and unmodified. Decoded chunked bodies retain shared immutable storage.
 class HttpRequestView
 {
   public:
@@ -51,7 +52,7 @@ class HttpRequestView
     /// @return Read-only view over the bounded header collection.
     [[nodiscard]] std::span<const HttpHeaderView> fields() const noexcept;
 
-    /// @brief Returns exactly the bytes declared by Content-Length.
+    /// @brief Returns the decoded payload without transfer framing or trailers.
     /// @return Borrowed read-only request body.
     [[nodiscard]] std::span<const std::byte> body() const noexcept;
 
@@ -80,6 +81,7 @@ class HttpRequestView
     std::string_view target_;             ///< Origin-form request target beginning with `/`.
     std::vector<HttpHeaderView> headers_; ///< Bounded headers in source order.
     std::span<const std::byte> body_;     ///< Exact request body boundary.
+    std::shared_ptr<const std::vector<std::byte>> body_storage_; ///< Optional decoded-body owner.
 };
 
 /// @brief Returns the canonical uppercase spelling of a supported HTTP method.

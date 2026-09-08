@@ -1,8 +1,12 @@
 #include "sparenode/http/http_request_parser.hpp"
 
+#include "sparenode/http/detail/body_decode_buffer.hpp"
 #include "sparenode/http/detail/host_authority.hpp"
+#include "sparenode/http/detail/http_request_view_access.hpp"
+#include "sparenode/http/http_body_decoder.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <optional>
 #include <string_view>
@@ -10,28 +14,6 @@
 
 namespace sparenode::http
 {
-namespace detail
-{
-
-/// @brief Constructs immutable request views exclusively for the validated parser path.
-struct HttpRequestViewAccess
-{
-    /// @brief Forwards validated fields into the private complete-view constructor.
-    /// @param[in] method Validated supported method.
-    /// @param[in] target Validated origin-form target.
-    /// @param[in] headers Bounded validated header fields.
-    /// @param[in] body Exact borrowed request body.
-    /// @return Complete immutable request view.
-    [[nodiscard]] static HttpRequestView create(HttpMethod method, std::string_view target,
-                                                std::vector<HttpHeaderView> headers,
-                                                std::span<const std::byte> body)
-    {
-        return HttpRequestView(method, target, std::move(headers), body);
-    }
-};
-
-} // namespace detail
-
 namespace
 {
 
@@ -58,6 +40,7 @@ struct ParsedHeaderSection
     std::vector<HttpHeaderView> headers; ///< Parsed fields in source order.
     std::size_t body_start{};            ///< Offset immediately after the header terminator.
     std::size_t body_size{};             ///< Strict parsed Content-Length, or zero when absent.
+    bool chunked{};                      ///< Validated chunked framing.
 };
 
 /// @brief Preserves one validated field and the positions needed for diagnostics.
@@ -71,9 +54,12 @@ struct ParsedHeaderField
 /// @brief Accumulates bounded header and framing state during one parse.
 struct HeaderParseState
 {
-    std::vector<HttpHeaderView> headers;  ///< Parsed fields in source order.
-    std::optional<std::size_t> body_size; ///< Validated Content-Length when supplied.
-    bool host_seen{};                     ///< Whether the required Host field was observed.
+    std::vector<HttpHeaderView> headers;    ///< Parsed fields in source order.
+    std::optional<std::size_t> body_size;   ///< Validated Content-Length when supplied.
+    bool host_seen{};                       ///< Whether the required Host field was observed.
+    bool transfer_encoding_seen{};          ///< Whether Transfer-Encoding was observed.
+    std::string_view transfer_encoding;     ///< Borrowed coding list, validated after all fields.
+    std::size_t transfer_encoding_offset{}; ///< Coding field diagnostic offset.
 };
 
 /// @brief Searches for and validates the request-line terminator within its byte limit.
@@ -491,11 +477,42 @@ apply_header_field(const ParsedHeaderField &parsed, const HttpRequestParserLimit
     }
     else if (ascii_case_insensitive_equal(field.name, "Transfer-Encoding"))
     {
-        return unexpected(HttpRequestParseError{
-            HttpRequestParseErrorCode::unsupported_transfer_encoding, parsed.line_start});
+        if (state.transfer_encoding_seen)
+        {
+            return unexpected(HttpRequestParseError{
+                HttpRequestParseErrorCode::invalid_transfer_encoding, parsed.line_start});
+        }
+        state.transfer_encoding_seen = true;
+        state.transfer_encoding = field.value;
+        state.transfer_encoding_offset = parsed.value_start;
     }
     state.headers.push_back(field);
     return {};
+}
+
+/// @brief Resolves framing only after the complete header set is available.
+[[nodiscard]] Result<void, HttpRequestParseError> validate_framing(const HeaderParseState &state)
+{
+    if (!state.transfer_encoding_seen)
+    {
+        return {};
+    }
+    const auto offset = state.transfer_encoding_offset;
+    if (state.body_size.has_value())
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::conflicting_message_length, offset});
+    }
+    if (ascii_case_insensitive_equal(state.transfer_encoding, "chunked"))
+    {
+        return {};
+    }
+    // Only a single coding is supported. Lists and parameters are rejected as ambiguous.
+    const auto code = !state.transfer_encoding.empty() &&
+                              std::ranges::all_of(state.transfer_encoding, is_token_character)
+                          ? HttpRequestParseErrorCode::unsupported_transfer_encoding
+                          : HttpRequestParseErrorCode::invalid_transfer_encoding;
+    return unexpected(HttpRequestParseError{code, offset});
 }
 
 /// @brief Parses and validates the complete header section when it is available.
@@ -529,8 +546,13 @@ parse_header_section(const std::string_view input, const std::size_t header_star
                 return unexpected(
                     HttpRequestParseError{HttpRequestParseErrorCode::missing_host, header_start});
             }
-            return std::optional<ParsedHeaderSection>{ParsedHeaderSection{
-                std::move(state.headers), line_end + 2, state.body_size.value_or(0)}};
+            if (const auto framing = validate_framing(state); !framing)
+            {
+                return unexpected(framing.error());
+            }
+            return std::optional<ParsedHeaderSection>{
+                ParsedHeaderSection{std::move(state.headers), line_end + 2,
+                                    state.body_size.value_or(0), state.transfer_encoding_seen}};
         }
         if (state.headers.size() >= limits.max_header_count)
         {
@@ -554,13 +576,14 @@ parse_header_section(const std::string_view input, const std::size_t header_star
 
 } // namespace
 
-/// @brief Parses one complete bounded HTTP/1.1 request when enough bytes are available.
-Result<HttpRequestParseResult, HttpRequestParseError>
-parse_http_request(const std::span<const std::byte> input, const HttpRequestParserLimits &limits)
+/// @brief Validates request metadata independently of body arrival and storage policy.
+Result<std::optional<HttpRequestHead>, HttpRequestParseError>
+parse_http_request_head(const std::span<const std::byte> input,
+                        const HttpRequestParserLimits &limits)
 {
     if (input.empty())
     {
-        return HttpRequestParseResult::incomplete();
+        return std::optional<HttpRequestHead>{};
     }
     const std::string_view text(reinterpret_cast<const char *>(input.data()), input.size());
     auto request_line_end_result = find_request_line_end(text, limits.max_request_line_bytes);
@@ -570,7 +593,7 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
     }
     if (!request_line_end_result->has_value())
     {
-        return HttpRequestParseResult::incomplete();
+        return std::optional<HttpRequestHead>{};
     }
 
     const std::size_t request_line_end = request_line_end_result->value_or(LineEnd{}).offset;
@@ -589,19 +612,61 @@ parse_http_request(const std::span<const std::byte> input, const HttpRequestPars
     }
     if (!header_result->has_value())
     {
-        return HttpRequestParseResult::incomplete();
+        return std::optional<HttpRequestHead>{};
     }
     ParsedHeaderSection parsed_headers = header_result->value_or(ParsedHeaderSection{});
-    if (input.size() - parsed_headers.body_start < parsed_headers.body_size)
+    return std::optional<HttpRequestHead>{HttpRequestHead{
+        method_result.value(), target, std::move(parsed_headers.headers), parsed_headers.body_start,
+        parsed_headers.body_size, parsed_headers.chunked}};
+}
+
+/// @brief Parses a bounded complete request; chunked payload owns decoded storage.
+Result<HttpRequestParseResult, HttpRequestParseError>
+parse_http_request(const std::span<const std::byte> input, const HttpRequestParserLimits &limits)
+{
+    auto parsed = parse_http_request_head(input, limits);
+    if (!parsed)
+    {
+        return unexpected(parsed.error());
+    }
+    if (!parsed->has_value())
     {
         return HttpRequestParseResult::incomplete();
     }
-
+    auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
+    if (!head.chunked)
+    {
+        if (input.size() - head.consumed_bytes < head.content_length)
+        {
+            return HttpRequestParseResult::incomplete();
+        }
+        const auto consumed = head.consumed_bytes + head.content_length;
+        const auto body = input.subspan(head.consumed_bytes, head.content_length);
+        return HttpRequestParseResult::complete(
+            consumed, detail::HttpRequestViewAccess::create(std::move(head), body));
+    }
+    HttpBodyDecoder decoder(head, limits);
+    auto storage = std::make_shared<std::vector<std::byte>>();
+    std::array<std::byte, detail::body_decode_buffer_bytes> output{};
+    std::size_t consumed = head.consumed_bytes;
+    while (consumed < input.size() && !decoder.complete())
+    {
+        const auto progress = decoder.feed(input.subspan(consumed), output);
+        if (!progress)
+        {
+            return unexpected(progress.error());
+        }
+        storage->insert(storage->end(), output.begin(),
+                        output.begin() + static_cast<std::ptrdiff_t>(progress->produced));
+        consumed += progress->consumed;
+    }
+    if (!decoder.complete())
+    {
+        return HttpRequestParseResult::incomplete();
+    }
+    const std::span<const std::byte> body(*storage);
     return HttpRequestParseResult::complete(
-        parsed_headers.body_start + parsed_headers.body_size,
-        detail::HttpRequestViewAccess::create(
-            method_result.value(), target, std::move(parsed_headers.headers),
-            input.subspan(parsed_headers.body_start, parsed_headers.body_size)));
+        consumed, detail::HttpRequestViewAccess::create(std::move(head), body, std::move(storage)));
 }
 
 /// @brief Converts a portable HTTP parse failure into stable diagnostic text.
@@ -645,6 +710,20 @@ const char *to_string(const HttpRequestParseErrorCode code) noexcept
         return "HTTP Content-Length is repeated";
     case HttpRequestParseErrorCode::unsupported_transfer_encoding:
         return "HTTP Transfer-Encoding is not supported";
+    case HttpRequestParseErrorCode::invalid_transfer_encoding:
+        return "HTTP Transfer-Encoding is ambiguous or malformed";
+    case HttpRequestParseErrorCode::conflicting_message_length:
+        return "HTTP Transfer-Encoding conflicts with Content-Length";
+    case HttpRequestParseErrorCode::malformed_chunk:
+        return "HTTP chunk framing is malformed";
+    case HttpRequestParseErrorCode::chunk_metadata_too_large:
+        return "HTTP chunk metadata exceeds its configured limit";
+    case HttpRequestParseErrorCode::invalid_trailer:
+        return "HTTP trailer is invalid or forbidden";
+    case HttpRequestParseErrorCode::trailers_too_large:
+        return "HTTP trailers exceed their configured limit";
+    case HttpRequestParseErrorCode::incomplete_body:
+        return "HTTP request body ended before framing completed";
     }
     return "unknown HTTP request parse error";
 }

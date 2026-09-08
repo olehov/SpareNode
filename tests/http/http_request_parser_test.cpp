@@ -259,7 +259,7 @@ TEST_CASE("HTTP request parser rejects malformed and ambiguous protocol syntax",
          Code::invalid_content_length},
         {"POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\na",
          Code::duplicate_content_length},
-        {"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n",
+        {"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: gzip\r\n\r\n",
          Code::unsupported_transfer_encoding}};
 
     for (const auto &[source, expected] : cases)

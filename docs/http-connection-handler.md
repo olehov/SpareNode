@@ -2,29 +2,33 @@
 
 `handle_http_connection()` is the HTTP/TCP composition boundary used by dispatcher
 workers. It incrementally reads one HTTP/1.1 request into caller-independent,
-bounded storage, invokes `parse_http_request()` after each receive, dispatches a
+bounded storage, validates metadata with `parse_http_request_head()`, dispatches a
 complete borrowed request through `HttpRouter`, and streams the resulting
 `HttpResponse` through `write_http_response()`.
 
-The default request boundary is derived from the independent parser limits:
-request-line bytes, the line terminator, header bytes, and body bytes. Native
-receives request at most `receive_chunk_bytes` at a time. Invalid zero limits and
-overflowing combined limits are rejected before network I/O. The current parser
-requires a complete bounded body in memory; SN-087 will replace large-body
-retention with temporary-file ingestion.
+`BufferedRequest` freezes validated metadata storage and feeds fresh body bytes to
+one persistent `HttpBodyDecoder` for fixed-length and chunked framing. Only decoded
+payload is retained for routing. Chunk syntax is never reparsed on the next receive.
+Native receives request at most `receive_chunk_bytes` at a time, bounded also by
+the combined request-line, CRLF, header, and payload configuration. Zero receive
+chunks and overflowing combined limits are rejected before I/O. Framing and trailer
+limits apply independently of decoded payload limits. SN-087 can replace the
+bounded body buffer with temporary-file ingestion through the same decoder API.
 
 ## Connection policy
 
 Version 0.1 handles exactly one request and one response per TCP connection. If
 the initial receive contains pipelined bytes, the parser reports the first exact
-request boundary and the session keeps all input storage alive while routing and
+request boundary and the session keeps metadata and decoded storage alive while routing and
 writing that response. Bytes after the boundary are never interpreted as part of
-the first request. They are discarded only when the session returns and its
-exclusive `TcpConnection` closes. Persistent connections can be added later
+the first request. Already received trailing bytes are discarded; unread socket
+bytes remain until the exclusive `TcpConnection` closes. Persistent connections can be added later
 without changing parser boundaries.
 
 Malformed requests receive an empty bounded error response when transmission is
-still possible. The mapping uses 400 for general syntax, 413 for body size, 414
+still possible. EOF after a partial request also receives 400; an idle peer EOF
+remains a successful close. The mapping uses 400 for general syntax and framing
+ambiguity, 413 for body or chunk/trailer metadata limits, 414
 for request-target size, 431 for header limits, 501 for unsupported transport
 features, and 505 for unsupported HTTP versions. Route failures receive 500.
 Network receive/send failures remain structured `NetworkError` values.
