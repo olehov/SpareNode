@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -44,8 +45,8 @@ class HttpRequestView
     /// @return Parsed request method.
     [[nodiscard]] HttpMethod method() const noexcept;
 
-    /// @brief Returns the validated origin-form request target.
-    /// @return Borrowed target beginning with `/`.
+    /// @brief Returns the normalized routing target.
+    /// @return Origin-form path/query or `*` for server-wide OPTIONS.
     [[nodiscard]] std::string_view target() const noexcept;
 
     /// @brief Returns all parsed header fields in their original source order.
@@ -71,14 +72,15 @@ class HttpRequestView
 
     /// @brief Creates a complete view after every parser invariant has passed.
     /// @param[in] method Validated supported method.
-    /// @param[in] target Validated origin-form target.
+    /// @param[in] target Validated normalized routing target.
     /// @param[in] headers Bounded validated header fields in source order.
     /// @param[in] body Exact borrowed body boundary.
     HttpRequestView(HttpMethod method, std::string_view target, std::vector<HttpHeaderView> headers,
                     std::span<const std::byte> body);
 
-    HttpMethod method_{};                 ///< Parsed supported request method.
-    std::string_view target_;             ///< Origin-form request target beginning with `/`.
+    std::shared_ptr<const std::string> target_storage_; ///< Optional synthetic target owner.
+    HttpMethod method_{};                               ///< Parsed supported request method.
+    std::string_view target_;             ///< Normalized path/query or server-wide asterisk.
     std::vector<HttpHeaderView> headers_; ///< Bounded headers in source order.
     std::span<const std::byte> body_;     ///< Exact request body boundary.
     std::shared_ptr<const std::vector<std::byte>> body_storage_; ///< Optional decoded-body owner.

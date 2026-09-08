@@ -1,7 +1,7 @@
 # HTTP/1.1 conformance profile v1
 
-Profile revision: **v1-draft.2**, 2026-09-08.
-Implementation baseline: SN-097 implementation based on `72880bf`.
+Profile revision: **v1-draft.3**, 2026-09-08.
+Implementation baseline: SN-098 implementation based on `1857263`.
 Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 [SN-095](https://github.com/olehov/SpareNode/issues/103) and
 [Sprint 3](https://github.com/olehov/SpareNode/issues/105).
@@ -9,7 +9,7 @@ Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 This is a draft compatibility contract for SpareNode's restricted HTTP/1.1
 origin-server transport. It records current behavior separately from planned
 changes. It does not assert full HTTP/1.1 conformance. SN-096 remains incomplete
-until SN-098 through SN-100 deliver their behavior and this profile is reconciled
+until SN-099 and SN-100 deliver their behavior and this profile is reconciled
 with their implementation and tests.
 
 ## Classification
@@ -27,10 +27,11 @@ with their implementation and tests.
 | --- | --- | --- | --- |
 | Request-line and field parsing | Implemented | Strict CRLF, token field names, bounded fields, and rejection of obsolete folding. | [RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.2), [§5](https://www.rfc-editor.org/rfc/rfc9112.html#section-5) |
 | Origin-form targets | Implemented | Absolute paths beginning with `/`, with optional query; fragments and invalid escapes are rejected. | [RFC 9112 §3.2.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1) |
-| Absolute-form and asterisk-form | Deferred | Currently rejected. SN-098 owns absolute authority handling and `OPTIONS *`. | [RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.2), [§3.2.4](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.4) |
+| Absolute-form and asterisk-form | Implemented | HTTP absolute targets normalize to origin-form path/query; URL authority replaces the downstream Host, including on mismatch. OPTIONS alone accepts `*`, returning server-wide 204 without invoking resource routes. | [RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.2), [§3.2.4](https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.4) |
+| Absolute URI schemes | Intentionally restricted | Only case-insensitive `http://` is supported. HTTPS, other schemes, userinfo, fragments, and unsupported authority syntax fail 400. The parser guide specifies normalization and ownership. | [RFC 9110 §4.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2) |
 | Methods | Intentionally restricted | Parser accepts GET, HEAD, POST, PUT, DELETE, OPTIONS. Other valid method tokens produce 501; acceptance does not imply an installed endpoint. | [RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.1) |
 | Host | Intentionally restricted | Exactly one nonempty Host is required. The supported ASCII DNS/IPv4/bracketed-IPv6 authority grammar is described in the parser guide; it is not the complete URI reg-name grammar. | [RFC 9110 §7.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-7.2) |
-| HTTP versions | Deferred | Exact HTTP/1.1 only; other versions produce 505. SN-098 owns the HTTP/1.x compatibility policy. | [RFC 9112 §2.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.3) |
+| HTTP versions | Intentionally restricted | HTTP/1.1–1.9 use HTTP/1.1 semantics/responses. Well-formed unsupported versions, including 1.0, yield 505; malformed single-digit version grammar yields 400. | [RFC 9112 §2.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.3) |
 | Fixed request length | Implemented | One decimal Content-Length; overflow, duplicates, and invalid values are rejected. No length field means an empty body. | [RFC 9112 §6.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.2), [§6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
 | Chunked requests and trailers | Implemented | SN-097 provides incremental decoding, checked sizes, bounded ignored extensions and trailers, TE/CL rejection, and EOF validation. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1), [§7.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1) |
 | Transfer-coding subset | Intentionally restricted | One case-insensitive chunked coding only. Coding lists, parameters, and repeated TE fields fail with 400; other single coding tokens fail with 501. Trailer policy and limits are specified in the parser guide. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1) |
@@ -99,14 +100,16 @@ Endpoints must not implement their own competing message-framing policy.
 Current behavior is exercised by `tests/http/http_request_parser_test.cpp`,
 `http_connection_handler_test.cpp`, `http_response_test.cpp`, `http_router_test.cpp`,
 `http_body_decoder_test.cpp`, and `request_deadlines_test.cpp`, plus configuration
-and network tests. SN-097 coverage includes every split of a chunked fixture,
+and network tests. `request_target_test.cpp` and router/session tests cover
+normalization, authoritative Host replacement, query storage lifetime, OPTIONS *,
+wire length boundaries, and version syntax/status behavior. SN-097 coverage includes every split of a chunked fixture,
 small output buffers, exact limits, malformed framing, premature EOF, trailer
 isolation, and chunked loopback timeout/cancellation behavior.
 The corresponding implementation contracts are in the
 [parser](http-request-parser.md), [response](http-response.md),
 [router](http-router.md), and [session](http-connection-handler.md) guides.
 
-To finalize v1, update each deferred SN-098–SN-100 row after its implementation,
+To finalize v1, update each deferred SN-099–SN-100 row after its implementation,
 link its regression coverage, record remaining restrictions, and resolve the
 Expect/Date review items under SN-095. Verify Windows and Linux behavior and run
 the documentation checks. Change the baseline and revision whenever the recorded

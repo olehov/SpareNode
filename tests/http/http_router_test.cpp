@@ -66,6 +66,52 @@ respond_with(const sparenode::http::HttpStatusCode status, std::string reason)
 
 } // namespace
 
+TEST_CASE("Origin and absolute forms select the same route and wildcard suffix",
+          "[http][router][target]")
+{
+    sparenode::http::HttpRouter router;
+    std::vector<std::string> selected;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::get, "/files/*",
+                                  [&](const sparenode::http::HttpRequestView &request,
+                                      const sparenode::http::HttpRouteParameters &parameters)
+                                  {
+                                      selected.push_back(std::string(request.target()) + "|" +
+                                                         std::string(parameters.wildcard_suffix()));
+                                      return make_response(sparenode::http::HttpStatusCode::ok,
+                                                           "OK");
+                                  }));
+    const std::string origin = "GET /files/a%2Fb?x=1 HTTP/1.1\r\nHost: local\r\n\r\n";
+    const std::string absolute =
+        "GET http://local/files/a%2Fb?x=1 HTTP/1.9\r\nHost: different\r\n\r\n";
+    REQUIRE(router.dispatch(parse_request(origin)).has_value());
+    REQUIRE(router.dispatch(parse_request(absolute)).has_value());
+    // Two entries prove that both requests invoked the handler independently.
+    REQUIRE(selected.size() == 2);
+    CHECK(selected.front() == "/files/a%2Fb?x=1|a%2Fb");
+    CHECK(selected.back() == selected.front());
+}
+
+TEST_CASE("OPTIONS asterisk is server-wide and bypasses resource routes", "[http][router][target]")
+{
+    sparenode::http::HttpRouter router;
+    const std::string source = "OPTIONS * HTTP/1.1\r\nHost: local\r\n\r\n";
+    auto response = router.dispatch(parse_request(source));
+    REQUIRE(response.has_value());
+    CHECK(response->status_code() == sparenode::http::HttpStatusCode::no_content);
+    bool called = false;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::options, "/*",
+        [&](const sparenode::http::HttpRequestView &, const sparenode::http::HttpRouteParameters &)
+        {
+            called = true;
+            return make_response(sparenode::http::HttpStatusCode::ok, "OK");
+        }));
+    response = router.dispatch(parse_request(source));
+    REQUIRE(response.has_value());
+    CHECK(response->status_code() == sparenode::http::HttpStatusCode::no_content);
+    CHECK_FALSE(called);
+}
+
 TEST_CASE("HTTP router registers the initial SpareNode API route shapes",
           "[http][router][registration]")
 {

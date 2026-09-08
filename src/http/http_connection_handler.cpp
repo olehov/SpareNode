@@ -100,6 +100,7 @@ constexpr int response_writer_error_detail_base = 100;
     case HttpRequestParseErrorCode::malformed_chunk:
     case HttpRequestParseErrorCode::invalid_trailer:
     case HttpRequestParseErrorCode::incomplete_body:
+    case HttpRequestParseErrorCode::malformed_http_version:
         return HttpStatusCode::bad_request;
     }
     return HttpStatusCode::bad_request;

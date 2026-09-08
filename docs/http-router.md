@@ -9,7 +9,15 @@ Patterns are either exact paths (`/api/status`) or paths with one terminal wildc
 prefix wins. The wildcard suffix is returned as borrowed raw request-path text and is deliberately
 not decoded or resolved. A filesystem handler must pass it through the `SafePath` security boundary.
 The query component is not part of route matching and remains available through the original
-request target.
+normalized request target. Equivalent origin-form and absolute-form targets select
+the same path and wildcard suffix. The parser supplies the absolute URL authority
+as the effective Host when present.
+
+`OPTIONS *` is a built-in server-wide availability request returning an empty
+`204 No Content` response, including when no routes are registered. It bypasses
+resource routes, including OPTIONS wildcard handlers. This response does not
+advertise per-resource method capabilities; ordinary OPTIONS paths still dispatch
+through the route table.
 
 A successful route match is not an authorization decision. Protected handlers must be composed
 with the authentication/authorization layer before registration; the router never calls an

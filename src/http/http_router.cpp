@@ -207,6 +207,10 @@ HttpRouter::register_route(const HttpMethod method, std::string pattern, HttpRou
 /// @brief Selects the most specific method-and-path handler for one request.
 Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView &request) const
 {
+    if (request.method() == HttpMethod::options && request.target() == "*")
+    {
+        return make_routing_response(HttpStatusCode::no_content, "No Content");
+    }
     const std::string_view path = request_path(request.target());
     const Route *selected = nullptr;
     for (const Route &route : routes_)
