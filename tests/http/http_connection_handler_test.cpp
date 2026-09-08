@@ -365,10 +365,11 @@ TEST_CASE("HTTP sessions expire idle partial headers and partial bodies",
 {
     const std::string_view prefix =
         GENERATE("", "GET / HTTP/1.1\r\nHost: loc",
-                 "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\nx");
+                 "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\nx",
+                 "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nx");
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
-    const bool reading_body = prefix.ends_with("\r\n\r\nx");
+    const bool reading_body = prefix.starts_with("POST");
     const sparenode::http::HttpConnectionHandlerConfig config{
         .timeouts = {.headers =
                          reading_body ? std::chrono::seconds{30} : std::chrono::milliseconds{30},
@@ -488,4 +489,65 @@ TEST_CASE("An HTTP timeout is logged and releases the sole worker for another re
     CHECK(receive_until_closed(active).starts_with("HTTP/1.1 404 Not Found\r\n"));
     server.request_stop();
     CHECK(output.str().contains("domain=timeout"));
+}
+
+TEST_CASE("HTTP session routes decoded chunked payload after trailers", "[http][session][chunked]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::string payload;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::post, "/",
+                                  [&](const sparenode::http::HttpRequestView &request,
+                                      const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      payload.assign(
+                                          reinterpret_cast<const char *>(request.body().data()),
+                                          request.body().size());
+                                      return ok_response();
+                                  }));
+    send_all(pair.client, "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: Chunked\r\n\r\n"
+                          "2;test=\"yes\"\r\nhe\r\n3\r\nllo\r\n0\r\nX-Check: ignored\r\n\r\n");
+    const auto result = sparenode::http::handle_http_connection(
+        std::move(pair.server), router, {}, {.receive_chunk_bytes = 1, .deadline_provider = {}});
+    REQUIRE(result.has_value());
+    CHECK(payload == "hello");
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+TEST_CASE("HTTP session rejects premature body EOF without routing",
+          "[http][session][chunked][eof]")
+{
+    const std::string_view framing =
+        GENERATE("Content-Length: 4\r\n\r\nx", "Transfer-Encoding: chunked\r\n\r\n4\r\nx",
+                 "Transfer-Encoding: chunked\r\n\r\n0\r\nX: y\r\n");
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    send_all(pair.client, std::string("POST / HTTP/1.1\r\nHost: local\r\n") + std::string(framing));
+    pair.client.shutdown_send();
+    const auto result = sparenode::http::handle_http_connection(std::move(pair.server), router, {});
+    REQUIRE(result.has_value());
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 400 Bad Request\r\n"));
+}
+
+TEST_CASE("HTTP chunked body wait remains cancellable", "[http][session][chunked][cancel]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::stop_source stop;
+    send_all(pair.client,
+             "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n");
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .deadline_provider = [&](const sparenode::http::HttpRequestReadPhase phase,
+                                 sparenode::network::NetworkDeadline)
+        {
+            if (phase == sparenode::http::HttpRequestReadPhase::body)
+            {
+                stop.request_stop();
+            }
+            return std::nullopt;
+        }};
+    const auto result = sparenode::http::handle_http_connection(std::move(pair.server), router,
+                                                                stop.get_token(), config);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
 }

@@ -194,6 +194,16 @@ class TestClientSocket final
         return receive(bytes);
     }
 
+    /// @brief Sends EOF while keeping the receive direction open for an error response.
+    void shutdown_send() const noexcept
+    {
+#ifdef _WIN32
+        static_cast<void>(::shutdown(socket_, SD_SEND));
+#else
+        static_cast<void>(::shutdown(socket_, SHUT_WR));
+#endif
+    }
+
     /// Interrupts pending test I/O without releasing the native socket handle.
     void shutdown() const noexcept
     {

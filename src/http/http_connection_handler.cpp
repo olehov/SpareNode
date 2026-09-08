@@ -9,7 +9,10 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/http/detail/buffered_request.hpp"
+#include "sparenode/http/detail/http_request_view_access.hpp"
 #include "sparenode/http/detail/request_deadlines.hpp"
+#include "sparenode/http/http_body_decoder.hpp"
 #include "sparenode/http/http_response_writer.hpp"
 
 namespace sparenode::http
@@ -60,17 +63,6 @@ constexpr int response_writer_error_detail_base = 100;
     return metadata_bytes + limits.max_body_bytes;
 }
 
-/// @brief Detects whether the terminating empty header line has arrived.
-/// @param[in] input Bytes accumulated for the current request.
-/// @return Header or body phase for the next receive operation.
-[[nodiscard]] HttpRequestReadPhase read_phase(const std::span<const std::byte> input) noexcept
-{
-    constexpr std::array terminator{std::byte{'\r'}, std::byte{'\n'}, std::byte{'\r'},
-                                    std::byte{'\n'}};
-    return std::ranges::search(input, terminator).empty() ? HttpRequestReadPhase::headers
-                                                          : HttpRequestReadPhase::body;
-}
-
 /// @brief Selects the standard response status for one parser failure.
 /// @param[in] code Parser category to map without exposing request data.
 /// @return Bounded client-error status.
@@ -84,6 +76,8 @@ constexpr int response_writer_error_detail_base = 100;
     case HttpRequestParseErrorCode::too_many_headers:
         return HttpStatusCode::request_header_fields_too_large;
     case HttpRequestParseErrorCode::body_too_large:
+    case HttpRequestParseErrorCode::chunk_metadata_too_large:
+    case HttpRequestParseErrorCode::trailers_too_large:
         return HttpStatusCode::content_too_large;
     case HttpRequestParseErrorCode::unsupported_http_version:
         return HttpStatusCode::http_version_not_supported;
@@ -101,6 +95,11 @@ constexpr int response_writer_error_detail_base = 100;
     case HttpRequestParseErrorCode::invalid_host:
     case HttpRequestParseErrorCode::invalid_content_length:
     case HttpRequestParseErrorCode::duplicate_content_length:
+    case HttpRequestParseErrorCode::invalid_transfer_encoding:
+    case HttpRequestParseErrorCode::conflicting_message_length:
+    case HttpRequestParseErrorCode::malformed_chunk:
+    case HttpRequestParseErrorCode::invalid_trailer:
+    case HttpRequestParseErrorCode::incomplete_body:
         return HttpStatusCode::bad_request;
     }
     return HttpStatusCode::bad_request;
@@ -244,48 +243,38 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
 
     try
     {
-        std::vector<std::byte> input;
-        input.reserve((std::min)(request_limit, config.receive_chunk_bytes));
+        detail::BufferedRequest request(config.parser_limits);
+        std::vector<std::byte> input((std::min)(request_limit, config.receive_chunk_bytes));
         while (true)
         {
-            auto parsed = parse_http_request(input, config.parser_limits);
-            if (!parsed)
+            if (request.complete())
             {
-                return send_error_response(connection, parse_error_status(parsed.error().code),
-                                           stop_token);
+                return dispatch_and_respond(connection, router, request.request(), stop_token);
             }
-            const auto &request = parsed->request();
-            if (request.has_value())
-            {
-                return dispatch_and_respond(connection, router, request.value(), stop_token);
-            }
-            if (input.size() == request_limit)
-            {
-                return send_error_response(connection, HttpStatusCode::bad_request, stop_token);
-            }
-
-            const HttpRequestReadPhase phase = read_phase(input);
-            const std::size_t available = request_limit - input.size();
-            const std::size_t requested = (std::min)(available, config.receive_chunk_bytes);
-            const std::size_t previous_size = input.size();
-            input.resize(previous_size + requested);
+            const auto phase =
+                request.reading_body() ? HttpRequestReadPhase::body : HttpRequestReadPhase::headers;
             auto options = read_options(config, phase, session_started, stop_token);
             const auto bounded_deadline = deadlines.next(phase == HttpRequestReadPhase::body);
             options.deadline = options.deadline.has_value()
                                    ? (std::min)(options.deadline.value(), bounded_deadline)
                                    : bounded_deadline;
-            auto received =
-                connection.receive_with_options(std::span(input).subspan(previous_size), options);
+            auto received = connection.receive_with_options(input, options);
             if (!received)
             {
                 return unexpected(received.error());
             }
             if (received.value() == 0)
             {
-                return {};
+                return request.empty() ? Result<void, network::NetworkError>{}
+                                       : send_error_response(
+                                             connection, HttpStatusCode::bad_request, stop_token);
             }
             deadlines.record_progress(std::chrono::steady_clock::now());
-            input.resize(previous_size + received.value());
+            if (const auto parsed = request.feed(std::span(input).first(received.value())); !parsed)
+            {
+                return send_error_response(connection, parse_error_status(parsed.error().code),
+                                           stop_token);
+            }
         }
     }
     catch (const std::bad_alloc &)

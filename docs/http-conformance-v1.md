@@ -1,7 +1,7 @@
 # HTTP/1.1 conformance profile v1
 
-Profile revision: **v1-draft.1**, 2026-09-08.
-Implementation baseline: `6d1326d` (SN-089 merged).
+Profile revision: **v1-draft.2**, 2026-09-08.
+Implementation baseline: SN-097 implementation based on `72880bf`.
 Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 [SN-095](https://github.com/olehov/SpareNode/issues/103) and
 [Sprint 3](https://github.com/olehov/SpareNode/issues/105).
@@ -9,7 +9,7 @@ Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 This is a draft compatibility contract for SpareNode's restricted HTTP/1.1
 origin-server transport. It records current behavior separately from planned
 changes. It does not assert full HTTP/1.1 conformance. SN-096 remains incomplete
-until SN-097 through SN-100 deliver their behavior and this profile is reconciled
+until SN-098 through SN-100 deliver their behavior and this profile is reconciled
 with their implementation and tests.
 
 ## Classification
@@ -32,7 +32,8 @@ with their implementation and tests.
 | Host | Intentionally restricted | Exactly one nonempty Host is required. The supported ASCII DNS/IPv4/bracketed-IPv6 authority grammar is described in the parser guide; it is not the complete URI reg-name grammar. | [RFC 9110 §7.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-7.2) |
 | HTTP versions | Deferred | Exact HTTP/1.1 only; other versions produce 505. SN-098 owns the HTTP/1.x compatibility policy. | [RFC 9112 §2.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.3) |
 | Fixed request length | Implemented | One decimal Content-Length; overflow, duplicates, and invalid values are rejected. No length field means an empty body. | [RFC 9112 §6.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.2), [§6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
-| Chunked requests and trailers | Deferred | All Transfer-Encoding fields currently fail. This is a conformance gap, not an alternative framing contract. SN-097 owns bounded decoding, extensions, trailers, and TE/CL conflict handling. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1), [§7.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1) |
+| Chunked requests and trailers | Implemented | SN-097 provides incremental decoding, checked sizes, bounded ignored extensions and trailers, TE/CL rejection, and EOF validation. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1), [§7.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1) |
+| Transfer-coding subset | Intentionally restricted | One case-insensitive chunked coding only. Coding lists, parameters, and repeated TE fields fail with 400; other single coding tokens fail with 501. Trailer policy and limits are specified in the parser guide. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1) |
 | Expect / 100-continue | Deferred | The session waits for a complete request before routing and has no interim-response handshake. Clients must not rely on receiving 100 Continue. Requires follow-up review under SN-095. | [RFC 9110 §10.1.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.1.1) |
 
 ## Response and connection compatibility
@@ -62,6 +63,9 @@ Defaults at the baseline:
 | Header section, including terminating CRLF | 32,768 bytes |
 | Request header count | 100 |
 | Request body | 1,048,576 bytes |
+| Chunk size/extension line, excluding CRLF | 1,024 bytes |
+| Cumulative chunk framing, including trailers | 65,536 bytes |
+| Trailer bytes / field count | 8,192 bytes / 32 fields |
 | Session receive chunk | 16,384 bytes |
 | Header inactivity / body inactivity | 10 seconds / 10 seconds |
 | Total request receive budget | 30 seconds |
@@ -73,8 +77,9 @@ Defaults at the baseline:
 Parser/storage settings are C++ configuration boundaries. Persistent server
 configuration exposes `header_timeout_ms`, `body_timeout_ms`, and
 `request_timeout_ms`, each accepting 1 through 86,400,000 milliseconds.
-The session's accumulated request storage is bounded by the configured request
-line plus CRLF, headers, and body; it still buffers the complete request body.
+The session retains bounded request metadata and decoded payload plus receive and
+decoder scratch buffers; it still buffers the complete decoded request body.
+Chunk framing is processed once and discarded rather than accumulated with payload.
 The response streaming limit is independent of the declared stream length.
 
 Receive budgets start when a worker enters the session, not at accept. Nonempty
@@ -93,12 +98,15 @@ Endpoints must not implement their own competing message-framing policy.
 
 Current behavior is exercised by `tests/http/http_request_parser_test.cpp`,
 `http_connection_handler_test.cpp`, `http_response_test.cpp`, `http_router_test.cpp`,
-and `request_deadlines_test.cpp`, plus configuration and network tests.
+`http_body_decoder_test.cpp`, and `request_deadlines_test.cpp`, plus configuration
+and network tests. SN-097 coverage includes every split of a chunked fixture,
+small output buffers, exact limits, malformed framing, premature EOF, trailer
+isolation, and chunked loopback timeout/cancellation behavior.
 The corresponding implementation contracts are in the
 [parser](http-request-parser.md), [response](http-response.md),
 [router](http-router.md), and [session](http-connection-handler.md) guides.
 
-To finalize v1, update each deferred SN-097–SN-100 row after its implementation,
+To finalize v1, update each deferred SN-098–SN-100 row after its implementation,
 link its regression coverage, record remaining restrictions, and resolve the
 Expect/Date review items under SN-095. Verify Windows and Linux behavior and run
 the documentation checks. Change the baseline and revision whenever the recorded
