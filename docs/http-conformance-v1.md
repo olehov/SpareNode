@@ -1,7 +1,7 @@
 # HTTP/1.1 conformance profile v1
 
-Profile revision: **v1-draft.3**, 2026-09-08.
-Implementation baseline: SN-098 implementation based on `1857263`.
+Profile revision: **v1-draft.4**, 2026-09-09.
+Implementation baseline: SN-099 implementation based on `5003272`.
 Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 [SN-095](https://github.com/olehov/SpareNode/issues/103) and
 [Sprint 3](https://github.com/olehov/SpareNode/issues/105).
@@ -9,7 +9,7 @@ Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 This is a draft compatibility contract for SpareNode's restricted HTTP/1.1
 origin-server transport. It records current behavior separately from planned
 changes. It does not assert full HTTP/1.1 conformance. SN-096 remains incomplete
-until SN-099 and SN-100 deliver their behavior and this profile is reconciled
+until SN-100 delivers its behavior and this profile is reconciled
 with their implementation and tests.
 
 ## Classification
@@ -45,8 +45,8 @@ with their implementation and tests.
 | Bodyless statuses | Implemented | Informational, 204, and 304 responses reject nonempty bodies and omit Content-Length. This does not imply a session-level interim-response exchange. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
 | HEAD | Deferred | Parsed and routed, but the session does not suppress handler content. SN-100 owns body suppression and representation metadata. | [RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2) |
 | Known-length streaming | Implemented | Bounded writer buffer, partial-send retries, exact declared length, structured reader failures, and cooperative cancellation. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
-| Persistence | Intentionally restricted | One request is handled per connection. SN-099 retains this policy; pipelined requests are not executed. | [RFC 9112 §9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3) |
-| Connection-close signaling and draining | Deferred | Session-generated errors declare close, but routed responses are not normalized. Immediate close with unread bytes can reset TCP. SN-099 owns uniform headers and bounded, cancellable staged shutdown. | [RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) |
+| Persistence | Intentionally restricted | One request is handled per connection.  pipelined requests are not executed. | [RFC 9112 §9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3) |
+| Connection-close signaling and draining | Implemented | Transport-generated Connection: close for every final response; endpoint Connection/Keep-Alive fields rejected. Successful final writes use send half-close, then bounded and cancellable draining. Budget exhaustion ends normally; peer resets or excess input can still prevent delivery. | [RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) |
 | Date generation | Deferred | The response layer does not automatically generate Date. Applicability and generation need review under SN-095 before a final conformance claim. | [RFC 9110 §6.6.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-6.6.1) |
 | Ranges, conditional requests, representation metadata | Deferred | No file-serving endpoint contract exists yet. File handlers must specify their supported semantics; generic routing does not implement them. | [RFC 9110 §8](https://www.rfc-editor.org/rfc/rfc9110.html#section-8), [§13](https://www.rfc-editor.org/rfc/rfc9110.html#section-13), [§14](https://www.rfc-editor.org/rfc/rfc9110.html#section-14) |
 | Proxy forwarding and CONNECT tunnels | Not applicable | SpareNode has no proxy/gateway role or tunnel endpoint. | [RFC 9110 §7.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-7.6), [§9.3.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6) |
@@ -74,6 +74,8 @@ Defaults at the baseline:
 | Application response fields | 100 |
 | Owned response body | 1,048,576 bytes |
 | Streaming writer buffer | 16,384 bytes |
+| Post-response drain bytes / absolute time | 65,536 bytes / 100 ms |
+| Drain buffer | 4,096 bytes |
 
 Parser/storage settings are C++ configuration boundaries. Persistent server
 configuration exposes `header_timeout_ms`, `body_timeout_ms`, and
@@ -105,6 +107,8 @@ normalization, authoritative Host replacement, query storage lifetime, OPTIONS *
 wire length boundaries, and version syntax/status behavior. SN-097 coverage includes every split of a chunked fixture,
 small output buffers, exact limits, malformed framing, premature EOF, trailer
 isolation, and chunked loopback timeout/cancellation behavior.
+SN-099 coverage includes generated close headers, exact response-head bounds,
+unread socket input, half-close receive access, byte/time drain limits, and cancellation.
 The corresponding implementation contracts are in the
 [parser](http-request-parser.md), [response](http-response.md),
 [router](http-router.md), and [session](http-connection-handler.md) guides.

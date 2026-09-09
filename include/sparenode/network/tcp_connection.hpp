@@ -98,6 +98,10 @@ class TcpConnection final
     [[nodiscard]] Result<std::size_t, NetworkError>
     send_with_options(std::span<const std::byte> buffer, const NetworkIoOptions &options);
 
+    /// @brief Sends FIN after queued output while retaining the receive side for draining.
+    /// @return Success or a structured state/native shutdown failure.
+    [[nodiscard]] Result<void, NetworkError> shutdown_send() noexcept;
+
   private:
     /// @brief Platform-specific implementation hidden from the public API.
     struct Impl;

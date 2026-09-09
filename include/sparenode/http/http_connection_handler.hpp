@@ -38,21 +38,23 @@ struct HttpConnectionHandlerConfig
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
     HttpRequestTimeouts timeouts{}; ///< Header/body inactivity and total receive budgets.
-    HttpRequestDeadlineProvider deadline_provider; ///< Optional earlier per-read deadline.
+    HttpRequestDeadlineProvider deadline_provider;       ///< Optional earlier per-read deadline.
+    std::size_t max_drain_bytes{std::size_t{64} * 1024}; ///< Maximum extra socket bytes discarded.
+    std::chrono::milliseconds drain_timeout{100};        ///< Absolute post-response drain budget.
 };
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.
 ///
 /// Input is accumulated incrementally in bounded storage until the parser returns
 /// one complete borrowed request. Any trailing pipelined bytes remain untouched
-/// until response completion, then are discarded when this MVP session closes the
-/// connection. Parser failures receive one bounded HTTP error response when the
-/// socket remains writable.
+/// until response completion. Output is then half-closed and extra socket input
+/// is discarded within the configured byte and absolute time limits. Parser failures receive one
+/// bounded HTTP error response when the socket remains writable.
 /// @param[in] connection Open connection transferred exclusively to this call.
 /// @param[in] router Immutable route table shared by dispatcher workers.
 /// @param[in] stop_token Worker cancellation token.
 /// @param[in] config Parser, storage, and deadline policy.
-/// @return Success after one response or orderly peer shutdown; otherwise the
+/// @return Success after one response and EOF/drain budget, or orderly peer shutdown; otherwise the
 /// structured network failure that terminated the session.
 [[nodiscard]] Result<void, network::NetworkError>
 handle_http_connection(network::TcpConnection connection, const HttpRouter &router,

@@ -106,4 +106,24 @@ TcpConnection::send_with_options(const std::span<const std::byte> buffer,
     return impl_->io.send_with_options(buffer, options);
 }
 
+Result<void, NetworkError> TcpConnection::shutdown_send() noexcept
+{
+    if (!is_open())
+    {
+        return unexpected(
+            NetworkError{NetworkOperation::shutdown_send, NetworkErrorDomain::state, 1});
+    }
+#ifdef _WIN32
+    constexpr int send_direction = SD_SEND;
+#else
+    constexpr int send_direction = SHUT_WR;
+#endif
+    if (::shutdown(impl_->socket, send_direction) != 0)
+    {
+        return unexpected(NetworkError{NetworkOperation::shutdown_send, NetworkErrorDomain::socket,
+                                       detail::last_socket_error()});
+    }
+    return {};
+}
+
 } // namespace sparenode::network

@@ -68,6 +68,11 @@ constexpr std::uint16_t minimum_response_status_code = 100;
         constexpr std::size_t content_length_fixed_bytes = 18;
         size += content_length_fixed_bytes + decimal_length(response.content_length());
     }
+    if (http_status_code_value(response.status_code()) >=
+        http_status_code_value(HttpStatusCode::ok))
+    {
+        size += std::string_view("Connection: close\r\n").size();
+    }
     return size;
 }
 
@@ -167,6 +172,11 @@ std::string serialize_http_response_head(const HttpResponse &response)
         head += "Content-Length: ";
         head += std::to_string(response.content_length());
         head += "\r\n";
+    }
+    if (http_status_code_value(response.status_code()) >=
+        http_status_code_value(HttpStatusCode::ok))
+    {
+        head += "Connection: close\r\n";
     }
     head += "\r\n";
     return head;

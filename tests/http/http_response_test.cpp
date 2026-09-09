@@ -150,13 +150,14 @@ TEST_CASE("HTTP response head serialization generates exact framing", "[http][re
 {
     auto response = make_memory_response("hello");
     CHECK(sparenode::http::serialize_http_response_head(response) ==
-          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\n");
+          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: "
+          "close\r\n\r\n");
 
     auto no_content_result = sparenode::http::HttpResponse::create(
         HttpStatusCode::no_content, "No Content", {{"X-Test", "yes"}}, {});
     REQUIRE(no_content_result.has_value());
     CHECK(sparenode::http::serialize_http_response_head(no_content_result.value()) ==
-          "HTTP/1.1 204 No Content\r\nX-Test: yes\r\n\r\n");
+          "HTTP/1.1 204 No Content\r\nX-Test: yes\r\nConnection: close\r\n\r\n");
 }
 
 TEST_CASE("HTTP response writer sends an in-memory response completely",
@@ -352,4 +353,49 @@ TEST_CASE("HTTP response error descriptions cover every category", "[http][respo
     CHECK(std::string_view(sparenode::http::to_string(Code::body_ended_early)).starts_with("HTTP"));
     CHECK(std::string_view(sparenode::http::to_string(Code::resource_allocation_failed))
               .starts_with("HTTP"));
+}
+
+TEST_CASE("HTTP response connection policy belongs to the transport", "[http][response][close]")
+{
+    using Code = sparenode::http::HttpResponseValidationErrorCode;
+    for (const auto name : {"Connection", "cOnNeCtIoN", "Keep-Alive"})
+    {
+        auto rejected = sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK",
+                                                              {{name, "keep-alive"}}, {});
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == Code::managed_connection_header);
+    }
+    for (const auto status : {100, 103, 200, 204, 205, 304, 404, 500})
+    {
+        auto response = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {}, {});
+        REQUIRE(response);
+        const auto head = sparenode::http::serialize_http_response_head(response.value());
+        CHECK(head.contains("Connection: close\r\n") == (status >= 200));
+    }
+}
+
+TEST_CASE("HTTP response head boundary includes generated connection policy",
+          "[http][response][close]")
+{
+    for (const auto status : {200, 204, 205, 304})
+    {
+        auto baseline = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {{"X-Pad", ""}}, {});
+        REQUIRE(baseline);
+        const auto padding = sparenode::http::HttpResponse::maximum_head_bytes -
+                             sparenode::http::serialize_http_response_head(baseline.value()).size();
+        auto exact =
+            sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status), "Test",
+                                                  {{"X-Pad", std::string(padding, 'x')}}, {});
+        REQUIRE(exact);
+        CHECK(sparenode::http::serialize_http_response_head(exact.value()).size() ==
+              sparenode::http::HttpResponse::maximum_head_bytes);
+        auto oversized =
+            sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status), "Test",
+                                                  {{"X-Pad", std::string(padding + 1, 'x')}}, {});
+        REQUIRE_FALSE(oversized);
+        CHECK(oversized.error().code ==
+              sparenode::http::HttpResponseValidationErrorCode::response_head_too_large);
+    }
 }

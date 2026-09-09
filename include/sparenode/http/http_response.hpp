@@ -47,16 +47,17 @@ using HttpBodyReader = std::move_only_function<Result<std::size_t, HttpBodyReadE
 /// @brief Identifies an invalid response rejected before transmission begins.
 enum class HttpResponseValidationErrorCode : std::uint8_t
 {
-    invalid_status_code,     ///< Status is outside the three-digit HTTP range.
-    invalid_reason_phrase,   ///< Reason contains a forbidden control byte.
-    too_many_headers,        ///< Header count exceeds the response boundary.
-    invalid_header_name,     ///< A field name is empty or is not an HTTP token.
-    invalid_header_value,    ///< A field value contains a forbidden control byte.
-    managed_framing_header,  ///< Content-Length or Transfer-Encoding was supplied.
-    body_not_allowed,        ///< This status code cannot carry a message body.
-    response_head_too_large, ///< Serialized status and headers exceed their boundary.
-    memory_body_too_large,   ///< An in-memory body exceeds its dedicated boundary.
-    missing_body_reader      ///< A streaming response has no callable body source.
+    invalid_status_code,       ///< Status is outside the three-digit HTTP range.
+    invalid_reason_phrase,     ///< Reason contains a forbidden control byte.
+    too_many_headers,          ///< Header count exceeds the response boundary.
+    invalid_header_name,       ///< A field name is empty or is not an HTTP token.
+    invalid_header_value,      ///< A field value contains a forbidden control byte.
+    managed_framing_header,    ///< Content-Length or Transfer-Encoding was supplied.
+    managed_connection_header, ///< Connection and Keep-Alive belong to the transport.
+    body_not_allowed,          ///< This status code cannot carry a message body.
+    response_head_too_large,   ///< Serialized status and headers exceed their boundary.
+    memory_body_too_large,     ///< An in-memory body exceeds its dedicated boundary.
+    missing_body_reader        ///< A streaming response has no callable body source.
 };
 
 /// @brief Describes one response-construction failure and its optional field index.
@@ -80,7 +81,8 @@ class HttpResponse final
     /// @brief Creates a validated response that owns a small in-memory body.
     /// @param[in] status_code Three-digit HTTP status from 100 through 599.
     /// @param[in] reason_phrase Human-readable reason without line delimiters.
-    /// @param[in] headers Application fields excluding transport-managed framing.
+    /// @param[in] headers Application fields excluding transport-managed framing and connection
+    /// headers.
     /// @param[in] body Body bytes copied or moved into bounded response storage.
     /// @return Complete response or a structured validation failure.
     [[nodiscard]] static Result<HttpResponse, HttpResponseValidationError>
@@ -90,7 +92,8 @@ class HttpResponse final
     /// @brief Creates a validated response backed by an incremental body producer.
     /// @param[in] status_code Three-digit HTTP status from 100 through 599.
     /// @param[in] reason_phrase Human-readable reason without line delimiters.
-    /// @param[in] headers Application fields excluding transport-managed framing.
+    /// @param[in] headers Application fields excluding transport-managed framing and connection
+    /// headers.
     /// @param[in] content_length Exact number of bytes the reader must produce.
     /// @param[in] body_reader Stateful reader transferred into the response.
     /// @return Complete streaming response or a structured validation failure.
