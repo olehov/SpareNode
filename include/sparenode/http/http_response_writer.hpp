@@ -33,7 +33,7 @@ struct HttpResponseWriteError
     std::optional<HttpBodyReadError> body_error;        ///< Nested body failure when present.
 };
 
-/// @brief Serializes a validated response status and fields with managed framing.
+/// @brief Serializes validated framing and Connection: close for every final response.
 /// @param[in] response Response whose body is not consumed.
 /// @return Complete HTTP/1.1 head ending in CRLF CRLF.
 [[nodiscard]] std::string serialize_http_response_head(const HttpResponse &response);

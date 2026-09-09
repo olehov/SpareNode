@@ -99,6 +99,12 @@ validate_header(const HttpResponseHeader &header, const HeaderValidationContext 
         return unexpected(HttpResponseValidationError{
             HttpResponseValidationErrorCode::managed_framing_header, context.index});
     }
+    if (ascii_case_insensitive_equal(header.name, "Connection") ||
+        ascii_case_insensitive_equal(header.name, "Keep-Alive"))
+    {
+        return unexpected(HttpResponseValidationError{
+            HttpResponseValidationErrorCode::managed_connection_header, context.index});
+    }
     if (header.name.size() > context.remaining ||
         header.value.size() > context.remaining - header.name.size() ||
         context.remaining - header.name.size() - header.value.size() < 4)
@@ -144,7 +150,15 @@ validate_response(const HttpStatusCode status_code, const std::string_view reaso
         status_has_no_message_body(status_code)
             ? 2
             : content_length_fixed_bytes + decimal_length(content_length) + 2;
-    std::size_t head_size = status_line_fixed_bytes + reason_phrase.size() + framing_bytes;
+    const std::size_t connection_bytes =
+        numeric_status >= http_status_code_value(HttpStatusCode::ok)
+            ? std::string_view("Connection: close\r\n").size()
+            : 0;
+    // 205 carries Content-Length: 0 even though its body is forbidden.
+    const std::size_t reset_content_bytes =
+        status_code == HttpStatusCode::reset_content ? content_length_fixed_bytes + 1 : 0;
+    std::size_t head_size = status_line_fixed_bytes + reason_phrase.size() + framing_bytes +
+                            connection_bytes + reset_content_bytes;
     if (head_size > HttpResponse::maximum_head_bytes)
     {
         return unexpected(HttpResponseValidationError{
@@ -285,6 +299,8 @@ const char *to_string(const HttpResponseValidationErrorCode code) noexcept
         return "HTTP response header value is invalid";
     case HttpResponseValidationErrorCode::managed_framing_header:
         return "HTTP response framing header is managed by the transport";
+    case HttpResponseValidationErrorCode::managed_connection_header:
+        return "connection policy header is transport-managed";
     case HttpResponseValidationErrorCode::body_not_allowed:
         return "HTTP response status does not permit a message body";
     case HttpResponseValidationErrorCode::response_head_too_large:

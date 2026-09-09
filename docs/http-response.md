@@ -21,6 +21,14 @@ Header names use the HTTP token grammar. Reason phrases and field values reject
 control bytes that could inject a new protocol line. The serialized head has a
 32 KiB boundary and at most 100 application fields.
 
+The transport also owns connection policy: every final (non-1xx) response includes
+exactly one `Connection: close`. Application-provided `Connection` and `Keep-Alive`
+fields are rejected case-insensitively during construction with
+`managed_connection_header`. Handlers omit these fields. Generated fields count
+toward the serialized head boundary. Informational serialization does not add close;
+the current session requires a final response and converts a standalone 1xx handler
+result to 500 because interim exchanges and upgrades are not implemented.
+
 ## Body representations
 
 Small bodies are owned directly by the response and are limited to 1 MiB. This

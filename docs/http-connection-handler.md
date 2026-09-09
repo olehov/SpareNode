@@ -22,8 +22,32 @@ the initial receive contains pipelined bytes, the parser reports the first exact
 request boundary and the session keeps metadata and decoded storage alive while routing and
 writing that response. Bytes after the boundary are never interpreted as part of
 the first request. Already received trailing bytes are discarded; unread socket
-bytes remain until the exclusive `TcpConnection` closes. Persistent connections can be added later
-without changing parser boundaries.
+bytes are drained after sending the final response. Persistent connections can be
+added later without changing parser boundaries.
+
+The response transport generates `Connection: close` for every final response,
+including routed responses and parser/route errors. Endpoint-supplied `Connection`
+and `Keep-Alive` headers fail response validation. A standalone informational route
+result becomes 500; the session does not implement interim exchanges or upgrades.
+
+After a successful write, `TcpConnection::shutdown_send()` sends FIN after queued
+output while retaining the receive direction. The session then discards additional
+socket input until peer EOF, `max_drain_bytes` (64 KiB by default), or the fixed
+`drain_timeout` (100 ms by default). Progress never renews this deadline. The buffer
+is fixed at 4 KiB, and each read is capped by the remaining byte budget. Already
+buffered trailing request bytes need no additional socket reads and are covered by
+the existing receive-buffer bound. Extra requests are never dispatched.
+
+Direct C++ configuration requires a nonzero byte limit and a positive drain timeout
+of at most 24 hours. These settings are not yet persistent configuration directives.
+Budget exhaustion after a final response is normal completion, not a request timeout.
+Cancellation and native shutdown/read errors remain structured failures for existing
+logging. Failed response writes and request receive timeouts retain their immediate
+termination behavior and do not start a new drain phase.
+
+This staged close follows [RFC 9112 section 9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6).
+It preserves responses in the tested unread/pipelined-input scenarios, but cannot
+guarantee delivery if the peer resets or continues sending beyond the finite budgets.
 
 Malformed requests receive an empty bounded error response when transmission is
 still possible. EOF after a partial request also receives 400; an idle peer EOF

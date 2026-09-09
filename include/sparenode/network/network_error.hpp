@@ -19,6 +19,7 @@ enum class NetworkOperation : std::uint8_t
     send,                 ///< Send bytes through a connection.
     query_local_endpoint, ///< Query the address bound to a socket.
     query_peer_endpoint,  ///< Query the address of a connected peer.
+    shutdown_send,        ///< Shut down the connection's sending direction.
 };
 
 /// @brief Identifies which subsystem produced an error code.

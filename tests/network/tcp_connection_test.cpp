@@ -362,3 +362,26 @@ TEST_CASE("TCP I/O gives pre-requested cancellation priority over an expired dea
     REQUIRE_FALSE(received.has_value());
     check_cancelled(received.error(), sparenode::network::NetworkOperation::receive);
 }
+
+TEST_CASE("TCP send shutdown preserves receiving and reports invalid ownership",
+          "[network][tcp][close]")
+{
+    auto pair = create_connected_pair();
+    REQUIRE(pair.server.shutdown_send());
+    std::array<std::byte, 1> buffer{};
+    CHECK(pair.client.receive(buffer) == 0);
+    const std::array payload{std::byte{'x'}};
+    REQUIRE(pair.client.send(payload) == 1);
+    auto received = pair.server.receive_with_options(
+        buffer,
+        {.stop_token = {}, .deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1}});
+    REQUIRE(received);
+    CHECK(received.value() == 1);
+    CHECK(buffer == payload);
+    auto moved = std::move(pair.server);
+    auto invalid = pair.server.shutdown_send();
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().operation == sparenode::network::NetworkOperation::shutdown_send);
+    CHECK(invalid.error().domain == sparenode::network::NetworkErrorDomain::state);
+    CHECK(moved.is_open());
+}

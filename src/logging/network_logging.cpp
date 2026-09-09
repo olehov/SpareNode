@@ -31,6 +31,8 @@ namespace
         return "receive";
     case network::NetworkOperation::send:
         return "send";
+    case network::NetworkOperation::shutdown_send:
+        return "shutdown_send";
     case network::NetworkOperation::query_local_endpoint:
         return "query_local_endpoint";
     case network::NetworkOperation::query_peer_endpoint:

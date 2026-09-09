@@ -138,8 +138,7 @@ constexpr int response_writer_error_detail_base = 100;
 [[nodiscard]] Result<HttpResponse, network::NetworkError>
 make_error_response(const HttpStatusCode status)
 {
-    auto response = HttpResponse::create(status, std::string(reason_phrase(status)),
-                                         {{"Connection", "close"}}, {});
+    auto response = HttpResponse::create(status, std::string(reason_phrase(status)), {}, {});
     if (!response)
     {
         return unexpected(network::NetworkError{
@@ -162,14 +161,68 @@ make_error_response(const HttpStatusCode status)
             response_writer_error_detail_base + static_cast<int>(error.code)};
 }
 
+/// @brief Half-closes output and discards peer input within fixed byte and time budgets.
+/// @param[in,out] connection Connection whose final response has already been sent.
+/// @param[in] stop_token Cancellation observed even while input remains continuously readable.
+/// @param[in] config Bounded close policy independent of request receive deadlines.
+/// @return Success at EOF or a budget boundary; cancellation/native failures remain observable.
+[[nodiscard]] Result<void, network::NetworkError>
+drain_after_response(network::TcpConnection &connection, const std::stop_token &stop_token,
+                     const HttpConnectionHandlerConfig &config)
+{
+    if (stop_token.stop_requested())
+    {
+        return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                network::NetworkErrorDomain::cancellation, 0});
+    }
+    if (auto shutdown = connection.shutdown_send(); !shutdown)
+    {
+        return shutdown;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + config.drain_timeout;
+    constexpr std::size_t drain_buffer_bytes = 4096;
+    std::array<std::byte, drain_buffer_bytes> buffer{};
+    std::size_t remaining = config.max_drain_bytes;
+    while (remaining > 0)
+    {
+        if (stop_token.stop_requested())
+        {
+            return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                    network::NetworkErrorDomain::cancellation, 0});
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            return {};
+        }
+        auto received = connection.receive_with_options(
+            std::span(buffer).first((std::min)(remaining, buffer.size())),
+            {.stop_token = stop_token, .deadline = deadline});
+        if (!received)
+        {
+            if (received.error().domain == network::NetworkErrorDomain::timeout)
+            {
+                return {};
+            }
+            return unexpected(received.error());
+        }
+        if (received.value() == 0)
+        {
+            return {};
+        }
+        remaining -= received.value();
+    }
+    return {};
+}
+
 /// @brief Sends one session-owned error response.
 /// @param[in,out] connection Exclusive connection used for transmission.
 /// @param[in] status Error status sent with an empty body.
 /// @param[in] stop_token Cancellation token observed during writes.
+/// @param[in] config Bounded post-response drain policy.
 /// @return Success or a mapped response-construction/write failure.
 [[nodiscard]] Result<void, network::NetworkError>
 send_error_response(network::TcpConnection &connection, const HttpStatusCode status,
-                    const std::stop_token &stop_token)
+                    const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     auto response = make_error_response(status);
     if (!response)
@@ -180,7 +233,7 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
     {
         return unexpected(map_write_error(written.error()));
     }
-    return {};
+    return drain_after_response(connection, stop_token, config);
 }
 
 /// @brief Resolves cancellation and deadline options for the next request read.
@@ -204,21 +257,25 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 /// @param[in] router Immutable route table used for dispatch.
 /// @param[in] request Complete request whose views borrow the session buffer.
 /// @param[in] stop_token Cancellation token observed during writes.
+/// @param[in] config Bounded post-response drain policy.
 /// @return Success or a mapped routing/write failure.
 [[nodiscard]] Result<void, network::NetworkError>
 dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &router,
-                     const HttpRequestView &request, const std::stop_token &stop_token)
+                     const HttpRequestView &request, const std::stop_token &stop_token,
+                     const HttpConnectionHandlerConfig &config)
 {
     auto response = router.dispatch(request);
-    if (!response)
+    if (!response || http_status_code_value(response->status_code()) <
+                         http_status_code_value(HttpStatusCode::ok))
     {
-        return send_error_response(connection, HttpStatusCode::internal_server_error, stop_token);
+        return send_error_response(connection, HttpStatusCode::internal_server_error, stop_token,
+                                   config);
     }
     if (auto written = write_http_response(connection, response.value(), stop_token); !written)
     {
         return unexpected(map_write_error(written.error()));
     }
-    return {};
+    return drain_after_response(connection, stop_token, config);
 }
 
 } // namespace
@@ -234,7 +291,9 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
     const std::size_t request_limit = maximum_request_bytes(config.parser_limits);
     const auto session_started = std::chrono::steady_clock::now();
     auto deadline_state = detail::RequestDeadlines::create(config.timeouts, session_started);
-    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value())
+    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
+        config.max_drain_bytes == 0 || config.drain_timeout <= std::chrono::milliseconds::zero() ||
+        config.drain_timeout > HttpRequestTimeouts::maximum_config_timeout)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::validation,
@@ -250,7 +309,8 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
         {
             if (request.complete())
             {
-                return dispatch_and_respond(connection, router, request.request(), stop_token);
+                return dispatch_and_respond(connection, router, request.request(), stop_token,
+                                            config);
             }
             const auto phase =
                 request.reading_body() ? HttpRequestReadPhase::body : HttpRequestReadPhase::headers;
@@ -266,15 +326,16 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
             }
             if (received.value() == 0)
             {
-                return request.empty() ? Result<void, network::NetworkError>{}
-                                       : send_error_response(
-                                             connection, HttpStatusCode::bad_request, stop_token);
+                return request.empty()
+                           ? Result<void, network::NetworkError>{}
+                           : send_error_response(connection, HttpStatusCode::bad_request,
+                                                 stop_token, config);
             }
             deadlines.record_progress(std::chrono::steady_clock::now());
             if (const auto parsed = request.feed(std::span(input).first(received.value())); !parsed)
             {
                 return send_error_response(connection, parse_error_status(parsed.error().code),
-                                           stop_token);
+                                           stop_token, config);
             }
         }
     }

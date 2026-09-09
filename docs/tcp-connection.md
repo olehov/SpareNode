@@ -95,3 +95,11 @@ Moving a connection transfers ownership and leaves the source closed. Operations
 on a moved-from connection return a `state` error. Native error codes remain
 platform-specific and are intended for diagnostics rather than application
 control flow.
+
+## Sending-direction shutdown
+
+`shutdown_send()` queues FIN after pending output while preserving receive access
+and socket ownership. It uses `SD_SEND` on Windows and `SHUT_WR` on POSIX. The call
+does not wait for peer EOF; callers own bounded, cancellable draining through
+`receive_with_options()`. It returns structured `shutdown_send` state/native errors.
+Destruction still closes the owned socket. Do not send more bytes after shutdown.

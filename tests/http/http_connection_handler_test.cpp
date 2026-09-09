@@ -114,7 +114,7 @@ TEST_CASE("HTTP connection session reads incrementally routes and writes a respo
     worker.join();
 
     REQUIRE(result.has_value());
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
 TEST_CASE("HTTP connection session returns a bounded parser error response",
@@ -166,7 +166,7 @@ TEST_CASE("HTTP connection session handles one request and discards pipelined by
     worker.join();
 
     REQUIRE(result.has_value());
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     CHECK(response.find("HTTP/1.1", 1) == std::string::npos);
 }
 
@@ -340,7 +340,7 @@ TEST_CASE("HTTP connection handler runs through the TCP dispatcher",
     const std::string response = receive_until_closed(client);
     server.request_stop();
 
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
 TEST_CASE("HTTP connection session observes dispatcher cancellation",
@@ -585,4 +585,159 @@ TEST_CASE("HTTP session applies target and version policy on the wire", "[http][
     {
         CHECK(routed_target.empty());
     }
+}
+
+TEST_CASE("HTTP close preserves final responses with unread socket input",
+          "[http][session][integration][close]")
+{
+    const bool malformed = GENERATE(false, true);
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const std::string request = malformed ? "GET /%GG HTTP/1.1\r\nHost: local\r\n\r\n"
+                                          : "GET / HTTP/1.1\r\nHost: local\r\n\r\n";
+    // Exceed the receive chunk so trailing bytes remain in the native socket.
+    send_all(pair.client,
+             request + "GET /second HTTP/1.1\r\nHost: local\r\n\r\n" + std::string(32768, 'x'));
+    pair.client.shutdown_send();
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&]
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, {},
+                {.receive_chunk_bytes = 16, .deadline_provider = {}}));
+        });
+    const auto response = receive_until_closed(pair.client);
+    REQUIRE(future.get());
+    CHECK(response.starts_with(malformed ? "HTTP/1.1 400 " : "HTTP/1.1 404 "));
+    CHECK(response.contains("Connection: close\r\n"));
+    CHECK(response.ends_with("\r\n\r\n"));
+    CHECK(response.find("HTTP/1.1", 1) == std::string::npos);
+}
+
+TEST_CASE("HTTP drain remains cancellable after the client observes FIN",
+          "[http][session][integration][close]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, token,
+                {.deadline_provider = {}, .drain_timeout = std::chrono::seconds{5}}));
+        });
+    send_all(pair.client, "GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    CHECK(receive_until_closed(pair.client).contains("Connection: close\r\n"));
+    CHECK(future.wait_for(std::chrono::milliseconds{0}) == std::future_status::timeout);
+    worker.request_stop();
+    REQUIRE(future.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    const auto result = future.get();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
+}
+
+TEST_CASE("HTTP drain stops at its byte budget while the peer stays open",
+          "[http][session][integration][close]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    constexpr std::size_t drain_limit = 32;
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, token,
+                {.deadline_provider = {},
+                 .max_drain_bytes = drain_limit,
+                 .drain_timeout = std::chrono::seconds{5}}));
+        });
+    send_all(pair.client, "GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    CHECK(receive_until_closed(pair.client).contains("Connection: close\r\n"));
+    send_all(pair.client, std::string(drain_limit - 1, 'x'));
+    CHECK(future.wait_for(std::chrono::milliseconds{20}) == std::future_status::timeout);
+    send_all(pair.client, "x");
+    REQUIRE(future.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    CHECK(future.get().has_value());
+}
+
+TEST_CASE("HTTP drain deadline is absolute for idle and trickling peers",
+          "[http][session][integration][close]")
+{
+    const bool trickle = GENERATE(false, true);
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, token,
+                {.deadline_provider = {}, .drain_timeout = std::chrono::milliseconds{100}}));
+        });
+    send_all(pair.client, "GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    CHECK(receive_until_closed(pair.client).contains("Connection: close\r\n"));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    while (future.wait_for(std::chrono::milliseconds{10}) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+        if (trickle)
+        {
+            // A close racing this send is expected when the absolute budget expires.
+            static_cast<void>(pair.client.send(bytes_of("x")));
+        }
+    }
+    REQUIRE(future.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+    CHECK(future.get().has_value());
+}
+
+TEST_CASE("HTTP session rejects invalid close budgets before receiving",
+          "[http][session][close][limits]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    sparenode::http::HttpConnectionHandlerConfig config;
+    const auto invalid_policy = GENERATE(0, 1, 2, 3);
+    if (invalid_policy == 0)
+    {
+        config.max_drain_bytes = 0;
+    }
+    else
+    {
+        config.drain_timeout = invalid_policy == 1   ? std::chrono::milliseconds{0}
+                               : invalid_policy == 2 ? std::chrono::milliseconds{-1}
+                                                     : std::chrono::hours{25};
+    }
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::validation);
+}
+
+TEST_CASE("HTTP session requires a final response from endpoint handlers", "[http][session][close]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/",
+        [](const sparenode::http::HttpRequestView &, const sparenode::http::HttpRouteParameters &)
+            -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+        {
+            auto response = sparenode::http::HttpResponse::create(
+                static_cast<sparenode::http::HttpStatusCode>(103), "Early Hints", {}, {});
+            return std::move(response).value();
+        }));
+    send_all(pair.client, "GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    const auto response = receive_until_closed(pair.client);
+    CHECK(response.starts_with("HTTP/1.1 500 "));
+    CHECK(response.contains("Connection: close\r\n"));
+    CHECK_FALSE(response.contains("103"));
 }
