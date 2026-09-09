@@ -57,6 +57,17 @@ for request-target size, 431 for header limits, 501 for unsupported transport
 features, and 505 for unsupported HTTP versions. Route failures receive 500.
 Network receive/send failures remain structured `NetworkError` values.
 
+## HEAD responses
+
+The session passes the original request method to the response writer. HEAD uses
+GET fallback or an explicit HEAD route, but content suppression is enforced after
+routing, even if a handler returns a nonempty memory body or a streaming reader.
+Status and representation fields are preserved; Content-Length describes the
+selected GET representation wherever the status permits that field. Streaming
+readers are never invoked for HEAD. Endpoint error responses receive the same
+suppression. Router/parser/session-generated errors currently have empty bodies.
+The existing Connection: close and bounded drain policy applies unchanged.
+
 ## Cancellation and deadlines
 
 Every receive carries the dispatcher worker's stop token and an absolute

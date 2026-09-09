@@ -55,5 +55,18 @@ failures remain distinguishable.
 
 One streaming response is a one-shot value: transmitting it advances its owned
 reader. A failed or completed streaming response must not be transmitted again.
-Connection persistence, request deadlines, routing, and HEAD-specific body
-suppression belong to the HTTP session layer built on top of this component.
+Request deadlines and routing belong to the HTTP session layer. It passes the
+original request method to `write_http_response()`. For HEAD, the writer sends the
+same serialized response head, including the selected representation's Content-Length,
+and returns before memory-body transmission or streaming-buffer allocation/reader
+invocation. Existing bodyless-status rules still omit Content-Length for 204/304.
+The default writer method is GET for callers that do not supply request context.
+
+For large files, construct a known-length streaming response using representation
+metadata and a lazy body reader. Open the transfer handle inside that reader when
+possible; HEAD never calls it. Response construction and authorization still run.
+The transport cannot prevent eager file I/O or other work inside an endpoint handler.
+Explicit HEAD handlers must describe the GET representation, not substitute a zero
+length simply because HEAD sends no content.
+
+These semantics follow [RFC 9110 section 9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2).

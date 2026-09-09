@@ -13,6 +13,16 @@ normalized request target. Equivalent origin-form and absolute-form targets sele
 the same path and wildcard suffix. The parser supplies the absolute URL authority
 as the effective Host when present.
 
+HEAD can use GET routes without a separate registration. Eligible GET and HEAD
+routes are ranked by the same path specificity: exact first, then longest wildcard.
+At equal specificity, an explicit HEAD route wins independently of registration
+order. Thus a broad HEAD wildcard cannot replace a more specific GET route.
+The chosen handler receives the original HEAD method, query, fields, and wildcard
+suffix. There is no second handler invocation if it returns an error or denies access.
+An explicit HEAD route must apply the same authorization and representation metadata
+policy as its corresponding GET route. `Allow` includes HEAD wherever GET is available;
+a HEAD-only registration does not implicitly enable GET.
+
 `OPTIONS *` is a built-in server-wide availability request returning an empty
 `204 No Content` response, including when no routes are registered. It bypasses
 resource routes, including OPTIONS wildcard handlers. This response does not

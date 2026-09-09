@@ -185,7 +185,8 @@ std::string serialize_http_response_head(const HttpResponse &response)
 /// @brief Transmits a response head followed by its memory or streaming body.
 Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection &connection,
                                                          HttpResponse &response,
-                                                         const std::stop_token &stop_token)
+                                                         const std::stop_token &stop_token,
+                                                         const HttpMethod request_method)
 {
     try
     {
@@ -194,6 +195,10 @@ Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection 
         if (auto sent = send_all(connection, head_bytes, stop_token); !sent)
         {
             return sent;
+        }
+        if (request_method == HttpMethod::head)
+        {
+            return {};
         }
         if (response.is_streaming())
         {
