@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/http/detail/response_date.hpp"
 #include "sparenode/http/http_response.hpp"
 #include "sparenode/http/http_response_writer.hpp"
 #include "support/connected_tcp_pair.hpp"
@@ -151,13 +152,15 @@ TEST_CASE("HTTP response head serialization generates exact framing", "[http][re
     auto response = make_memory_response("hello");
     CHECK(sparenode::http::serialize_http_response_head(response) ==
           "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: "
-          "close\r\n\r\n");
+          "close\r\nDate: " +
+              std::string(response.date_value()) + "\r\n\r\n");
 
     auto no_content_result = sparenode::http::HttpResponse::create(
         HttpStatusCode::no_content, "No Content", {{"X-Test", "yes"}}, {});
     REQUIRE(no_content_result.has_value());
     CHECK(sparenode::http::serialize_http_response_head(no_content_result.value()) ==
-          "HTTP/1.1 204 No Content\r\nX-Test: yes\r\nConnection: close\r\n\r\n");
+          "HTTP/1.1 204 No Content\r\nX-Test: yes\r\nConnection: close\r\nDate: " +
+              std::string(no_content_result->date_value()) + "\r\n\r\n");
 }
 
 TEST_CASE("HTTP response writer sends an in-memory response completely",
@@ -397,5 +400,37 @@ TEST_CASE("HTTP response head boundary includes generated connection policy",
         REQUIRE_FALSE(oversized);
         CHECK(oversized.error().code ==
               sparenode::http::HttpResponseValidationErrorCode::response_head_too_large);
+    }
+}
+
+TEST_CASE("HTTP Date uses stable UTC IMF-fixdate formatting", "[http][response][date]")
+{
+    using namespace std::chrono;
+    CHECK(sparenode::http::detail::format_response_date(system_clock::time_point{}) ==
+          "Thu, 01 Jan 1970 00:00:00 GMT");
+    CHECK(sparenode::http::detail::format_response_date(system_clock::time_point{} - seconds{1}) ==
+          "Wed, 31 Dec 1969 23:59:59 GMT");
+    CHECK(sparenode::http::detail::format_response_date(sys_days{year{1994} / 11 / 6} + hours{8} +
+                                                        minutes{49} + seconds{37}) ==
+          "Sun, 06 Nov 1994 08:49:37 GMT");
+    CHECK(sparenode::http::detail::format_response_date(sys_days{year{2000} / 2 / 29}) ==
+          "Tue, 29 Feb 2000 00:00:00 GMT");
+    for (const auto status : {100, 200, 204, 301, 304, 400, 500})
+    {
+        auto response = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {}, {});
+        REQUIRE(response);
+        const auto wire = sparenode::http::serialize_http_response_head(response.value());
+        CHECK(wire.contains("\r\nDate: ") == (status >= 200));
+        CHECK(response->date_value().size() == (status >= 200 ? 29 : 0));
+        CHECK(sparenode::http::serialize_http_response_head(response.value()) == wire);
+    }
+    for (const auto name : {"Date", "dAtE"})
+    {
+        auto response = sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK",
+                                                              {{name, "bad date"}}, {});
+        REQUIRE_FALSE(response);
+        CHECK(response.error().code ==
+              sparenode::http::HttpResponseValidationErrorCode::managed_date_header);
     }
 }

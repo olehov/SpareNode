@@ -1,5 +1,7 @@
 #include "sparenode/http/http_response_writer.hpp"
 
+#include "sparenode/http/detail/response_date.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -71,7 +73,8 @@ constexpr std::uint16_t minimum_response_status_code = 100;
     if (http_status_code_value(response.status_code()) >=
         http_status_code_value(HttpStatusCode::ok))
     {
-        size += std::string_view("Connection: close\r\n").size();
+        size +=
+            std::string_view("Connection: close\r\n").size() + detail::response_date_field_bytes;
     }
     return size;
 }
@@ -176,7 +179,9 @@ std::string serialize_http_response_head(const HttpResponse &response)
     if (http_status_code_value(response.status_code()) >=
         http_status_code_value(HttpStatusCode::ok))
     {
-        head += "Connection: close\r\n";
+        head += "Connection: close\r\nDate: ";
+        head += response.date_value();
+        head += "\r\n";
     }
     head += "\r\n";
     return head;

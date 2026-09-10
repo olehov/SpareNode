@@ -1,16 +1,16 @@
 # HTTP/1.1 conformance profile v1
 
-Profile revision: **v1-draft.5**, 2026-09-09.
-Implementation baseline: SN-100 implementation based on `72df192`.
+Profile revision: **v1**, 2026-09-10.
+Implementation baseline: SN-095 audit follow-up based on `4622aa0`.
 Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 [SN-095](https://github.com/olehov/SpareNode/issues/103) and
 [Sprint 3](https://github.com/olehov/SpareNode/issues/105).
 
-This is a draft compatibility contract for SpareNode's restricted HTTP/1.1
-origin-server transport. It records current behavior separately from planned
-changes. It does not assert full HTTP/1.1 conformance. The SN-097 through SN-100 policies are implemented;
-Expect/Date review and the remaining restrictions still require reconciliation
-under SN-095 before a final conformance claim.
+This is a versioned compatibility contract for SpareNode's restricted HTTP/1.1
+origin-server transport, not a claim of full HTTP support. SN-097 through SN-100
+supply the main transport policies; the final SN-095 audit adds response Date and
+request expectation handling. Remaining endpoint-specific and optional features
+are classified below.
 
 ## Classification
 
@@ -35,19 +35,19 @@ under SN-095 before a final conformance claim.
 | Fixed request length | Implemented | One decimal Content-Length; overflow, duplicates, and invalid values are rejected. No length field means an empty body. | [RFC 9112 §6.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.2), [§6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
 | Chunked requests and trailers | Implemented | SN-097 provides incremental decoding, checked sizes, bounded ignored extensions and trailers, TE/CL rejection, and EOF validation. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1), [§7.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1) |
 | Transfer-coding subset | Intentionally restricted | One case-insensitive chunked coding only. Coding lists, parameters, and repeated TE fields fail with 400; other single coding tokens fail with 501. Trailer policy and limits are specified in the parser guide. | [RFC 9112 §6.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.1) |
-| Expect / 100-continue | Deferred | The session waits for a complete request before routing and has no interim-response handshake. Clients must not rely on receiving 100 Continue. Requires follow-up review under SN-095. | [RFC 9110 §10.1.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.1.1) |
+| Expect / 100-continue | Implemented | Validated headers trigger at most one immediate 100 Continue for an incomplete body. Case-insensitive 100-continue lists and repeated fields are supported; other expectations receive immediate 417. Already complete or empty bodies omit the interim response. Receive budgets remain unchanged. | [RFC 9110 §10.1.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.1.1) |
 
 ## Response and connection compatibility
 
 | Behavior | Classification | Current contract and follow-up | Reference |
 | --- | --- | --- | --- |
 | Response framing | Implemented | Validated status and fields; generated Content-Length; application-supplied Content-Length and Transfer-Encoding are rejected. | [RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6) |
-| Bodyless statuses | Implemented | Informational, 204, and 304 responses reject nonempty bodies and omit Content-Length. This does not imply a session-level interim-response exchange. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
+| Bodyless statuses | Implemented | Informational, 204, and 304 responses reject nonempty bodies and omit Content-Length. Only the session-owned 100 Continue handshake is implemented; endpoint-returned standalone 1xx remains invalid. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
 | HEAD | Implemented | GET fallback with path specificity preserved and explicit HEAD winning ties. The session suppresses all response content while preserving selected representation metadata and Content-Length where applicable; streaming readers are not called. | [RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2) |
 | Known-length streaming | Implemented | Bounded writer buffer, partial-send retries, exact declared length, structured reader failures, and cooperative cancellation. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
-| Persistence | Intentionally restricted | One request is handled per connection.  pipelined requests are not executed. | [RFC 9112 §9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3) |
+| Persistence | Intentionally restricted | One request is handled per connection. Pipelined requests are not executed. | [RFC 9112 §9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3) |
 | Connection-close signaling and draining | Implemented | Transport-generated Connection: close for every final response; endpoint Connection/Keep-Alive fields rejected. Successful final writes use send half-close, then bounded and cancellable draining. Budget exhaustion ends normally; peer resets or excess input can still prevent delivery. | [RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) |
-| Date generation | Deferred | The response layer does not automatically generate Date. Applicability and generation need review under SN-095 before a final conformance claim. | [RFC 9110 §6.6.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-6.6.1) |
+| Date generation | Implemented | Final responses generate one UTC IMF-fixdate at response construction; repeated serialization retains the same value. Endpoint-supplied Date is rejected and the generated field counts toward the head limit. Interim responses omit Date. | [RFC 9110 §6.6.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-6.6.1) |
 | Ranges, conditional requests, representation metadata | Deferred | No file-serving endpoint contract exists yet. File handlers must specify their supported semantics; generic routing does not implement them. | [RFC 9110 §8](https://www.rfc-editor.org/rfc/rfc9110.html#section-8), [§13](https://www.rfc-editor.org/rfc/rfc9110.html#section-13), [§14](https://www.rfc-editor.org/rfc/rfc9110.html#section-14) |
 | Proxy forwarding and CONNECT tunnels | Not applicable | SpareNode has no proxy/gateway role or tunnel endpoint. | [RFC 9110 §7.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-7.6), [§9.3.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6) |
 
@@ -115,7 +115,7 @@ The corresponding implementation contracts are in the
 [parser](http-request-parser.md), [response](http-response.md),
 [router](http-router.md), and [session](http-connection-handler.md) guides.
 
-To finalize v1, reconcile the implemented policies and remaining restrictions,
-resolve the Expect/Date review items under SN-095, and run the documentation checks.
-Change the baseline and revision whenever the recorded wire contract changes;
-do not silently describe planned behavior as implemented.
+Update the baseline and revision whenever the recorded wire contract changes.
+New endpoint features must specify their metadata and status-specific requirements
+before being described as implemented. The audit does not claim coverage of
+HTTP/2, HTTP/3, TLS, proxies, or optional extensions outside this profile.

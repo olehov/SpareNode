@@ -115,6 +115,8 @@ constexpr int response_writer_error_detail_base = 100;
     {
     case HttpStatusCode::bad_request:
         return "Bad Request";
+    case HttpStatusCode::expectation_failed:
+        return "Expectation Failed";
     case HttpStatusCode::content_too_large:
         return "Content Too Large";
     case HttpStatusCode::uri_too_long:
@@ -236,6 +238,49 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
     return drain_after_response(connection, stop_token, config);
 }
 
+/// @brief Sends one interim continue or an immediate final expectation rejection.
+/// @param[in,out] connection Session-owned transport.
+/// @param[in] expectation One-time decision from validated headers.
+/// @param[in] options Session cancellation and built-in body/total deadline.
+/// @param[in] config Final response close policy.
+/// @return True to continue request ingestion, false after a final response, or a write error.
+[[nodiscard]] Result<bool, network::NetworkError> respond_to_expectation(
+    network::TcpConnection &connection, const detail::RequestExpectation expectation,
+    const network::NetworkIoOptions &options, const HttpConnectionHandlerConfig &config)
+{
+    if (expectation == detail::RequestExpectation::unsupported)
+    {
+        const auto sent = send_error_response(connection, HttpStatusCode::expectation_failed,
+                                              options.stop_token, config);
+        if (!sent)
+        {
+            return unexpected(sent.error());
+        }
+        return false;
+    }
+    if (expectation == detail::RequestExpectation::continue_request)
+    {
+        constexpr std::string_view interim = "HTTP/1.1 100 Continue\r\n\r\n";
+        auto remaining = std::as_bytes(std::span(interim.data(), interim.size()));
+        while (!remaining.empty())
+        {
+            const auto sent = connection.send_with_options(remaining, options);
+            if (!sent)
+            {
+                return unexpected(sent.error());
+            }
+            if (sent.value() == 0)
+            {
+                return unexpected(network::NetworkError{
+                    network::NetworkOperation::send, network::NetworkErrorDomain::state,
+                    error_detail(HttpSessionFailureCode::response_failure)});
+            }
+            remaining = remaining.subspan(sent.value());
+        }
+    }
+    return true;
+}
+
 /// @brief Resolves cancellation and deadline options for the next request read.
 /// @param[in] config Session configuration and optional provider.
 /// @param[in] phase Incomplete request section awaiting input.
@@ -309,6 +354,17 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
         std::vector<std::byte> input((std::min)(request_limit, config.receive_chunk_bytes));
         while (true)
         {
+            const auto expectation = respond_to_expectation(
+                connection, request.take_expectation(),
+                {.stop_token = stop_token, .deadline = deadlines.next(true)}, config);
+            if (!expectation)
+            {
+                return unexpected(expectation.error());
+            }
+            if (!expectation.value())
+            {
+                return {};
+            }
             if (request.complete())
             {
                 return dispatch_and_respond(connection, router, request.request(), stop_token,

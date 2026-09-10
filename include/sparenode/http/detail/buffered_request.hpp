@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <stdexcept>
 
 #include "sparenode/http/detail/http_request_view_access.hpp"
@@ -7,6 +8,14 @@
 
 namespace sparenode::http::detail
 {
+/// @brief One-time action selected after validated request headers arrive.
+enum class RequestExpectation : std::uint8_t
+{
+    none,             ///< No interim or final expectation action is required.
+    continue_request, ///< A supported expectation awaits additional body bytes.
+    unsupported       ///< At least one expectation cannot be met.
+};
+
 /// @brief Adapts streaming body ingestion to the MVP's bounded in-memory route contract.
 /// Metadata storage freezes after parsing; body bytes use one decoder for both framings.
 class BufferedRequest final
@@ -52,12 +61,17 @@ class BufferedRequest final
         return HttpRequestViewAccess::create(head_.value(), body_);
     }
 
+    /// @brief Consumes the header expectation decision once, before waiting for more body bytes.
+    /// @return Continue for an incomplete expected body, unsupported for unknown expectations.
+    [[nodiscard]] RequestExpectation take_expectation();
+
   private:
     /// @brief Drains decoder output into the bounded MVP payload buffer.
     /// @param[in] input New body wire bytes, excluding previously consumed data.
     /// @return Success or terminal body syntax/limit failure.
     [[nodiscard]] Result<void, HttpRequestParseError> feed_body(std::span<const std::byte> input);
 
+    bool expectation_checked_{};      ///< Prevents repeated interim responses.
     HttpRequestParserLimits limits_;  ///< Session parser and decoder limits.
     std::vector<std::byte> metadata_; ///< Frozen metadata backing all header views.
     std::vector<std::byte> body_;     ///< Bounded decoded payload; replaceable by SN-087 ingestion.

@@ -1,11 +1,81 @@
 #include "sparenode/http/detail/buffered_request.hpp"
 
+#include <algorithm>
 #include <array>
+#include <string_view>
 
 #include "sparenode/http/detail/body_decode_buffer.hpp"
 
 namespace sparenode::http::detail
 {
+namespace
+{
+/// @brief Compares ASCII HTTP tokens without depending on the process locale.
+[[nodiscard]] bool equal_token(const std::string_view left, const std::string_view right)
+{
+    return std::ranges::equal(left, right,
+                              [](char lhs, char rhs)
+                              {
+                                  if (lhs >= 'A' && lhs <= 'Z')
+                                  {
+                                      lhs = static_cast<char>(lhs + ('a' - 'A'));
+                                  }
+                                  if (rhs >= 'A' && rhs <= 'Z')
+                                  {
+                                      rhs = static_cast<char>(rhs + ('a' - 'A'));
+                                  }
+                                  return lhs == rhs;
+                              });
+}
+/// @brief Accepts a bounded list of 100-continue tokens, ignoring empty list members.
+[[nodiscard]] bool supported_expectations(std::string_view value)
+{
+    while (!value.empty())
+    {
+        const auto comma = value.find(',');
+        auto item = value.substr(0, comma);
+        const auto begin = item.find_first_not_of(" \t");
+        if (begin != std::string_view::npos)
+        {
+            item = item.substr(begin, item.find_last_not_of(" \t") - begin + 1);
+            if (!equal_token(item, "100-continue"))
+            {
+                return false;
+            }
+        }
+        if (comma == std::string_view::npos)
+        {
+            break;
+        }
+        value.remove_prefix(comma + 1);
+    }
+    return true;
+}
+} // namespace
+
+RequestExpectation BufferedRequest::take_expectation()
+{
+    if (!head_.has_value() || expectation_checked_)
+    {
+        return RequestExpectation::none;
+    }
+    expectation_checked_ = true;
+    bool expected = false;
+    for (const auto &field : head_->fields)
+    {
+        if (equal_token(field.name, "Expect"))
+        {
+            if (!supported_expectations(field.value))
+            {
+                return RequestExpectation::unsupported;
+            }
+            expected = expected || field.value.find_first_not_of(" ,\t") != std::string_view::npos;
+        }
+    }
+    return expected && !complete() ? RequestExpectation::continue_request
+                                   : RequestExpectation::none;
+}
+
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
 Result<void, HttpRequestParseError> BufferedRequest::feed(const std::span<const std::byte> input)
 {
