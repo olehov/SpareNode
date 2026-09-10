@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Configure
-        run: cmake -S . -B build/ci-msvc -G "Visual Studio 18 2026" -A x64
+        run: cmake -S . -B build/ci-msvc -G "Visual Studio 18 2026" -A x64 -DSPARENODE_REQUIRE_SYMLINK_TESTS=ON
 
       - name: Build
         run: cmake --build build/ci-msvc --config Debug --parallel
