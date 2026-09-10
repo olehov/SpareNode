@@ -196,7 +196,7 @@ TEST_CASE("HTTP router creates standard responses for unmatched requests",
     CHECK(method_not_allowed->status_code() == sparenode::http::HttpStatusCode::method_not_allowed);
     REQUIRE(method_not_allowed->headers().size() == 1);
     CHECK(method_not_allowed->headers().front().name == "Allow");
-    CHECK(method_not_allowed->headers().front().value == "GET, POST");
+    CHECK(method_not_allowed->headers().front().value == "GET, HEAD, POST");
 }
 
 TEST_CASE("HTTP router preserves structured handler failures", "[http][router][errors]")
@@ -279,4 +279,87 @@ TEST_CASE("HTTP router enforces its route table boundary", "[http][router][limit
     REQUIRE(!overflow.has_value());
     CHECK(overflow.error().code ==
           sparenode::http::HttpRouteRegistrationErrorCode::too_many_routes);
+}
+
+TEST_CASE("HEAD routing preserves specificity and prefers explicit HEAD on ties",
+          "[http][router][head]")
+{
+    using sparenode::http::HttpMethod;
+    using sparenode::http::HttpStatusCode;
+    for (const bool reverse : {false, true})
+    {
+        sparenode::http::HttpRouter router;
+        std::vector<HttpMethod> observed_methods;
+        const auto recording_response = [&observed_methods](std::string reason)
+        {
+            return [&observed_methods,
+                    reason = std::move(reason)](const sparenode::http::HttpRequestView &request,
+                                                const sparenode::http::HttpRouteParameters &)
+            {
+                observed_methods.push_back(request.method());
+                return make_response(HttpStatusCode::ok, reason);
+            };
+        };
+        const auto add_get = [&]
+        {
+            REQUIRE(router.register_route(HttpMethod::get, "/files/*",
+                                          recording_response("GET wildcard")));
+            REQUIRE(router.register_route(HttpMethod::get, "/files/exact",
+                                          recording_response("GET exact")));
+            REQUIRE(router.register_route(HttpMethod::get, "/files/deep/*",
+                                          recording_response("GET deep")));
+        };
+        const auto add_head = [&]
+        {
+            REQUIRE(router.register_route(HttpMethod::head, "/files/*",
+                                          recording_response("HEAD wildcard")));
+        };
+        if (reverse)
+        {
+            add_head();
+            add_get();
+        }
+        else
+        {
+            add_get();
+            add_head();
+        }
+        const auto wildcard =
+            router.dispatch(parse_request("HEAD /files/item HTTP/1.1\r\nHost: local\r\n\r\n"));
+        const auto exact =
+            router.dispatch(parse_request("HEAD /files/exact HTTP/1.1\r\nHost: local\r\n\r\n"));
+        const auto deep =
+            router.dispatch(parse_request("HEAD /files/deep/item HTTP/1.1\r\nHost: local\r\n\r\n"));
+        REQUIRE(wildcard);
+        REQUIRE(exact);
+        REQUIRE(deep);
+        CHECK(wildcard->reason_phrase() == "HEAD wildcard");
+        CHECK(exact->reason_phrase() == "GET exact");
+        CHECK(deep->reason_phrase() == "GET deep");
+        REQUIRE(router.register_route(HttpMethod::head, "/files/exact",
+                                      recording_response("HEAD exact")));
+        const auto overridden =
+            router.dispatch(parse_request("HEAD /files/exact HTTP/1.1\r\nHost: local\r\n\r\n"));
+        REQUIRE(overridden);
+        CHECK(overridden->reason_phrase() == "HEAD exact");
+        CHECK(observed_methods == std::vector<HttpMethod>(4, HttpMethod::head));
+        const auto get =
+            router.dispatch(parse_request("GET /files/exact HTTP/1.1\r\nHost: local\r\n\r\n"));
+        REQUIRE(get);
+        CHECK(get->reason_phrase() == "GET exact");
+        REQUIRE(observed_methods.size() == 5);
+        CHECK(observed_methods.back() == HttpMethod::get);
+    }
+}
+
+TEST_CASE("A HEAD-only route does not implicitly allow GET", "[http][router][head]")
+{
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::head, "/",
+                                  respond_with(sparenode::http::HttpStatusCode::ok, "HEAD only")));
+    const auto get = router.dispatch(parse_request("GET / HTTP/1.1\r\nHost: local\r\n\r\n"));
+    REQUIRE(get);
+    CHECK(get->status_code() == sparenode::http::HttpStatusCode::method_not_allowed);
+    REQUIRE(get->headers().size() == 1);
+    CHECK(get->headers().front().value == "HEAD");
 }

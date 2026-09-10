@@ -741,3 +741,126 @@ TEST_CASE("HTTP session requires a final response from endpoint handlers", "[htt
     CHECK(response.contains("Connection: close\r\n"));
     CHECK_FALSE(response.contains("103"));
 }
+
+TEST_CASE("HEAD preserves GET metadata without transmitting memory content",
+          "[http][session][head]")
+{
+    const bool wildcard = GENERATE(false, true);
+    const bool explicit_head = GENERATE(false, true);
+    const std::string payload = GENERATE(std::string{}, std::string{"representation"});
+    sparenode::http::HttpRouter router;
+    auto handler = [&payload](const sparenode::http::HttpRequestView &,
+                              const sparenode::http::HttpRouteParameters &)
+        -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+    {
+        const auto bytes = bytes_of(payload);
+        auto response = sparenode::http::HttpResponse::create(
+            sparenode::http::HttpStatusCode::ok, "OK",
+            {{"Content-Type", "text/plain"}, {"ETag", "\"v1\""}},
+            std::vector<std::byte>(bytes.begin(), bytes.end()));
+        return std::move(response).value();
+    };
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::get,
+                                  wildcard ? "/files/*" : "/files/item", handler));
+    if (explicit_head)
+    {
+        REQUIRE(router.register_route(sparenode::http::HttpMethod::head,
+                                      wildcard ? "/files/*" : "/files/item", handler));
+    }
+    std::array<std::string, 2> responses;
+    for (std::size_t index = 0; index < responses.size(); ++index)
+    {
+        auto pair = sparenode::test::create_connected_tcp_pair();
+        send_all(pair.client, std::string(index == 0 ? "GET" : "HEAD") +
+                                  " /files/item?q=1 HTTP/1.1\r\nHost: local\r\n\r\n");
+        pair.client.shutdown_send();
+        REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+        responses[index] = receive_until_closed(pair.client);
+    }
+    const auto head_end = responses[0].find("\r\n\r\n");
+    REQUIRE(head_end != std::string::npos);
+    CHECK(responses[0].substr(head_end + 4) == payload);
+    CHECK(responses[1] == responses[0].substr(0, head_end + 4));
+    CHECK(responses[1].contains("Content-Length: " + std::to_string(payload.size()) + "\r\n"));
+}
+
+TEST_CASE("HEAD never invokes the streaming body producer", "[http][session][head][stream]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::size_t body_reads = 0;
+    constexpr std::uint64_t representation_bytes = std::uint64_t{5} * 1024 * 1024 * 1024;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/files/*",
+        [&](const sparenode::http::HttpRequestView &request,
+            const sparenode::http::HttpRouteParameters &parameters)
+            -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+        {
+            CHECK(request.method() == sparenode::http::HttpMethod::head);
+            CHECK(parameters.wildcard_suffix() == "large");
+            auto response = sparenode::http::HttpResponse::create_streaming(
+                sparenode::http::HttpStatusCode::ok, "OK",
+                {{"Content-Type", "application/octet-stream"}}, representation_bytes,
+                [&](std::span<std::byte>, const std::stop_token &)
+                    -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+                {
+                    ++body_reads;
+                    return sparenode::unexpected(sparenode::http::HttpBodyReadError{
+                        sparenode::http::HttpBodyReadErrorDomain::filesystem, 1});
+                });
+            return std::move(response).value();
+        }));
+    send_all(pair.client, "HEAD /files/large HTTP/1.1\r\nHost: local\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    const auto response = receive_until_closed(pair.client);
+    CHECK(body_reads == 0);
+    CHECK(response.contains("Content-Length: 5368709120\r\n"));
+    CHECK(response.find("\r\n\r\n") + 4 == response.size());
+}
+
+TEST_CASE("HEAD suppresses endpoint error content and preserves bodyless status framing",
+          "[http][session][head]")
+{
+    const auto status = GENERATE(204, 304, 404, 500);
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/",
+        [status](const sparenode::http::HttpRequestView &,
+                 const sparenode::http::HttpRouteParameters &)
+            -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+        {
+            auto response = sparenode::http::HttpResponse::create(
+                static_cast<sparenode::http::HttpStatusCode>(status), "Test", {},
+                status >= 400 ? std::vector<std::byte>{std::byte{'x'}} : std::vector<std::byte>{});
+            return std::move(response).value();
+        }));
+    send_all(pair.client, "HEAD / HTTP/1.1\r\nHost: local\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    const auto response = receive_until_closed(pair.client);
+    CHECK(response.starts_with("HTTP/1.1 " + std::to_string(status)));
+    CHECK(response.find("\r\n\r\n") + 4 == response.size());
+    CHECK(response.contains("Content-Length: 1\r\n") == (status >= 400));
+    CHECK(response.contains("Content-Length:") == (status >= 400));
+}
+
+TEST_CASE("HEAD routing and parser errors remain bodyless", "[http][session][head]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::post, "/post",
+        [](const sparenode::http::HttpRequestView &, const sparenode::http::HttpRouteParameters &)
+        { return ok_response(); }));
+    const auto scenario = GENERATE(std::pair{"HEAD /missing", "404"},
+                                   std::pair{"HEAD /post", "405"}, std::pair{"HEAD /%GG", "400"});
+    send_all(pair.client, std::string(scenario.first) + " HTTP/1.1\r\nHost: local\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    const auto response = receive_until_closed(pair.client);
+    CHECK(response.starts_with(std::string("HTTP/1.1 ") + scenario.second));
+    CHECK(response.find("\r\n\r\n") + 4 == response.size());
+    CHECK(response.contains("Connection: close\r\n"));
+}

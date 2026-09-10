@@ -1,16 +1,16 @@
 # HTTP/1.1 conformance profile v1
 
-Profile revision: **v1-draft.4**, 2026-09-09.
-Implementation baseline: SN-099 implementation based on `5003272`.
+Profile revision: **v1-draft.5**, 2026-09-09.
+Implementation baseline: SN-100 implementation based on `72df192`.
 Tracking: [SN-096](https://github.com/olehov/SpareNode/issues/106), within
 [SN-095](https://github.com/olehov/SpareNode/issues/103) and
 [Sprint 3](https://github.com/olehov/SpareNode/issues/105).
 
 This is a draft compatibility contract for SpareNode's restricted HTTP/1.1
 origin-server transport. It records current behavior separately from planned
-changes. It does not assert full HTTP/1.1 conformance. SN-096 remains incomplete
-until SN-100 delivers its behavior and this profile is reconciled
-with their implementation and tests.
+changes. It does not assert full HTTP/1.1 conformance. The SN-097 through SN-100 policies are implemented;
+Expect/Date review and the remaining restrictions still require reconciliation
+under SN-095 before a final conformance claim.
 
 ## Classification
 
@@ -43,7 +43,7 @@ with their implementation and tests.
 | --- | --- | --- | --- |
 | Response framing | Implemented | Validated status and fields; generated Content-Length; application-supplied Content-Length and Transfer-Encoding are rejected. | [RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6) |
 | Bodyless statuses | Implemented | Informational, 204, and 304 responses reject nonempty bodies and omit Content-Length. This does not imply a session-level interim-response exchange. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
-| HEAD | Deferred | Parsed and routed, but the session does not suppress handler content. SN-100 owns body suppression and representation metadata. | [RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2) |
+| HEAD | Implemented | GET fallback with path specificity preserved and explicit HEAD winning ties. The session suppresses all response content while preserving selected representation metadata and Content-Length where applicable; streaming readers are not called. | [RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2) |
 | Known-length streaming | Implemented | Bounded writer buffer, partial-send retries, exact declared length, structured reader failures, and cooperative cancellation. | [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) |
 | Persistence | Intentionally restricted | One request is handled per connection.  pipelined requests are not executed. | [RFC 9112 §9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3) |
 | Connection-close signaling and draining | Implemented | Transport-generated Connection: close for every final response; endpoint Connection/Keep-Alive fields rejected. Successful final writes use send half-close, then bounded and cancellable draining. Budget exhaustion ends normally; peer resets or excess input can still prevent delivery. | [RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) |
@@ -109,12 +109,13 @@ small output buffers, exact limits, malformed framing, premature EOF, trailer
 isolation, and chunked loopback timeout/cancellation behavior.
 SN-099 coverage includes generated close headers, exact response-head bounds,
 unread socket input, half-close receive access, byte/time drain limits, and cancellation.
+SN-100 tests compare GET/HEAD metadata and content on exact/wildcard routes,
+verify explicit HEAD precedence, bodyless/error responses, and skip a 5 GiB reader.
 The corresponding implementation contracts are in the
 [parser](http-request-parser.md), [response](http-response.md),
 [router](http-router.md), and [session](http-connection-handler.md) guides.
 
-To finalize v1, update each deferred SN-099–SN-100 row after its implementation,
-link its regression coverage, record remaining restrictions, and resolve the
-Expect/Date review items under SN-095. Verify Windows and Linux behavior and run
-the documentation checks. Change the baseline and revision whenever the recorded
-wire contract changes; do not silently describe planned behavior as implemented.
+To finalize v1, reconcile the implemented policies and remaining restrictions,
+resolve the Expect/Date review items under SN-095, and run the documentation checks.
+Change the baseline and revision whenever the recorded wire contract changes;
+do not silently describe planned behavior as implemented.

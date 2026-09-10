@@ -204,6 +204,33 @@ HttpRouter::register_route(const HttpMethod method, std::string pattern, HttpRou
     return {};
 }
 
+/// @brief Selects the most specific route, allowing GET fallback for HEAD.
+const HttpRouter::Route *HttpRouter::select_route(const HttpMethod method,
+                                                  const std::string_view path) const noexcept
+{
+    const Route *selected = nullptr;
+    for (const Route &route : routes_)
+    {
+        const bool method_matches = route.method == method ||
+                                    (method == HttpMethod::head && route.method == HttpMethod::get);
+        if (!method_matches || !path_matches(route.wildcard, route.prefix, path))
+        {
+            continue;
+        }
+        const bool explicit_head_tie = selected != nullptr && route.method == HttpMethod::head &&
+                                       selected->method == HttpMethod::get &&
+                                       route.wildcard == selected->wildcard &&
+                                       route.prefix.size() == selected->prefix.size();
+        if (selected == nullptr || explicit_head_tie ||
+            is_more_specific(route.wildcard, route.prefix.size(), selected->wildcard,
+                             selected->prefix.size()))
+        {
+            selected = &route;
+        }
+    }
+    return selected;
+}
+
 /// @brief Selects the most specific method-and-path handler for one request.
 Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView &request) const
 {
@@ -212,16 +239,7 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
         return make_routing_response(HttpStatusCode::no_content, "No Content");
     }
     const std::string_view path = request_path(request.target());
-    const Route *selected = nullptr;
-    for (const Route &route : routes_)
-    {
-        if (route.method == request.method() && path_matches(route.wildcard, route.prefix, path) &&
-            (selected == nullptr || is_more_specific(route.wildcard, route.prefix.size(),
-                                                     selected->wildcard, selected->prefix.size())))
-        {
-            selected = &route;
-        }
-    }
+    const Route *selected = select_route(request.method(), path);
 
     if (selected != nullptr)
     {
@@ -238,6 +256,10 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
         {
             path_exists = true;
             allowed[method_index(route.method)] = true;
+            if (route.method == HttpMethod::get)
+            {
+                allowed[method_index(HttpMethod::head)] = true;
+            }
         }
     }
 

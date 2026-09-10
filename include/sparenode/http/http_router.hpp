@@ -74,6 +74,7 @@ struct HttpRouteRegistrationError
 /// Patterns are either exact origin paths such as `/api/status` or paths ending in one terminal
 /// wildcard such as `/api/file/*`. Matching ignores the request query string. Exact routes take
 /// precedence over wildcard routes, and the longest matching wildcard prefix wins.
+/// HEAD also matches GET routes; explicit HEAD wins ties without changing the request method.
 class HttpRouter final
 {
   public:
@@ -121,6 +122,13 @@ class HttpRouter final
         bool wildcard{};          ///< Whether the pattern captures a suffix.
         HttpRouteHandler handler; ///< Application callback invoked for a match.
     };
+
+    /// @brief Selects by path specificity, then explicit HEAD over GET fallback.
+    /// @param[in] method Original request method.
+    /// @param[in] path Request path without its query.
+    /// @return Borrowed route or null when none matches.
+    [[nodiscard]] const Route *select_route(HttpMethod method,
+                                            std::string_view path) const noexcept;
 
     std::vector<Route> routes_; ///< Bounded route table searched by specificity.
 };

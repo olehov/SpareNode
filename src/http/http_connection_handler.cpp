@@ -271,7 +271,9 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &route
         return send_error_response(connection, HttpStatusCode::internal_server_error, stop_token,
                                    config);
     }
-    if (auto written = write_http_response(connection, response.value(), stop_token); !written)
+    if (auto written =
+            write_http_response(connection, response.value(), stop_token, request.method());
+        !written)
     {
         return unexpected(map_write_error(written.error()));
     }
