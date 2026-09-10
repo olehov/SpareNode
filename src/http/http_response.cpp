@@ -1,5 +1,7 @@
 #include "sparenode/http/http_response.hpp"
 
+#include "sparenode/http/detail/response_date.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -105,6 +107,11 @@ validate_header(const HttpResponseHeader &header, const HeaderValidationContext 
         return unexpected(HttpResponseValidationError{
             HttpResponseValidationErrorCode::managed_connection_header, context.index});
     }
+    if (ascii_case_insensitive_equal(header.name, "Date"))
+    {
+        return unexpected(HttpResponseValidationError{
+            HttpResponseValidationErrorCode::managed_date_header, context.index});
+    }
     if (header.name.size() > context.remaining ||
         header.value.size() > context.remaining - header.name.size() ||
         context.remaining - header.name.size() - header.value.size() < 4)
@@ -152,7 +159,7 @@ validate_response(const HttpStatusCode status_code, const std::string_view reaso
             : content_length_fixed_bytes + decimal_length(content_length) + 2;
     const std::size_t connection_bytes =
         numeric_status >= http_status_code_value(HttpStatusCode::ok)
-            ? std::string_view("Connection: close\r\n").size()
+            ? std::string_view("Connection: close\r\n").size() + detail::response_date_field_bytes
             : 0;
     // 205 carries Content-Length: 0 even though its body is forbidden.
     const std::size_t reset_content_bytes =
@@ -191,6 +198,9 @@ HttpResponse::HttpResponse(const HttpStatusCode status_code, std::string reason_
                            const std::uint64_t content_length, HttpBodyReader body_reader)
     : status_code_(status_code), reason_phrase_(std::move(reason_phrase)),
       headers_(std::move(headers)), memory_body_(std::move(body)), content_length_(content_length),
+      date_value_(http_status_code_value(status_code) >= http_status_code_value(HttpStatusCode::ok)
+                      ? detail::format_response_date(std::chrono::system_clock::now())
+                      : std::string{}),
       body_reader_(std::move(body_reader))
 {
 }
@@ -307,6 +317,8 @@ const char *to_string(const HttpResponseValidationErrorCode code) noexcept
         return "HTTP response head exceeds its configured boundary";
     case HttpResponseValidationErrorCode::memory_body_too_large:
         return "HTTP response in-memory body exceeds its configured boundary";
+    case HttpResponseValidationErrorCode::managed_date_header:
+        return "HTTP response Date is managed by the transport";
     case HttpResponseValidationErrorCode::missing_body_reader:
         return "HTTP streaming response requires a body reader";
     }

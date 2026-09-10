@@ -54,6 +54,7 @@ add_library(sparenode_core STATIC
     src/http/http_body_decoder.cpp
     src/http/detail/host_authority.cpp
     src/http/detail/request_target.cpp
+    src/http/detail/response_date.cpp
     src/http/detail/request_deadlines.cpp
     src/http/detail/buffered_request.cpp
     src/http/http_router.cpp

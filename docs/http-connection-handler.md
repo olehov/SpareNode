@@ -28,7 +28,7 @@ added later without changing parser boundaries.
 The response transport generates `Connection: close` for every final response,
 including routed responses and parser/route errors. Endpoint-supplied `Connection`
 and `Keep-Alive` headers fail response validation. A standalone informational route
-result becomes 500; the session does not implement interim exchanges or upgrades.
+result becomes 500; the session only implements its own 100 Continue exchange and has no upgrade path.
 
 After a successful write, `TcpConnection::shutdown_send()` sends FIN after queued
 output while retaining the receive direction. The session then discards additional
@@ -56,6 +56,25 @@ ambiguity, 413 for body or chunk/trailer metadata limits, 414
 for request-target size, 431 for header limits, 501 for unsupported transport
 features, and 505 for unsupported HTTP versions. Route failures receive 500.
 Network receive/send failures remain structured `NetworkError` values.
+
+## Request expectations
+
+After valid headers arrive, the session examines Expect before waiting for further
+content. Case-insensitive lists containing only `100-continue` (including repeated
+fields and ignorable empty list members) request one interim `HTTP/1.1 100 Continue`
+response when body framing remains incomplete. The same buffered decoder handles
+fixed-length and chunked input after that response. Empty or already completed
+bodies need no interim response. Unknown expectations or parameters produce 417
+immediately, without invoking a route or waiting for the declared body. Invalid
+request framing/limits can produce a final parser error before expectation handling.
+
+Interim responses have no body, Content-Length, Connection: close, or Date. Final
+responses retain the close/drain policy. The handshake never renews inactivity or
+total receive deadlines; cancellation and body timeout remain observable. Interim
+writes also use the built-in body/total deadline, so a non-reading peer cannot
+block the handshake indefinitely. The optional provider still controls request reads. Network
+failure can terminate the session after an interim response, as before any final
+response. This follows [RFC 9110 section 10.1.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.1.1).
 
 ## HEAD responses
 

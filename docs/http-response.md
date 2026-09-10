@@ -27,7 +27,17 @@ fields are rejected case-insensitively during construction with
 `managed_connection_header`. Handlers omit these fields. Generated fields count
 toward the serialized head boundary. Informational serialization does not add close;
 the current session requires a final response and converts a standalone 1xx handler
-result to 500 because interim exchanges and upgrades are not implemented.
+result to 500 because endpoint-driven interim exchanges and upgrades are not implemented.
+The session itself may send 100 Continue before receiving an expected body.
+
+The transport generates `Date` for every final response (including 5xx) in UTC
+IMF-fixdate form, for example `Sun, 06 Nov 1994 08:49:37 GMT`. It samples the system
+clock at response construction and stores that value, so serialization is stable
+and independent of process locale or concurrent calls. Application-provided Date
+is rejected case-insensitively with `managed_date_header`; the generated 37-byte
+field counts toward the existing head limit. Informational responses omit Date.
+This satisfies [RFC 9110 section 6.6.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-6.6.1)
+for this origin server with a system clock.
 
 ## Body representations
 

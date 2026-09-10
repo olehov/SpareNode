@@ -71,6 +71,38 @@ void send_all(const sparenode::test::TestClientSocket &client, const std::string
     }
 }
 
+/// @brief Removes only the dynamic Date field when comparing otherwise identical wire metadata.
+/// @param[in] response Complete final response containing one generated Date field.
+/// @return Response with that field removed; verifies its fixed width and uniqueness.
+[[nodiscard]] std::string without_response_date(std::string response)
+{
+    const auto begin = response.find("\r\nDate: ");
+    REQUIRE(begin != std::string::npos);
+    const auto end = response.find("\r\n", begin + 2);
+    REQUIRE(end - begin == 37);
+    REQUIRE(response.find("\r\nDate: ", end) == std::string::npos);
+    response.erase(begin + 2, end - begin);
+    return response;
+}
+
+/// @brief Reads through one head terminator without consuming a later response.
+/// @param[in] client Connected client awaiting an interim response before sending its body.
+/// @return Complete head, bounded by the test timeout and response-head size.
+[[nodiscard]] std::string receive_response_head(const sparenode::test::TestClientSocket &client)
+{
+    std::string response;
+    // One byte avoids consuming any bytes from the following final response.
+    std::array<std::byte, 1> byte{};
+    while (!response.ends_with("\r\n\r\n"))
+    {
+        const auto count = client.receive_within(byte, std::chrono::seconds{1});
+        REQUIRE(sparenode::test::require_optional(count) == 1);
+        response.push_back(static_cast<char>(byte.front()));
+        REQUIRE(response.size() <= sparenode::http::HttpResponse::maximum_head_bytes);
+    }
+    return response;
+}
+
 /// @brief Creates one fixed successful route response for session tests.
 /// @return Valid empty HTTP response.
 [[nodiscard]] sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
@@ -114,7 +146,8 @@ TEST_CASE("HTTP connection session reads incrementally routes and writes a respo
     worker.join();
 
     REQUIRE(result.has_value());
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    CHECK(without_response_date(response) ==
+          "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
 TEST_CASE("HTTP connection session returns a bounded parser error response",
@@ -166,7 +199,8 @@ TEST_CASE("HTTP connection session handles one request and discards pipelined by
     worker.join();
 
     REQUIRE(result.has_value());
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    CHECK(without_response_date(response) ==
+          "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     CHECK(response.find("HTTP/1.1", 1) == std::string::npos);
 }
 
@@ -340,7 +374,8 @@ TEST_CASE("HTTP connection handler runs through the TCP dispatcher",
     const std::string response = receive_until_closed(client);
     server.request_stop();
 
-    CHECK(response == "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    CHECK(without_response_date(response) ==
+          "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
 TEST_CASE("HTTP connection session observes dispatcher cancellation",
@@ -780,7 +815,8 @@ TEST_CASE("HEAD preserves GET metadata without transmitting memory content",
     const auto head_end = responses[0].find("\r\n\r\n");
     REQUIRE(head_end != std::string::npos);
     CHECK(responses[0].substr(head_end + 4) == payload);
-    CHECK(responses[1] == responses[0].substr(0, head_end + 4));
+    CHECK(without_response_date(responses[1]) ==
+          without_response_date(responses[0].substr(0, head_end + 4)));
     CHECK(responses[1].contains("Content-Length: " + std::to_string(payload.size()) + "\r\n"));
 }
 
@@ -863,4 +899,110 @@ TEST_CASE("HEAD routing and parser errors remain bodyless", "[http][session][hea
     CHECK(response.starts_with(std::string("HTTP/1.1 ") + scenario.second));
     CHECK(response.find("\r\n\r\n") + 4 == response.size());
     CHECK(response.contains("Connection: close\r\n"));
+}
+
+TEST_CASE("Expect continue unblocks fixed and chunked request bodies", "[http][session][expect]")
+{
+    const bool chunked = GENERATE(false, true);
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::post, "/",
+                                  [](const sparenode::http::HttpRequestView &request,
+                                     const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      CHECK(request.body().size() == 3);
+                                      return ok_response();
+                                  }));
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, token,
+                {.receive_chunk_bytes = 7, .deadline_provider = {}}));
+        });
+    send_all(pair.client,
+             std::string("POST / HTTP/1.1\r\nHost: local\r\nExpect: , 100-CoNtInUe,\r\nExpect: "
+                         "100-continue\r\n") +
+                 (chunked ? "Transfer-Encoding: chunked\r\n\r\n" : "Content-Length: 3\r\n\r\n"));
+    CHECK(receive_response_head(pair.client) == "HTTP/1.1 100 Continue\r\n\r\n");
+    send_all(pair.client, chunked ? "3\r\nabc\r\n0\r\n\r\n" : "abc");
+    pair.client.shutdown_send();
+    const auto final_response = receive_until_closed(pair.client);
+    CHECK(final_response.starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(final_response.contains("\r\nDate: "));
+    CHECK_FALSE(final_response.contains("100 Continue"));
+    REQUIRE(future.get());
+}
+
+TEST_CASE("Unsupported expectations and invalid framing receive immediate final errors",
+          "[http][session][expect]")
+{
+    const auto scenario =
+        GENERATE(std::pair{"Expect: other\r\nContent-Length: 3", "417"},
+                 std::pair{"Expect: 100-continue, other\r\nContent-Length: 3", "417"},
+                 std::pair{"Expect: 100-continue\r\nContent-Length: 999999999", "413"});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(
+                sparenode::http::handle_http_connection(std::move(pair.server), router, token));
+        });
+    send_all(pair.client,
+             std::string("POST / HTTP/1.1\r\nHost: local\r\n") + scenario.first + "\r\n\r\n");
+    const auto response = receive_until_closed(pair.client);
+    CHECK(response.starts_with(std::string("HTTP/1.1 ") + scenario.second));
+    CHECK(response.contains("Connection: close\r\n"));
+    CHECK(response.contains("\r\nDate: "));
+    CHECK_FALSE(response.contains("100 Continue"));
+    REQUIRE(future.get());
+}
+
+TEST_CASE("Continue is omitted for requests whose bodies already completed",
+          "[http][session][expect]")
+{
+    const auto body = GENERATE(std::string{}, std::string{"abc"});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    send_all(pair.client,
+             "POST / HTTP/1.1\r\nHost: local\r\nExpect: 100-continue\r\nContent-Length: " +
+                 std::to_string(body.size()) + "\r\n\r\n" + body);
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    const auto response = receive_until_closed(pair.client);
+    CHECK(response.starts_with("HTTP/1.1 404 "));
+    CHECK_FALSE(response.contains("100 Continue"));
+}
+
+TEST_CASE("Continue preserves body timeout and cancellation", "[http][session][expect]")
+{
+    const bool cancel = GENERATE(false, true);
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::promise<SessionResult> promise;
+    auto future = promise.get_future();
+    std::jthread worker(
+        [&](const std::stop_token &token)
+        {
+            promise.set_value(sparenode::http::handle_http_connection(
+                std::move(pair.server), router, token,
+                {.timeouts = {.body = std::chrono::milliseconds{200}}, .deadline_provider = {}}));
+        });
+    send_all(pair.client,
+             "POST / HTTP/1.1\r\nHost: local\r\nExpect: 100-continue\r\nContent-Length: 3\r\n\r\n");
+    CHECK(receive_response_head(pair.client) == "HTTP/1.1 100 Continue\r\n\r\n");
+    if (cancel)
+    {
+        worker.request_stop();
+    }
+    REQUIRE(future.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    const auto result = future.get();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().domain == (cancel ? sparenode::network::NetworkErrorDomain::cancellation
+                                           : sparenode::network::NetworkErrorDomain::timeout));
 }
