@@ -289,19 +289,30 @@ TEST_CASE("HEAD routing preserves specificity and prefers explicit HEAD on ties"
     for (const bool reverse : {false, true})
     {
         sparenode::http::HttpRouter router;
+        std::vector<HttpMethod> observed_methods;
+        const auto recording_response = [&observed_methods](std::string reason)
+        {
+            return [&observed_methods,
+                    reason = std::move(reason)](const sparenode::http::HttpRequestView &request,
+                                                const sparenode::http::HttpRouteParameters &)
+            {
+                observed_methods.push_back(request.method());
+                return make_response(HttpStatusCode::ok, reason);
+            };
+        };
         const auto add_get = [&]
         {
             REQUIRE(router.register_route(HttpMethod::get, "/files/*",
-                                          respond_with(HttpStatusCode::ok, "GET wildcard")));
+                                          recording_response("GET wildcard")));
             REQUIRE(router.register_route(HttpMethod::get, "/files/exact",
-                                          respond_with(HttpStatusCode::ok, "GET exact")));
+                                          recording_response("GET exact")));
             REQUIRE(router.register_route(HttpMethod::get, "/files/deep/*",
-                                          respond_with(HttpStatusCode::ok, "GET deep")));
+                                          recording_response("GET deep")));
         };
         const auto add_head = [&]
         {
             REQUIRE(router.register_route(HttpMethod::head, "/files/*",
-                                          respond_with(HttpStatusCode::ok, "HEAD wildcard")));
+                                          recording_response("HEAD wildcard")));
         };
         if (reverse)
         {
@@ -326,15 +337,18 @@ TEST_CASE("HEAD routing preserves specificity and prefers explicit HEAD on ties"
         CHECK(exact->reason_phrase() == "GET exact");
         CHECK(deep->reason_phrase() == "GET deep");
         REQUIRE(router.register_route(HttpMethod::head, "/files/exact",
-                                      respond_with(HttpStatusCode::ok, "HEAD exact")));
+                                      recording_response("HEAD exact")));
         const auto overridden =
             router.dispatch(parse_request("HEAD /files/exact HTTP/1.1\r\nHost: local\r\n\r\n"));
         REQUIRE(overridden);
         CHECK(overridden->reason_phrase() == "HEAD exact");
+        CHECK(observed_methods == std::vector<HttpMethod>(4, HttpMethod::head));
         const auto get =
             router.dispatch(parse_request("GET /files/exact HTTP/1.1\r\nHost: local\r\n\r\n"));
         REQUIRE(get);
         CHECK(get->reason_phrase() == "GET exact");
+        REQUIRE(observed_methods.size() == 5);
+        CHECK(observed_methods.back() == HttpMethod::get);
     }
 }
 
