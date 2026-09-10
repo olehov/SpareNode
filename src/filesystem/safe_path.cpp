@@ -105,6 +105,87 @@ namespace
     return true;
 }
 
+/// @brief Rechecks that the configured root still names its canonical directory.
+/// @param[in] shared_root Previously validated directory boundary.
+/// @return Current root path, or an error if it disappeared or was redirected.
+[[nodiscard]] Result<std::filesystem::path, SafePathErrorCode>
+recheck_root(const configuration::SharedRoot &shared_root)
+{
+    std::error_code error;
+    auto resolved = std::filesystem::canonical(shared_root.path(), error);
+    if (error)
+    {
+        return unexpected(SafePathErrorCode::resolution_failed);
+    }
+    if (resolved != shared_root.path())
+    {
+        return unexpected(SafePathErrorCode::outside_shared_root);
+    }
+    if (!std::filesystem::is_directory(resolved, error) || error)
+    {
+        return unexpected(SafePathErrorCode::resolution_failed);
+    }
+    return resolved;
+}
+
+/// @brief Resolves existing prefixes without treating dangling links as missing destinations.
+/// @param[in] candidate Lexically normalized absolute path already confined to the root.
+/// @param[in] shared_root Root required to contain every resolved request prefix.
+/// @return Canonical existing prefix with any missing suffix, or a confinement error.
+[[nodiscard]] Result<std::filesystem::path, SafePathErrorCode>
+resolve_existing_prefixes(const std::filesystem::path &candidate,
+                          const configuration::SharedRoot &shared_root)
+{
+    auto root = recheck_root(shared_root);
+    if (!root)
+    {
+        return unexpected(root.error());
+    }
+    auto resolved = std::move(root).value();
+    std::error_code error;
+    const auto relative = candidate.lexically_relative(shared_root.path());
+    bool missing_suffix = false;
+    for (const auto &component : relative)
+    {
+        if (component.empty() || component == ".")
+        {
+            continue;
+        }
+        // Win32 can report file/child as missing instead of ENOTDIR; check the parent first.
+        if (!missing_suffix && (!std::filesystem::is_directory(resolved, error) || error))
+        {
+            return unexpected(SafePathErrorCode::resolution_failed);
+        }
+        resolved /= component;
+        if (missing_suffix)
+        {
+            continue;
+        }
+        const auto status = std::filesystem::symlink_status(resolved, error);
+        if (status.type() == std::filesystem::file_type::not_found &&
+            (!error || error == std::errc::no_such_file_or_directory))
+        {
+            missing_suffix = true;
+            continue;
+        }
+        if (error)
+        {
+            return unexpected(SafePathErrorCode::resolution_failed);
+        }
+        // Canonicalization must succeed even for links: a dangling link is not a new file.
+        resolved = std::filesystem::canonical(resolved, error);
+        if (error)
+        {
+            return unexpected(SafePathErrorCode::resolution_failed);
+        }
+        if (!is_within_root(resolved, shared_root))
+        {
+            return unexpected(SafePathErrorCode::outside_shared_root);
+        }
+    }
+    return resolved;
+}
+
 /// @brief Detects absolute and drive-qualified syntax consistently on every host.
 /// @param[in] normalized_request Decoded path whose separators are all `/`.
 /// @return `true` for slash-rooted, UNC-style, or drive-qualified input.
@@ -298,7 +379,12 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
             SafePathError{SafePathErrorCode::outside_shared_root, std::string(requested_path)});
     }
 
-    return SafePath(std::move(resolved_path));
+    auto confined_path = resolve_existing_prefixes(resolved_path, shared_root);
+    if (!confined_path)
+    {
+        return unexpected(SafePathError{confined_path.error(), std::string(requested_path)});
+    }
+    return SafePath(std::move(confined_path).value());
 }
 
 const std::filesystem::path &SafePath::path() const noexcept
@@ -324,6 +410,8 @@ const char *to_string(const SafePathErrorCode code) noexcept
         return "the requested path contains a platform-invalid component";
     case SafePathErrorCode::outside_shared_root:
         return "the requested path escapes the shared root";
+    case SafePathErrorCode::resolution_failed:
+        return "an existing path prefix or symbolic-link target cannot be resolved";
     }
 
     return "unknown safe-path error";

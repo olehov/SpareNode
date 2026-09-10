@@ -22,6 +22,7 @@ enum class SafePathErrorCode : std::uint8_t
     rooted_path,              ///< The requested path supplies a root, drive, or absolute location.
     invalid_component,        ///< A component violates platform-specific naming rules.
     outside_shared_root,      ///< The resolved path is not contained by the configured shared root.
+    resolution_failed,        ///< An existing prefix or symbolic-link target cannot be resolved.
 };
 
 /// @brief Describes a failure while resolving an untrusted path.
@@ -34,9 +35,9 @@ struct SafePathError
 /// @brief Represents a filesystem path resolved and confined to one shared root.
 ///
 /// Instances can only be obtained through resolve(). The stored path is absolute and
-/// lexically normalized, so a missing final component remains representable for future
-/// create or upload operations. Symbolic-link and reparse-point confinement is added by
-/// the dedicated filesystem-security layers before untrusted paths reach file access.
+/// normalized, with existing symbolic links resolved inside the root. Missing descendants
+/// remain representable for future create or upload operations. This is a point-in-time
+/// check; file operations must independently prevent concurrent filesystem replacement.
 class SafePath final
 {
   public:

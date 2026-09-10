@@ -119,8 +119,13 @@ TEST_CASE("Safe path accepts a request at the application length limit", "[files
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-safe-path");
     const auto shared_root = require_shared_root(directory.path());
-    const std::string requested_path(sparenode::filesystem::SafePath::maximum_requested_path_bytes,
-                                     'a');
+    // A missing short prefix avoids imposing the host's filename limit on this input-limit test.
+    constexpr std::string_view missing_prefix = "missing/";
+    const auto requested_path =
+        std::string(missing_prefix) +
+        std::string(sparenode::filesystem::SafePath::maximum_requested_path_bytes -
+                        missing_prefix.size(),
+                    'a');
 
     const auto result = sparenode::filesystem::SafePath::resolve(shared_root, requested_path);
 

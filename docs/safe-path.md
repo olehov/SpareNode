@@ -26,6 +26,10 @@ construct a `SafePath` from an unrestricted host path.
    exist.
 10. Compare complete path components to ensure the result is the shared root or
    one of its descendants.
+11. Recheck the configured root, then inspect each existing request prefix with
+    `symlink_status` and canonicalize it. Reject resolved prefixes outside the
+    root, dangling links, cycles, and filesystem errors. Append a genuinely
+    missing suffix only after its existing parent has passed these checks.
 
 URL path decoding is case-insensitive for hexadecimal digits and does not treat
 `+` as a space. A decoded result containing another valid percent escape is
@@ -51,18 +55,36 @@ operations. The operation consuming `SafePath` remains responsible for its own
 requirements, such as whether the target must already exist or be a regular
 file.
 
+Internal file and directory symbolic links, including chains, resolve to their
+canonical target. An external directory link is rejected even if the requested
+child does not exist. Broken links are errors, not prospective upload targets.
+Request normalization precedes filesystem lookup: `link/../file.txt` denotes
+`file.txt` in the root; callers must use the returned path rather than reopen
+the original request. Native canonicalization resolves dots in link targets.
+
 ## Errors
 
 Resolution returns `SafePathError` rather than throwing for expected invalid
 input. The error distinguishes an oversized request, invalid or nested percent
 encoding, invalid UTF-8, embedded null bytes, rooted input, platform-invalid
-components, and escape from the shared root. Oversized input is not copied into
+components, escape from the shared root, and failure to resolve an existing
+prefix or link target (`resolution_failed`). Oversized input is not copied into
 the error object; its `requested_path` field is empty.
 
 ## Remaining security work
 
-`SafePath` establishes lexical confinement only. It deliberately does not
-follow symbolic links or inspect Windows reparse points because a missing upload
-destination must also be representable. Dedicated issues extend this boundary
-with symbolic-link protection, Windows reparse-point handling, and
-operation-time safeguards against filesystem races.
+`SafePath` checks symbolic-link confinement at resolution time. It does not hold
+an open file or directory handle, so replacing a directory or link after the
+check can invalidate that result. File operations must prevent these races at
+open/create time; a `SafePath` alone is not an authorization to follow a mutable
+pathname without further protection. Hard links and mount boundaries are not
+detected by symbolic-link resolution. Dedicated Windows reparse-point policies
+(including junctions) belong to SN-024.
+
+## Symbolic-link tests
+
+The `[symlink]` tests use real file and directory links on Linux and Windows.
+Windows requires Developer Mode or the symbolic-link creation privilege.
+Local tests skip only a missing Windows privilege; other setup errors fail.
+The Windows CI job configures `-DSPARENODE_REQUIRE_SYMLINK_TESTS=ON` so a missing
+privilege fails the suite instead of silently leaving this protection untested.

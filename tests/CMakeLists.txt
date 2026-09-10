@@ -23,6 +23,7 @@ add_executable(sparenode_tests
     configuration/runtime_config_mapper_test.cpp
     configuration/shared_root_test.cpp
     filesystem/safe_path_test.cpp
+    filesystem/safe_path_symlink_test.cpp
     http/http_connection_handler_test.cpp
     http/request_deadlines_test.cpp
     http/http_request_parser_test.cpp
@@ -46,6 +47,11 @@ target_link_libraries(sparenode_tests PRIVATE
     sparenode_core
     Threads::Threads
 )
+
+option(SPARENODE_REQUIRE_SYMLINK_TESTS "Fail instead of skipping when symlink privilege is missing" OFF)
+if(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    target_compile_definitions(sparenode_tests PRIVATE SPARENODE_REQUIRE_SYMLINK_TESTS)
+endif()
 
 if(WIN32)
     # The integration tests call Winsock directly to create their client socket.
