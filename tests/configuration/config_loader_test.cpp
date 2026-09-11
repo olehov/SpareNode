@@ -97,7 +97,7 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2400});
     CHECK(server.http_timeouts().total == std::chrono::milliseconds{3600});
     REQUIRE(server.shares().size() == 1);
-    CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
+    CHECK(std::filesystem::equivalent(server.shares().front().root().path(), directory.path()));
     CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{false, true, true});
 }

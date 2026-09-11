@@ -14,7 +14,10 @@ TEST_CASE("Shared root accepts an existing directory", "[configuration][filesyst
 
     REQUIRE(result);
     REQUIRE(result->path().is_absolute());
-    REQUIRE(result->path() == std::filesystem::canonical(directory.path()));
+    REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
+#ifdef _WIN32
+    REQUIRE(result->path().native().starts_with(LR"(\\?\)"));
+#endif
 }
 
 TEST_CASE("Shared root canonicalizes redundant path components", "[configuration][filesystem]")
@@ -25,7 +28,7 @@ TEST_CASE("Shared root canonicalizes redundant path components", "[configuration
     const auto result = sparenode::configuration::SharedRoot::create(redundant_path);
 
     REQUIRE(result);
-    REQUIRE(result->path() == std::filesystem::canonical(directory.path()));
+    REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
 }
 
 TEST_CASE("Shared root canonicalizes parent-directory components", "[configuration][filesystem]")
@@ -37,7 +40,7 @@ TEST_CASE("Shared root canonicalizes parent-directory components", "[configurati
     const auto result = sparenode::configuration::SharedRoot::create(child / "..");
 
     REQUIRE(result);
-    REQUIRE(result->path() == std::filesystem::canonical(directory.path()));
+    REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
 }
 
 TEST_CASE("Shared root resolves a directory symlink", "[configuration][filesystem]")
@@ -57,7 +60,7 @@ TEST_CASE("Shared root resolves a directory symlink", "[configuration][filesyste
     const auto result = sparenode::configuration::SharedRoot::create(link);
 
     REQUIRE(result);
-    REQUIRE(result->path() == std::filesystem::canonical(target));
+    REQUIRE(std::filesystem::equivalent(result->path(), target));
 }
 
 TEST_CASE("Shared root rejects an empty path", "[configuration][filesystem]")

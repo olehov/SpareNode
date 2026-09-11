@@ -2,6 +2,10 @@
 
 #include <utility>
 
+#ifdef _WIN32
+#include "../filesystem/detail/windows_path_inspector.hpp"
+#endif
+
 namespace sparenode::configuration
 {
 
@@ -28,6 +32,16 @@ Result<SharedRoot, SharedRootError> SharedRoot::create(const std::filesystem::pa
         return unexpected(SharedRootError{SharedRootErrorCode::canonicalization_failed, input_path,
                                           filesystem_error});
     }
+
+#ifdef _WIN32
+    auto inspected_path = filesystem::detail::inspect_windows_path(input_path);
+    if (!inspected_path)
+    {
+        return unexpected(
+            SharedRootError{SharedRootErrorCode::canonicalization_failed, input_path});
+    }
+    canonical_path = std::move(inspected_path).value();
+#endif
 
     const bool path_is_directory = std::filesystem::is_directory(canonical_path, filesystem_error);
     if (filesystem_error)
