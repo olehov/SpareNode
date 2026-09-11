@@ -76,6 +76,12 @@ add_library(sparenode_core STATIC
     src/network/detail/socket_wait.cpp
 )
 
+if(WIN32)
+    target_sources(sparenode_core PRIVATE
+        src/filesystem/detail/windows_path_inspector.cpp
+    )
+endif()
+
 target_compile_features(sparenode_core PUBLIC
     cxx_std_23
 )

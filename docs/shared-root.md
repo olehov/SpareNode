@@ -28,7 +28,10 @@ on Windows. See the [configuration format](configuration-format.md) for the full
 grammar and supported directives.
 
 The supplied path must already exist and identify a directory. SpareNode
-resolves it to a canonical absolute path before creating runtime settings. A
+resolves it to a canonical absolute path before creating runtime settings. On
+Windows, the stored boundary is also normalized from an opened native handle and
+keeps exact `\\?\` syntax so later reparse-point checks and file access use the
+same path representation. A
 missing configuration file, absent or duplicate `path` directive, regular file,
 or unresolvable path prevents startup and produces a source-located diagnostic.
 The local `config/spnode.conf` is ignored by Git so machine-specific paths are
@@ -42,7 +45,7 @@ handling must resolve untrusted client paths relative to `SharedRoot`; it must
 not accept unrestricted host paths as an equivalent substitute.
 
 Canonicalizing the startup path does not by itself protect individual file
-operations. The [`SafePath` boundary](safe-path.md) adds lexical confinement for
-untrusted relative paths. Symbolic-link changes, Windows reparse points, and
-operation-time filesystem races remain the responsibility of the dedicated
-filesystem-security layers.
+operations. The [`SafePath` boundary](safe-path.md) adds lexical confinement and
+resolves supported symbolic links and Windows junctions. Operation-time
+filesystem races remain the responsibility of the file operation that consumes
+the safe path.

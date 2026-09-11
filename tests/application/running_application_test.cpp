@@ -42,8 +42,8 @@ TEST_CASE("Running application starts from runtime settings and retains shares",
     CHECK(local_endpoint.address == "127.0.0.1");
     CHECK(local_endpoint.port != 0);
     REQUIRE(result->config().servers().front().shares().size() == 1);
-    CHECK(result->config().servers().front().shares().front().root().path() ==
-          std::filesystem::canonical(directory.path()));
+    CHECK(std::filesystem::equivalent(
+        result->config().servers().front().shares().front().root().path(), directory.path()));
 }
 
 TEST_CASE("Running application rejects an empty runtime server collection",
