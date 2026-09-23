@@ -6,6 +6,7 @@
 #include <new>
 #include <ranges>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace sparenode::filesystem
@@ -151,7 +152,16 @@ resolve_directory(const configuration::SharedRoot &shared_root,
 read_entry(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
            const std::filesystem::directory_entry &native_entry)
 {
-    const auto name = filename_as_utf8(native_entry.path());
+    std::string name;
+    try
+    {
+        name = filename_as_utf8(native_entry.path());
+    }
+    catch (const std::system_error &)
+    {
+        // One native name that cannot be represented as UTF-8 must not hide the directory.
+        return std::optional<DirectoryListingEntry>{};
+    }
     const auto encoded_name = encode_path_component(name);
     auto child = SafePath::resolve(shared_root, child_request({requested_path, encoded_name}));
     if (!child)
@@ -160,16 +170,27 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
         return std::optional<DirectoryListingEntry>{};
     }
 
+    const auto skip_missing_child = [](const std::error_code failure)
+        -> Result<std::optional<DirectoryListingEntry>, DirectoryListingError>
+    {
+        if (failure == std::errc::no_such_file_or_directory)
+        {
+            // Entries can be removed or renamed after the directory iterator observes them.
+            return std::optional<DirectoryListingEntry>{};
+        }
+        return unexpected(filesystem_error(failure));
+    };
+
     std::error_code error;
     const auto link_status = native_entry.symlink_status(error);
     if (error)
     {
-        return unexpected(filesystem_error(error));
+        return skip_missing_child(error);
     }
     const auto target_status = std::filesystem::status(child->path(), error);
     if (error)
     {
-        return unexpected(filesystem_error(error));
+        return skip_missing_child(error);
     }
     const auto type = classify_entry({link_status, target_status});
 
@@ -179,13 +200,13 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
         size = std::filesystem::file_size(child->path(), error);
         if (error)
         {
-            return unexpected(filesystem_error(error));
+            return skip_missing_child(error);
         }
     }
     const auto native_time = std::filesystem::last_write_time(child->path(), error);
     if (error)
     {
-        return unexpected(filesystem_error(error));
+        return skip_missing_child(error);
     }
     return std::optional<DirectoryListingEntry>(std::in_place, name, type, size,
                                                 to_system_seconds(native_time));

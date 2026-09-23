@@ -153,6 +153,7 @@ TEST_CASE("Directory listing hides external links and identifies internal links"
     REQUIRE(std::ofstream(outside / "secret.txt").good());
     create_link(shared / "inside.txt", shared / "internal-link", false);
     create_link(outside / "secret.txt", shared / "external-link", false);
+    create_link(outside, shared / "external-directory-link", true);
     auto root = sparenode::configuration::SharedRoot::create(shared);
     REQUIRE(root);
 
@@ -160,6 +161,18 @@ TEST_CASE("Directory listing hides external links and identifies internal links"
     REQUIRE(listing);
     CHECK(std::ranges::none_of(listing.value(),
                                [](const auto &entry) { return entry.name == "external-link"; }));
+    CHECK(std::ranges::none_of(listing.value(), [](const auto &entry)
+                               { return entry.name == "external-directory-link"; }));
+
+    const auto escaped =
+        sparenode::filesystem::list_directory(root.value(), "external-directory-link");
+    REQUIRE_FALSE(escaped);
+    CHECK(escaped.error().code == sparenode::filesystem::DirectoryListingErrorCode::invalid_path);
+    const auto path_error = escaped.error().path_error;
+    REQUIRE(path_error);
+    CHECK((path_error == sparenode::filesystem::SafePathErrorCode::outside_shared_root ||
+           path_error == sparenode::filesystem::SafePathErrorCode::unsupported_reparse_point));
+
     const auto &internal = find_entry(listing.value(), "internal-link");
     CHECK(internal.type == DirectoryEntryType::symbolic_link);
     CHECK_FALSE(internal.size);
