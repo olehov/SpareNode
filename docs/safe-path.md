@@ -108,3 +108,14 @@ real `IO_REPARSE_TAG_MOUNT_POINT` objects through `FSCTL_SET_REPARSE_POINT` and
 cover internal targets, external targets, nested redirection, missing suffixes,
 ordinary directories, replacement of the configured root, a forbidden
 third-party target behind an allowed junction, and trailing-period aliases.
+
+## Filesystem security regression suite
+
+CTest registers `sparenode_filesystem_security_suite`, which runs every test
+tagged `[filesystem][security]` as one explicit sandbox regression suite. The
+suite creates a real protected file beside the configured shared root and tries
+to read it through traversal, absolute and malformed paths, encoded and mixed
+separators, symbolic-link chains, and Windows junction chains. Valid relative
+paths are read as a control. The normal CI test command executes this suite on
+Linux and Windows; Windows CI also requires symbolic-link support instead of
+allowing those checks to skip.

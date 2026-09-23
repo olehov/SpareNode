@@ -22,6 +22,7 @@ add_executable(sparenode_tests
     configuration/config_validator_test.cpp
     configuration/runtime_config_mapper_test.cpp
     configuration/shared_root_test.cpp
+    filesystem/filesystem_security_test.cpp
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
     http/http_connection_handler_test.cpp
@@ -74,6 +75,14 @@ sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
+
+add_test(
+    NAME sparenode_filesystem_security_suite
+    COMMAND $<TARGET_FILE:sparenode_tests> "[filesystem][security]" --reporter console
+)
+set_tests_properties(sparenode_filesystem_security_suite PROPERTIES
+    LABELS "filesystem;security"
+)
 
 option(
     SPARENODE_ENABLE_FAILURE_PROBE
