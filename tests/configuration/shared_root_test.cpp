@@ -5,6 +5,40 @@
 
 #include "sparenode/configuration/shared_root.hpp"
 #include "support/temporary_directory.hpp"
+#ifdef _WIN32
+#include "support/windows_junction.hpp"
+#endif
+
+namespace
+{
+
+/// @brief Returns the canonical representation stored by SharedRoot on this platform.
+/// @param[in] path Existing filesystem object to canonicalize.
+/// @return Canonical native path in the representation expected from SharedRoot.
+[[nodiscard]] std::filesystem::path expected_canonical_path(const std::filesystem::path &path)
+{
+    auto canonical = std::filesystem::canonical(path);
+#ifdef _WIN32
+    return sparenode::test::extended_windows_path(canonical);
+#else
+    return canonical;
+#endif
+}
+
+/// @brief Returns the normalized input spelling without following a final symbolic link.
+/// @param[in] path Input path whose own spelling must be retained.
+/// @return Absolute lexical spelling in the platform-specific representation.
+[[nodiscard]] std::filesystem::path normalized_input_path(const std::filesystem::path &path)
+{
+    auto absolute = std::filesystem::absolute(path).lexically_normal();
+#ifdef _WIN32
+    return sparenode::test::extended_windows_path(absolute);
+#else
+    return absolute;
+#endif
+}
+
+} // namespace
 
 TEST_CASE("Shared root accepts an existing directory", "[configuration][filesystem]")
 {
@@ -14,6 +48,7 @@ TEST_CASE("Shared root accepts an existing directory", "[configuration][filesyst
 
     REQUIRE(result);
     REQUIRE(result->path().is_absolute());
+    REQUIRE(result->path() == expected_canonical_path(directory.path()));
     REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
 #ifdef _WIN32
     REQUIRE(result->path().native().starts_with(LR"(\\?\)"));
@@ -28,6 +63,7 @@ TEST_CASE("Shared root canonicalizes redundant path components", "[configuration
     const auto result = sparenode::configuration::SharedRoot::create(redundant_path);
 
     REQUIRE(result);
+    REQUIRE(result->path() == expected_canonical_path(directory.path()));
     REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
 }
 
@@ -40,6 +76,7 @@ TEST_CASE("Shared root canonicalizes parent-directory components", "[configurati
     const auto result = sparenode::configuration::SharedRoot::create(child / "..");
 
     REQUIRE(result);
+    REQUIRE(result->path() == expected_canonical_path(directory.path()));
     REQUIRE(std::filesystem::equivalent(result->path(), directory.path()));
 }
 
@@ -60,6 +97,8 @@ TEST_CASE("Shared root resolves a directory symlink", "[configuration][filesyste
     const auto result = sparenode::configuration::SharedRoot::create(link);
 
     REQUIRE(result);
+    REQUIRE(result->path() == expected_canonical_path(target));
+    REQUIRE(result->path() != normalized_input_path(link));
     REQUIRE(std::filesystem::equivalent(result->path(), target));
 }
 

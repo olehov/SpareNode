@@ -2,8 +2,10 @@
 
 #ifdef _WIN32
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -107,6 +109,32 @@ TEST_CASE("Safe path rejects nested Windows junction redirection outside the roo
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
+TEST_CASE("Safe path enforces the Windows reparse redirect limit",
+          "[filesystem][safe-path][windows][junction][security]")
+{
+    const JunctionFixture fixture;
+    const auto target = fixture.shared / "target";
+    std::filesystem::create_directory(target);
+
+    auto next = target;
+    constexpr std::size_t maximum_redirects = 63;
+    for (std::size_t index = maximum_redirects; index > 0; --index)
+    {
+        const auto link = fixture.shared / ("hop-" + std::to_string(index - 1));
+        fixture.create_junction(next, link);
+        next = link;
+    }
+
+    const auto accepted = fixture.resolve("hop-0");
+    REQUIRE(accepted);
+    REQUIRE(std::filesystem::equivalent(accepted->path(), target));
+
+    fixture.create_junction(fixture.shared / "hop-0", fixture.shared / "overflow");
+    const auto rejected = fixture.resolve("overflow");
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == sparenode::filesystem::SafePathErrorCode::resolution_failed);
+}
+
 TEST_CASE("Safe path rejects an unsupported reparse target behind a Windows junction",
           "[filesystem][safe-path][windows][junction][reparse][security]")
 {
@@ -153,25 +181,41 @@ TEST_CASE("Safe path keeps normal Windows directories unchanged",
     REQUIRE(result->path() == parent->path() / "new.txt");
 }
 
-TEST_CASE("Safe path rejects a reparse target with a trailing-period component",
+TEST_CASE("Safe path rejects reparse targets with ambiguous trailing components",
           "[filesystem][safe-path][windows][junction][security]")
 {
     const JunctionFixture fixture;
-    fixture.create_junction(fixture.outside, fixture.shared / "dot");
     REQUIRE(std::ofstream(fixture.outside / "marker.txt") << "outside");
 
-    const auto exact_directory = sparenode::test::extended_windows_path(fixture.shared / "dot.");
-    REQUIRE(CreateDirectoryW(exact_directory.c_str(), nullptr) != FALSE);
-    REQUIRE(std::ofstream(exact_directory / "marker.txt") << "inside");
-    fixture.create_junction(fixture.shared / "dot.", fixture.shared / "alias");
+    struct AmbiguousComponentCase
+    {
+        std::string_view exact_name;      ///< Exact extended-length component spelling.
+        std::string_view normalized_name; ///< Legacy Win32 alias without trailing punctuation.
+        std::string_view alias_name;      ///< Junction used to expose the exact target.
+    };
+    constexpr std::array cases{AmbiguousComponentCase{"dot.", "dot", "dot-alias"},
+                               AmbiguousComponentCase{"space ", "space", "space-alias"}};
 
-    const auto result = fixture.resolve("alias/marker.txt");
-    REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
+    for (const auto &test_case : cases)
+    {
+        CAPTURE(test_case.exact_name);
+        fixture.create_junction(fixture.outside, fixture.shared / test_case.normalized_name);
+        const auto exact_directory =
+            sparenode::test::extended_windows_path(fixture.shared / test_case.exact_name);
+        REQUIRE(CreateDirectoryW(exact_directory.c_str(), nullptr) != FALSE);
+        REQUIRE(std::ofstream(exact_directory / "marker.txt") << "inside");
+        fixture.create_junction(fixture.shared / test_case.exact_name,
+                                fixture.shared / test_case.alias_name);
 
-    REQUIRE(std::filesystem::remove(fixture.shared / "alias"));
-    REQUIRE(std::filesystem::remove(exact_directory / "marker.txt"));
-    REQUIRE(std::filesystem::remove(exact_directory));
+        const auto request = std::string(test_case.alias_name) + "/marker.txt";
+        const auto result = fixture.resolve(request);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
+
+        REQUIRE(std::filesystem::remove(fixture.shared / test_case.alias_name));
+        REQUIRE(std::filesystem::remove(exact_directory / "marker.txt"));
+        REQUIRE(std::filesystem::remove(exact_directory));
+    }
 }
 
 #endif
