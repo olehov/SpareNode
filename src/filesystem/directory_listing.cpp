@@ -31,7 +31,7 @@ namespace
 [[nodiscard]] std::string encode_path_component(const std::string_view component)
 {
     constexpr std::string_view hexadecimal = "0123456789ABCDEF";
-    
+
     // One input byte can expand to the three-character percent escape `%HH`.
     std::string encoded;
     encoded.reserve(component.size() * 3);

@@ -66,7 +66,7 @@ void append_json_string(std::string &output, const std::string_view value)
 
                 // Convert the byte's high four bits into the first hexadecimal digit.
                 output.push_back(hexadecimal[byte >> 4U]);
-                
+
                 // Mask the low four bits and convert them into the second hexadecimal digit.
                 output.push_back(hexadecimal[byte & 0x0FU]);
             }
@@ -235,7 +235,7 @@ handle_listing(const ShareConfig &share, const std::string_view requested_path)
             std::string body("{\"error\":");
             append_json_string(body, identifier);
             body.push_back('}');
-            return make_json_response(status, std::move(body));
+            return make_json_response(status, body);
         }
         return make_json_response(HttpStatusCode::ok, serialize_listing(share, listing.value()));
     }
