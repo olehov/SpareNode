@@ -48,6 +48,12 @@ target_link_libraries(sparenode_tests PRIVATE
     Threads::Threads
 )
 
+if(WIN32)
+    target_sources(sparenode_tests PRIVATE
+        filesystem/windows_reparse_point_test.cpp
+    )
+endif()
+
 option(SPARENODE_REQUIRE_SYMLINK_TESTS "Fail instead of skipping when symlink privilege is missing" OFF)
 if(SPARENODE_REQUIRE_SYMLINK_TESTS)
     target_compile_definitions(sparenode_tests PRIVATE SPARENODE_REQUIRE_SYMLINK_TESTS)

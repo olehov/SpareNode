@@ -69,7 +69,7 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
     CHECK(server.http_timeouts().total == std::chrono::seconds{30});
     REQUIRE(server.shares().size() == 1);
     CHECK(server.shares().front().name() == "Documents");
-    CHECK(server.shares().front().root().path() == std::filesystem::canonical(directory.path()));
+    CHECK(std::filesystem::equivalent(server.shares().front().root().path(), directory.path()));
     CHECK(server.shares().front().permissions() ==
           sparenode::configuration::runtime::SharePermissions{true, false, false});
 }

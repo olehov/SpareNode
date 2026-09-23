@@ -73,16 +73,17 @@ TEST_CASE("Safe path follows internal absolute and relative directory links",
     std::filesystem::create_directory(target);
     create_link(target, fixture.shared / "absolute");
     create_link("target", fixture.shared / "relative");
+    const auto normalized_target = sparenode::configuration::SharedRoot::create(target);
+    REQUIRE(normalized_target);
 
     for (const auto request : {"absolute", "relative", "absolute/new/file.txt"})
     {
         CAPTURE(request);
         const auto result = fixture.resolve(request);
         REQUIRE(result);
-        const auto canonical_target = std::filesystem::canonical(target);
         const auto expected = request == std::string_view("absolute/new/file.txt")
-                                  ? canonical_target / "new/file.txt"
-                                  : canonical_target;
+                                  ? normalized_target->path() / "new/file.txt"
+                                  : normalized_target->path();
         REQUIRE(result->path() == expected);
     }
 }
@@ -97,10 +98,12 @@ TEST_CASE("Safe path follows internal file links and rejects external file links
     REQUIRE(std::ofstream(outside).good());
     create_link(inside, fixture.shared / "internal", false);
     create_link(outside, fixture.shared / "external", false);
+    const auto normalized_root = sparenode::configuration::SharedRoot::create(fixture.shared);
+    REQUIRE(normalized_root);
 
     const auto accepted = fixture.resolve("internal");
     REQUIRE(accepted);
-    REQUIRE(accepted->path() == std::filesystem::canonical(inside));
+    REQUIRE(accepted->path() == normalized_root->path() / "file.txt");
     const auto rejected = fixture.resolve("external");
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
@@ -131,9 +134,12 @@ TEST_CASE("Safe path checks the final target of nested symbolic links",
     std::filesystem::create_directory(fixture.shared / "target");
     create_link("target", fixture.shared / "second");
     create_link("second", fixture.shared / "first");
+    const auto normalized_target =
+        sparenode::configuration::SharedRoot::create(fixture.shared / "target");
+    REQUIRE(normalized_target);
     const auto accepted = fixture.resolve("first");
     REQUIRE(accepted);
-    REQUIRE(accepted->path() == std::filesystem::canonical(fixture.shared / "target"));
+    REQUIRE(accepted->path() == normalized_target->path());
 
     std::filesystem::remove(fixture.shared / "second");
     create_link(fixture.outside, fixture.shared / "second");
@@ -166,9 +172,11 @@ TEST_CASE("Safe path resolves only the lexically normalized request",
 {
     const SymlinkFixture fixture;
     create_link(fixture.outside, fixture.shared / "link");
+    const auto normalized_root = sparenode::configuration::SharedRoot::create(fixture.shared);
+    REQUIRE(normalized_root);
     const auto result = fixture.resolve("link/../file.txt");
     REQUIRE(result);
-    REQUIRE(result->path() == std::filesystem::canonical(fixture.shared) / "file.txt");
+    REQUIRE(result->path() == normalized_root->path() / "file.txt");
 }
 
 TEST_CASE("Safe path rejects a shared root replaced with an external link",

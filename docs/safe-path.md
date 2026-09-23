@@ -30,6 +30,18 @@ construct a `SafePath` from an unrestricted host path.
     `symlink_status` and canonicalize it. Reject resolved prefixes outside the
     root, dangling links, cycles, and filesystem errors. Append a genuinely
     missing suffix only after its existing parent has passed these checks.
+12. On Windows, open each existing component with
+    `FILE_FLAG_OPEN_REPARSE_POINT`, read its reparse tag, and allow only symbolic
+    links and mount points (the tag used by directory junctions). Read each
+    supported target with `FSCTL_GET_REPARSE_POINT`, restart component inspection
+    at that target, and reject a chain above Windows' 63-hop limit. This ensures
+    that a supported junction cannot conceal a disallowed intermediate or final
+    reparse tag.
+13. After every redirection has been inspected, obtain the normalized handle
+    name with `GetFinalPathNameByHandleW` and retain its `\\?\` prefix. Reject
+    handle-derived components ending in a period or space before legacy Win32
+    APIs can reinterpret them as a different object. The resulting exact path
+    must remain under the handle-derived shared root.
 
 URL path decoding is case-insensitive for hexadecimal digits and does not treat
 `+` as a space. A decoded result containing another valid percent escape is
@@ -68,8 +80,10 @@ Resolution returns `SafePathError` rather than throwing for expected invalid
 input. The error distinguishes an oversized request, invalid or nested percent
 encoding, invalid UTF-8, embedded null bytes, rooted input, platform-invalid
 components, escape from the shared root, and failure to resolve an existing
-prefix or link target (`resolution_failed`). Oversized input is not copied into
-the error object; its `requested_path` field is empty.
+prefix or link target (`resolution_failed`). On Windows,
+`unsupported_reparse_point` distinguishes a reparse tag whose behavior is not
+part of SpareNode's supported symlink and junction policy. Oversized input is
+not copied into the error object; its `requested_path` field is empty.
 
 ## Remaining security work
 
@@ -77,9 +91,9 @@ the error object; its `requested_path` field is empty.
 an open file or directory handle, so replacing a directory or link after the
 check can invalidate that result. File operations must prevent these races at
 open/create time; a `SafePath` alone is not an authorization to follow a mutable
-pathname without further protection. Hard links and mount boundaries are not
-detected by symbolic-link resolution. Dedicated Windows reparse-point policies
-(including junctions) belong to SN-024.
+pathname without further protection. Hard links are not redirects and remain
+inside this path-based policy. Volume mount points are handled as Windows
+reparse points and must resolve inside the shared root.
 
 ## Symbolic-link tests
 
@@ -88,3 +102,9 @@ Windows requires Developer Mode or the symbolic-link creation privilege.
 Local tests skip only a missing Windows privilege; other setup errors fail.
 The Windows CI job configures `-DSPARENODE_REQUIRE_SYMLINK_TESTS=ON` so a missing
 privilege fails the suite instead of silently leaving this protection untested.
+
+Windows junction tests do not require the symbolic-link privilege. They create
+real `IO_REPARSE_TAG_MOUNT_POINT` objects through `FSCTL_SET_REPARSE_POINT` and
+cover internal targets, external targets, nested redirection, missing suffixes,
+ordinary directories, replacement of the configured root, a forbidden
+third-party target behind an allowed junction, and trailing-period aliases.

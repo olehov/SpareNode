@@ -116,7 +116,7 @@ TEST_CASE("Configuration validator accepts version one defaults and independent 
     REQUIRE(result.has_value());
     CHECK(result->parsed().server.shares.front().name == "Documents");
     REQUIRE(result->shared_roots().size() == 1);
-    CHECK(result->shared_roots().front().path() == std::filesystem::canonical(directory.path()));
+    CHECK(std::filesystem::equivalent(result->shared_roots().front().path(), directory.path()));
 }
 
 TEST_CASE("Configuration validator collects independent server failures",

@@ -23,6 +23,7 @@ enum class SafePathErrorCode : std::uint8_t
     invalid_component,        ///< A component violates platform-specific naming rules.
     outside_shared_root,      ///< The resolved path is not contained by the configured shared root.
     resolution_failed,        ///< An existing prefix or symbolic-link target cannot be resolved.
+    unsupported_reparse_point, ///< A Windows reparse point is outside the supported policy.
 };
 
 /// @brief Describes a failure while resolving an untrusted path.
