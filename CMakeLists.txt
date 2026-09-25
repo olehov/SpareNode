@@ -80,7 +80,12 @@ add_library(sparenode_core STATIC
 
 if(WIN32)
     target_sources(sparenode_core PRIVATE
+        src/filesystem/detail/windows_directory_entry_reader.cpp
         src/filesystem/detail/windows_path_inspector.cpp
+    )
+else()
+    target_sources(sparenode_core PRIVATE
+        src/filesystem/detail/linux_directory_entry_reader.cpp
     )
 endif()
 

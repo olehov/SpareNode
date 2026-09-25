@@ -13,7 +13,9 @@
 #include <vector>
 
 #include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
+#include "sparenode/filesystem/safe_path.hpp"
 #include "support/temporary_directory.hpp"
 
 namespace
@@ -176,6 +178,33 @@ TEST_CASE("Directory listing hides external links and identifies internal links"
     const auto &internal = find_entry(listing.value(), "internal-link");
     CHECK(internal.type == DirectoryEntryType::symbolic_link);
     CHECK_FALSE(internal.size);
+}
+
+TEST_CASE("Directory entry metadata rejects a target replaced after safe-path validation",
+          "[filesystem][listing][symlink][security][race]")
+{
+    const sparenode::test::TemporaryDirectory fixture("sparenode-listing-replacement");
+    const auto shared = fixture.path() / "shared";
+    const auto outside = fixture.path() / "outside";
+    std::filesystem::create_directory(shared);
+    std::filesystem::create_directory(outside);
+    REQUIRE(std::ofstream(shared / "victim.txt") << "inside");
+    REQUIRE(std::ofstream(outside / "secret.txt") << "external-secret");
+
+    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    REQUIRE(root_result);
+    const auto root = std::move(root_result).value();
+    const auto validated = sparenode::filesystem::SafePath::resolve(root, "victim.txt");
+    REQUIRE(validated);
+
+    REQUIRE(std::filesystem::remove(shared / "victim.txt"));
+    create_link(outside / "secret.txt", shared / "victim.txt", false);
+
+    const std::filesystem::path native_name("victim.txt");
+    const auto metadata = sparenode::filesystem::detail::read_confined_directory_entry(
+        {root.path(), shared, native_name});
+    REQUIRE(metadata);
+    CHECK_FALSE(metadata.value());
 }
 
 TEST_CASE("Directory listing enforces its entry boundary", "[filesystem][listing][limits]")

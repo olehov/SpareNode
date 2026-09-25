@@ -9,6 +9,8 @@
 #include <system_error>
 #include <utility>
 
+#include "sparenode/filesystem/detail/directory_entry_reader.hpp"
+
 namespace sparenode::filesystem
 {
 namespace
@@ -80,41 +82,21 @@ struct ChildRequestParts
     return request;
 }
 
-/// @brief Keeps link-object and resolved-target status roles explicit at call sites.
-struct EntryStatuses
+/// @brief Converts an internally confined entry category into the public listing category.
+[[nodiscard]] DirectoryEntryType classify_entry(const detail::ConfinedEntryKind kind) noexcept
 {
-    std::filesystem::file_status link;   ///< Status without following the original link.
-    std::filesystem::file_status target; ///< Status of the safely resolved target.
-};
-
-/// @brief Classifies an entry without following its original symbolic-link object.
-[[nodiscard]] DirectoryEntryType classify_entry(const EntryStatuses statuses)
-{
-    if (std::filesystem::is_symlink(statuses.link))
+    switch (kind)
     {
-        return DirectoryEntryType::symbolic_link;
-    }
-    if (std::filesystem::is_regular_file(statuses.target))
-    {
+    case detail::ConfinedEntryKind::regular_file:
         return DirectoryEntryType::regular_file;
-    }
-    if (std::filesystem::is_directory(statuses.target))
-    {
+    case detail::ConfinedEntryKind::directory:
         return DirectoryEntryType::directory;
+    case detail::ConfinedEntryKind::symbolic_link:
+        return DirectoryEntryType::symbolic_link;
+    case detail::ConfinedEntryKind::other:
+        return DirectoryEntryType::other;
     }
     return DirectoryEntryType::other;
-}
-
-/// @brief Converts an implementation-defined filesystem clock into system time.
-[[nodiscard]] std::chrono::sys_seconds
-to_system_seconds(const std::filesystem::file_time_type value) noexcept
-{
-    const auto file_now = std::filesystem::file_time_type::clock::now();
-    const auto system_now = std::chrono::system_clock::now();
-    const auto system_value =
-        system_now +
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(value - file_now);
-    return std::chrono::floor<std::chrono::seconds>(system_value);
 }
 
 /// @brief Resolves and verifies the requested listing directory.
@@ -150,6 +132,7 @@ resolve_directory(const configuration::SharedRoot &shared_root,
 /// @brief Reads one entry after independently confining its resolved target.
 [[nodiscard]] Result<std::optional<DirectoryListingEntry>, DirectoryListingError>
 read_entry(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
+           const std::filesystem::path &directory,
            const std::filesystem::directory_entry &native_entry)
 {
     std::string name;
@@ -163,53 +146,30 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
         return std::optional<DirectoryListingEntry>{};
     }
     const auto encoded_name = encode_path_component(name);
-    auto child = SafePath::resolve(shared_root, child_request({requested_path, encoded_name}));
+    const auto child =
+        SafePath::resolve(shared_root, child_request({requested_path, encoded_name}));
     if (!child)
     {
         // External links and names that cannot form a safe later request expose no metadata.
         return std::optional<DirectoryListingEntry>{};
     }
 
-    const auto skip_missing_child = [](const std::error_code failure)
-        -> Result<std::optional<DirectoryListingEntry>, DirectoryListingError>
+    const auto native_name = native_entry.path().filename();
+    auto metadata =
+        detail::read_confined_directory_entry({shared_root.path(), directory, native_name});
+    if (!metadata)
     {
-        if (failure == std::errc::no_such_file_or_directory)
-        {
-            // Entries can be removed or renamed after the directory iterator observes them.
-            return std::optional<DirectoryListingEntry>{};
-        }
-        return unexpected(filesystem_error(failure));
-    };
-
-    std::error_code error;
-    const auto link_status = native_entry.symlink_status(error);
-    if (error)
-    {
-        return skip_missing_child(error);
+        return unexpected(filesystem_error(metadata.error()));
     }
-    const auto target_status = std::filesystem::status(child->path(), error);
-    if (error)
+    auto confined_metadata = metadata.value();
+    if (!confined_metadata)
     {
-        return skip_missing_child(error);
+        // The entry changed after validation or its stable handle resolved outside the root.
+        return std::optional<DirectoryListingEntry>{};
     }
-    const auto type = classify_entry({link_status, target_status});
-
-    std::optional<std::uintmax_t> size;
-    if (type == DirectoryEntryType::regular_file)
-    {
-        size = std::filesystem::file_size(child->path(), error);
-        if (error)
-        {
-            return skip_missing_child(error);
-        }
-    }
-    const auto native_time = std::filesystem::last_write_time(child->path(), error);
-    if (error)
-    {
-        return skip_missing_child(error);
-    }
-    return std::optional<DirectoryListingEntry>(std::in_place, name, type, size,
-                                                to_system_seconds(native_time));
+    const auto &stable = confined_metadata.value();
+    return std::optional<DirectoryListingEntry>(std::in_place, name, classify_entry(stable.kind),
+                                                stable.size, stable.modification_time);
 }
 
 /// @brief Iterates one verified directory under the configured resource boundary.
@@ -238,7 +198,7 @@ collect_entries(const configuration::SharedRoot &shared_root, const std::string_
             return unexpected(DirectoryListingError{
                 DirectoryListingErrorCode::too_many_entries, {}, std::nullopt});
         }
-        auto entry = read_entry(shared_root, requested_path, *iterator);
+        auto entry = read_entry(shared_root, requested_path, directory.path(), *iterator);
         if (!entry)
         {
             return unexpected(entry.error());
