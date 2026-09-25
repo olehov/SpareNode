@@ -5,16 +5,19 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <winternl.h>
 
 namespace sparenode::filesystem::detail
 {
@@ -57,6 +60,45 @@ using UniqueHandle = std::unique_ptr<void, HandleCloser>;
     if (handle == INVALID_HANDLE_VALUE)
     {
         return unexpected(last_system_error());
+    }
+    return UniqueHandle(handle);
+}
+
+/// @brief Opens one basename relative to a retained directory handle.
+[[nodiscard]] Result<UniqueHandle, std::error_code>
+open_relative(const HANDLE directory, const std::filesystem::path &native_name,
+              const bool open_reparse_point)
+{
+    const auto &name = native_name.native();
+    constexpr auto maximum_name_bytes =
+        static_cast<std::size_t>(std::numeric_limits<USHORT>::max());
+    const auto name_bytes = name.size() * sizeof(wchar_t);
+    if (name.empty() || name_bytes > maximum_name_bytes)
+    {
+        return unexpected(std::make_error_code(std::errc::filename_too_long));
+    }
+
+    UNICODE_STRING object_name{};
+    object_name.Length = static_cast<USHORT>(name_bytes);
+    object_name.MaximumLength = object_name.Length;
+    object_name.Buffer = const_cast<PWSTR>(name.data());
+
+    OBJECT_ATTRIBUTES attributes{};
+    InitializeObjectAttributes(&attributes, &object_name, OBJ_CASE_INSENSITIVE, directory, nullptr);
+    IO_STATUS_BLOCK status_block{};
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    ULONG options = FILE_OPEN_FOR_BACKUP_INTENT | FILE_SYNCHRONOUS_IO_NONALERT;
+    if (open_reparse_point)
+    {
+        options |= FILE_OPEN_REPARSE_POINT;
+    }
+    const auto status =
+        NtOpenFile(&handle, FILE_READ_ATTRIBUTES | SYNCHRONIZE, &attributes, &status_block,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, options);
+    if (status < 0)
+    {
+        return unexpected(std::error_code(static_cast<int>(RtlNtStatusToDosError(status)),
+                                          std::system_category()));
     }
     return UniqueHandle(handle);
 }
@@ -153,15 +195,27 @@ classify_entry(const FILE_ATTRIBUTE_TAG_INFO &link_information,
 
 } // namespace
 
-Result<std::optional<ConfinedEntryMetadata>, std::error_code>
-read_confined_directory_entry(const ConfinedDirectoryEntryRequest &request)
+/// @brief Holds the stable Windows parent handle and verified root path.
+struct ConfinedDirectory::Implementation
 {
-    if (request.native_name.empty() || request.native_name != request.native_name.filename())
-    {
-        return std::optional<ConfinedEntryMetadata>{};
-    }
+    UniqueHandle directory;            ///< Parent used for every relative entry open.
+    std::filesystem::path shared_root; ///< Root path resolved from its stable handle.
+};
 
-    auto root_handle = open_path(request.shared_root, false);
+ConfinedDirectory::ConfinedDirectory(std::unique_ptr<Implementation> implementation) noexcept
+    : implementation_(std::move(implementation))
+{
+}
+
+ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
+ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
+ConfinedDirectory::~ConfinedDirectory() = default;
+
+Result<ConfinedDirectory, std::error_code>
+open_confined_directory(const std::filesystem::path &shared_root,
+                        const std::filesystem::path &directory)
+{
+    auto root_handle = open_path(shared_root, false);
     if (!root_handle)
     {
         return unexpected(root_handle.error());
@@ -171,12 +225,12 @@ read_confined_directory_entry(const ConfinedDirectoryEntryRequest &request)
     {
         return unexpected(stable_root.error());
     }
-    if (!paths_equal(stable_root.value(), request.shared_root.lexically_normal()))
+    if (!paths_equal(stable_root.value(), shared_root.lexically_normal()))
     {
         return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
 
-    auto directory_handle = open_path(request.directory, false);
+    auto directory_handle = open_path(directory, false);
     if (!directory_handle)
     {
         return unexpected(directory_handle.error());
@@ -191,15 +245,29 @@ read_confined_directory_entry(const ConfinedDirectoryEntryRequest &request)
         return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
 
-    const auto entry_path = stable_directory.value() / request.native_name;
-    auto link_handle = open_path(entry_path, true);
-    auto target_handle = open_path(entry_path, false);
+    auto implementation =
+        std::make_unique<ConfinedDirectory::Implementation>(ConfinedDirectory::Implementation{
+            std::move(directory_handle).value(), std::move(stable_root).value()});
+    return ConfinedDirectory(std::move(implementation));
+}
+
+std::optional<ConfinedEntryMetadata>
+read_confined_directory_entry(const ConfinedDirectory &directory,
+                              const std::filesystem::path &native_name)
+{
+    if (native_name.empty() || native_name != native_name.filename())
+    {
+        return std::nullopt;
+    }
+    const auto &context = *directory.implementation_;
+    auto link_handle = open_relative(context.directory.get(), native_name, true);
+    auto target_handle = open_relative(context.directory.get(), native_name, false);
     if (!link_handle || !target_handle)
     {
         return std::optional<ConfinedEntryMetadata>{};
     }
     auto target_path = query_final_path(target_handle->get());
-    if (!target_path || !is_within_root(target_path.value(), stable_root.value()))
+    if (!target_path || !is_within_root(target_path.value(), context.shared_root))
     {
         return std::optional<ConfinedEntryMetadata>{};
     }

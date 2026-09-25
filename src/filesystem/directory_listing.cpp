@@ -132,7 +132,7 @@ resolve_directory(const configuration::SharedRoot &shared_root,
 /// @brief Reads one entry after independently confining its resolved target.
 [[nodiscard]] Result<std::optional<DirectoryListingEntry>, DirectoryListingError>
 read_entry(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
-           const std::filesystem::path &directory,
+           const detail::ConfinedDirectory &directory,
            const std::filesystem::directory_entry &native_entry)
 {
     std::string name;
@@ -155,13 +155,7 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
     }
 
     const auto native_name = native_entry.path().filename();
-    auto metadata =
-        detail::read_confined_directory_entry({shared_root.path(), directory, native_name});
-    if (!metadata)
-    {
-        return unexpected(filesystem_error(metadata.error()));
-    }
-    auto confined_metadata = metadata.value();
+    auto confined_metadata = detail::read_confined_directory_entry(directory, native_name);
     if (!confined_metadata)
     {
         // The entry changed after validation or its stable handle resolved outside the root.
@@ -177,6 +171,11 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
 collect_entries(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
                 const SafePath &directory)
 {
+    auto confined_directory = detail::open_confined_directory(shared_root.path(), directory.path());
+    if (!confined_directory)
+    {
+        return unexpected(filesystem_error(confined_directory.error()));
+    }
     std::error_code error;
     std::filesystem::directory_iterator iterator(directory.path(), error);
     if (error)
@@ -198,7 +197,7 @@ collect_entries(const configuration::SharedRoot &shared_root, const std::string_
             return unexpected(DirectoryListingError{
                 DirectoryListingErrorCode::too_many_entries, {}, std::nullopt});
         }
-        auto entry = read_entry(shared_root, requested_path, directory.path(), *iterator);
+        auto entry = read_entry(shared_root, requested_path, confined_directory.value(), *iterator);
         if (!entry)
         {
             return unexpected(entry.error());

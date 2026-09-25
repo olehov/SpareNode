@@ -102,7 +102,7 @@ target_link_libraries(sparenode_core PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE ws2_32)
+    target_link_libraries(sparenode_core PRIVATE ntdll ws2_32)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)

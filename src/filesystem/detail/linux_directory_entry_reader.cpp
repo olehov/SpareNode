@@ -93,10 +93,14 @@ descriptor_path(const FileDescriptor &descriptor)
     const auto proc_path =
         std::filesystem::path("/proc/self/fd") / std::to_string(descriptor.get());
     std::error_code error;
-    auto path = std::filesystem::canonical(proc_path, error);
+    auto path = std::filesystem::read_symlink(proc_path, error);
     if (error)
     {
         return unexpected(error);
+    }
+    if (!path.is_absolute())
+    {
+        return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
     return path.lexically_normal();
 }
@@ -132,18 +136,29 @@ open_directory(const std::filesystem::path &path)
     return ConfinedEntryKind::other;
 }
 
-/// @brief Holds a stable parent descriptor and the verified canonical root path.
-struct StableDirectoryContext
+} // namespace
+
+/// @brief Holds the stable Linux parent descriptor and verified root path.
+struct ConfinedDirectory::Implementation
 {
     FileDescriptor directory;          ///< Parent used for every relative entry open.
     std::filesystem::path shared_root; ///< Root path resolved from its stable descriptor.
 };
 
-/// @brief Opens and verifies the root and parent directory before per-entry inspection.
-[[nodiscard]] Result<StableDirectoryContext, std::error_code>
-open_directory_context(const ConfinedDirectoryEntryRequest &request)
+ConfinedDirectory::ConfinedDirectory(std::unique_ptr<Implementation> implementation) noexcept
+    : implementation_(std::move(implementation))
 {
-    auto root_descriptor = open_directory(request.shared_root);
+}
+
+ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
+ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
+ConfinedDirectory::~ConfinedDirectory() = default;
+
+Result<ConfinedDirectory, std::error_code>
+open_confined_directory(const std::filesystem::path &shared_root,
+                        const std::filesystem::path &directory)
+{
+    auto root_descriptor = open_directory(shared_root);
     if (!root_descriptor)
     {
         return unexpected(root_descriptor.error());
@@ -153,12 +168,12 @@ open_directory_context(const ConfinedDirectoryEntryRequest &request)
     {
         return unexpected(stable_root.error());
     }
-    if (stable_root.value() != request.shared_root.lexically_normal())
+    if (stable_root.value() != shared_root.lexically_normal())
     {
         return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
 
-    auto directory_descriptor = open_directory(request.directory);
+    auto directory_descriptor = open_directory(directory);
     if (!directory_descriptor)
     {
         return unexpected(directory_descriptor.error());
@@ -172,14 +187,22 @@ open_directory_context(const ConfinedDirectoryEntryRequest &request)
     {
         return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
-    return StableDirectoryContext{std::move(directory_descriptor).value(),
-                                  std::move(stable_root).value()};
+    auto implementation =
+        std::make_unique<ConfinedDirectory::Implementation>(ConfinedDirectory::Implementation{
+            std::move(directory_descriptor).value(), std::move(stable_root).value()});
+    return ConfinedDirectory(std::move(implementation));
 }
 
 /// @brief Opens one child relative to a stable parent and reads only handle-bound metadata.
-[[nodiscard]] std::optional<ConfinedEntryMetadata>
-read_entry_metadata(const StableDirectoryContext &context, const std::filesystem::path &native_name)
+std::optional<ConfinedEntryMetadata>
+read_confined_directory_entry(const ConfinedDirectory &directory,
+                              const std::filesystem::path &native_name)
 {
+    if (native_name.empty() || native_name != native_name.filename())
+    {
+        return std::nullopt;
+    }
+    const auto &context = *directory.implementation_;
     const auto link_descriptor =
         ::openat(context.directory.get(), native_name.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
     if (link_descriptor < 0)
@@ -226,23 +249,6 @@ read_entry_metadata(const StableDirectoryContext &context, const std::filesystem
     const auto modification_time =
         std::chrono::sys_seconds(std::chrono::seconds(target_information.st_mtim.tv_sec));
     return ConfinedEntryMetadata{kind, size, modification_time};
-}
-
-} // namespace
-
-Result<std::optional<ConfinedEntryMetadata>, std::error_code>
-read_confined_directory_entry(const ConfinedDirectoryEntryRequest &request)
-{
-    if (request.native_name.empty() || request.native_name != request.native_name.filename())
-    {
-        return std::optional<ConfinedEntryMetadata>{};
-    }
-    auto context = open_directory_context(request);
-    if (!context)
-    {
-        return unexpected(context.error());
-    }
-    return read_entry_metadata(context.value(), request.native_name);
 }
 
 } // namespace sparenode::filesystem::detail

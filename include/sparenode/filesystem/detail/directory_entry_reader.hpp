@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <system_error>
 
@@ -28,18 +29,52 @@ struct ConfinedEntryMetadata
     std::chrono::sys_seconds modification_time{}; ///< Last modification time in UTC seconds.
 };
 
-/// @brief Groups paths required to open one directory entry inside its configured boundary.
-struct ConfinedDirectoryEntryRequest
+/// @brief Owns one verified directory context inside the configured shared root.
+class ConfinedDirectory final
 {
-    const std::filesystem::path &shared_root; ///< Canonical filesystem boundary.
-    const std::filesystem::path &directory;   ///< Validated directory containing the entry.
-    const std::filesystem::path &native_name; ///< Single native filename relative to directory.
+  public:
+    ConfinedDirectory(const ConfinedDirectory &) = delete;
+    ConfinedDirectory &operator=(const ConfinedDirectory &) = delete;
+
+    /// @brief Transfers ownership of a verified platform directory context.
+    ConfinedDirectory(ConfinedDirectory &&) noexcept;
+
+    /// @brief Replaces this context with another verified platform directory context.
+    /// @return This context after taking ownership.
+    ConfinedDirectory &operator=(ConfinedDirectory &&) noexcept;
+
+    /// @brief Releases the retained platform directory handle.
+    ~ConfinedDirectory();
+
+  private:
+    struct Implementation;
+
+    /// @brief Takes ownership of a platform-specific verified directory implementation.
+    /// @param[in] implementation Stable directory handles and boundary state.
+    explicit ConfinedDirectory(std::unique_ptr<Implementation> implementation) noexcept;
+
+    std::unique_ptr<Implementation> implementation_; ///< Platform-specific stable handles.
+
+    friend Result<ConfinedDirectory, std::error_code>
+    open_confined_directory(const std::filesystem::path &, const std::filesystem::path &);
+    friend std::optional<ConfinedEntryMetadata>
+    read_confined_directory_entry(const ConfinedDirectory &, const std::filesystem::path &);
 };
 
-/// @brief Opens one directory entry and verifies its stable target against a shared root.
-/// @param[in] request Boundary, validated parent directory, and native filename.
-/// @return Metadata, an empty optional for a changed or unsafe entry, or a directory-level error.
-[[nodiscard]] Result<std::optional<ConfinedEntryMetadata>, std::error_code>
-read_confined_directory_entry(const ConfinedDirectoryEntryRequest &request);
+/// @brief Opens and verifies a stable directory context for one complete listing.
+/// @param[in] shared_root Canonical filesystem boundary.
+/// @param[in] directory Validated directory that will be enumerated.
+/// @return Stable confined context, or the directory-level filesystem error.
+[[nodiscard]] Result<ConfinedDirectory, std::error_code>
+open_confined_directory(const std::filesystem::path &shared_root,
+                        const std::filesystem::path &directory);
+
+/// @brief Opens one child relative to a retained directory and reads handle-bound metadata.
+/// @param[in] directory Stable context returned by open_confined_directory.
+/// @param[in] native_name Single native filename relative to the directory.
+/// @return Metadata, or an empty optional for a changed or unsafe entry.
+[[nodiscard]] std::optional<ConfinedEntryMetadata>
+read_confined_directory_entry(const ConfinedDirectory &directory,
+                              const std::filesystem::path &native_name);
 
 } // namespace sparenode::filesystem::detail

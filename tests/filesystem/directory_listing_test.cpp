@@ -200,11 +200,38 @@ TEST_CASE("Directory entry metadata rejects a target replaced after safe-path va
     REQUIRE(std::filesystem::remove(shared / "victim.txt"));
     create_link(outside / "secret.txt", shared / "victim.txt", false);
 
+    const auto directory =
+        sparenode::filesystem::detail::open_confined_directory(root.path(), shared);
+    REQUIRE(directory);
     const std::filesystem::path native_name("victim.txt");
     const auto metadata = sparenode::filesystem::detail::read_confined_directory_entry(
-        {root.path(), shared, native_name});
-    REQUIRE(metadata);
-    CHECK_FALSE(metadata.value());
+        directory.value(), native_name);
+    CHECK_FALSE(metadata);
+}
+
+TEST_CASE("Directory entry metadata stays bound to its opened parent",
+          "[filesystem][listing][security][race]")
+{
+    const sparenode::test::TemporaryDirectory fixture("sparenode-listing-parent-swap");
+    const auto shared = fixture.path() / "shared";
+    const auto listed = shared / "listed";
+    const auto moved = shared / "moved";
+    std::filesystem::create_directories(listed);
+
+    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    REQUIRE(root_result);
+    const auto root = std::move(root_result).value();
+    const auto directory =
+        sparenode::filesystem::detail::open_confined_directory(root.path(), listed);
+    REQUIRE(directory);
+
+    std::filesystem::rename(listed, moved);
+    std::filesystem::create_directory(listed);
+    REQUIRE(std::ofstream(listed / "replacement.txt") << "replacement");
+
+    const auto metadata = sparenode::filesystem::detail::read_confined_directory_entry(
+        directory.value(), std::filesystem::path("replacement.txt"));
+    CHECK_FALSE(metadata);
 }
 
 TEST_CASE("Directory listing enforces its entry boundary", "[filesystem][listing][limits]")
