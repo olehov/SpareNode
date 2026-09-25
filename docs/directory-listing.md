@@ -1,12 +1,13 @@
 # Directory listing API
 
-SpareNode exposes the sole configured share through two read-only HTTP routes:
+SpareNode exposes each configured filesystem location through two read-only HTTP routes.
+For a location configured as `/api/Documents`:
 
-- `GET /api/files` lists the share root.
-- `GET /api/files/*` lists the directory identified by the wildcard suffix.
+- `GET /api/Documents` lists the location root.
+- `GET /api/Documents/*` lists the directory identified by the wildcard suffix.
 
 The suffix is an untrusted, URL-encoded UTF-8 relative path. It passes through
-`SafePath` before any directory operation. A share with `read = false` returns
+`SafePath` before any directory operation. A location with `read = false` returns
 `403 Forbidden` without inspecting the directory.
 
 ## Response
@@ -16,7 +17,6 @@ name-sorted array:
 
 ```json
 {
-  "share": "Documents",
   "entries": [
     {
       "name": "report.txt",
@@ -36,7 +36,7 @@ name-sorted array:
 
 `type` is `file`, `directory`, `symlink`, or `other`. Only regular files expose
 a byte size. Modification times use second-resolution RFC 3339 UTC. Responses
-contain basenames and the configured share name; native host paths are never
+contain basenames and entry metadata; configured API paths and native host paths are never
 included.
 
 ## Safety and limits

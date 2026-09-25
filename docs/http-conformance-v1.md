@@ -95,7 +95,7 @@ These budgets do not interrupt route execution or bound response transmission.
 
 Request views borrow session storage and must not escape its lifetime. Filesystem
 decoding and containment belong to the filesystem boundary. Syntactically valid
-Host or request-target values do not authorize access to a configured share.
+Host or request-target values do not authorize access to a configured location.
 Streaming readers own their cursors and must honor cancellation and buffer bounds.
 Endpoints must not implement their own competing message-framing policy.
 

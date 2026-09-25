@@ -8,7 +8,7 @@
 #include "sparenode/configuration/config_lexer.hpp"
 #include "sparenode/configuration/config_parser.hpp"
 #include "sparenode/configuration/config_validator.hpp"
-#include "sparenode/configuration/runtime/share_permissions.hpp"
+#include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/configuration/runtime_config_mapper.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
@@ -34,17 +34,18 @@ validate_configuration(const std::string_view input)
     return std::move(validation_result).value();
 }
 
-/// @brief Creates a minimal configuration containing one existing share root.
+/// @brief Creates a minimal configuration containing one existing location root.
 /// @param[in] path Existing directory exposed by the configuration.
-/// @param[in] server_directives Optional server directives inserted before the share.
-/// @param[in] share_directives Optional permission directives inserted after the path.
+/// @param[in] server_directives Optional server directives inserted before the location.
+/// @param[in] location_directives Optional permission directives inserted after the path.
 /// @return Complete syntactically and semantically valid source text.
 [[nodiscard]] std::string make_configuration(const std::filesystem::path &path,
                                              const std::string_view server_directives = {},
-                                             const std::string_view share_directives = {})
+                                             const std::string_view location_directives = {})
 {
-    return "server {\n" + std::string(server_directives) + "share \"Documents\" {\npath \"" +
-           path.generic_string() + "\";\n" + std::string(share_directives) + "}\n}";
+    return "server {\n" + std::string(server_directives) +
+           "location \"/api/Documents\" {\npath \"" + path.generic_string() + "\";\n" +
+           std::string(location_directives) + "}\n}";
 }
 
 } // namespace
@@ -67,11 +68,11 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
     CHECK(server.http_timeouts().headers == std::chrono::seconds{10});
     CHECK(server.http_timeouts().body == std::chrono::seconds{10});
     CHECK(server.http_timeouts().total == std::chrono::seconds{30});
-    REQUIRE(server.shares().size() == 1);
-    CHECK(server.shares().front().name() == "Documents");
-    CHECK(std::filesystem::equivalent(server.shares().front().root().path(), directory.path()));
-    CHECK(server.shares().front().permissions() ==
-          sparenode::configuration::runtime::SharePermissions{true, false, false});
+    REQUIRE(server.locations().size() == 1);
+    CHECK(server.locations().front().api_path() == "/api/Documents");
+    CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
+    CHECK(server.locations().front().permissions() ==
+          sparenode::configuration::runtime::LocationPermissions{true, false, false});
 }
 
 TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
@@ -98,7 +99,7 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1500});
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2500});
     CHECK(server.http_timeouts().total == std::chrono::seconds{90});
-    REQUIRE(server.shares().size() == 1);
-    CHECK(server.shares().front().permissions() ==
-          sparenode::configuration::runtime::SharePermissions{false, true, true});
+    REQUIRE(server.locations().size() == 1);
+    CHECK(server.locations().front().permissions() ==
+          sparenode::configuration::runtime::LocationPermissions{false, true, true});
 }

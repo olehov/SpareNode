@@ -9,9 +9,9 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/configuration/runtime/server_config.hpp"
-#include "sparenode/configuration/runtime/share_config.hpp"
-#include "sparenode/configuration/runtime/share_permissions.hpp"
 #include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/http/filesystem_api.hpp"
 #include "sparenode/http/http_request_parser.hpp"
@@ -46,17 +46,18 @@ namespace
     return {reinterpret_cast<const char *>(body.data()), body.size()};
 }
 
-/// @brief Creates one server backed by the supplied temporary share.
+/// @brief Creates one server backed by the supplied temporary location.
 [[nodiscard]] sparenode::configuration::runtime::ServerConfig
 make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true)
 {
     auto root = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root);
-    std::vector<sparenode::configuration::runtime::ShareConfig> shares;
-    shares.emplace_back(
-        "Doc\"uments", std::move(root).value(),
-        sparenode::configuration::runtime::SharePermissions{allow_read, false, false});
-    return {{"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(shares)};
+    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    locations.emplace_back(
+        "/api/Documents", std::move(root).value(),
+        sparenode::configuration::runtime::LocationPermissions{allow_read, false, false});
+    return {
+        {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations)};
 }
 
 /// @brief Dispatches one GET request through a validated filesystem router.
@@ -85,13 +86,13 @@ TEST_CASE("Filesystem API lists root and nested directories as JSON", "[http][fi
     auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
     REQUIRE(router);
 
-    const auto root = dispatch_get(router.value(), "/api/files");
+    const auto root = dispatch_get(router.value(), "/api/Documents");
     CHECK(root.status_code() == sparenode::http::HttpStatusCode::ok);
     REQUIRE(root.headers().size() == 1);
     CHECK(root.headers().front().name == "Content-Type");
     CHECK(root.headers().front().value == "application/json; charset=utf-8");
     const auto root_body = body_text(root);
-    CHECK(root_body.find("\"share\":\"Doc\\\"uments\"") != std::string::npos);
+    CHECK(root_body.find("\"location\"") == std::string::npos);
     CHECK(root_body.find("\"name\":\"nested folder\"") != std::string::npos);
     CHECK(root_body.find("\"name\":\"report.txt\"") != std::string::npos);
     CHECK(root_body.find("\"type\":\"file\"") != std::string::npos);
@@ -100,7 +101,7 @@ TEST_CASE("Filesystem API lists root and nested directories as JSON", "[http][fi
     const auto native_root = directory.path().u8string();
     CHECK(root_body.find(std::string(native_root.begin(), native_root.end())) == std::string::npos);
 
-    const auto child = dispatch_get(router.value(), "/api/files/nested%20folder");
+    const auto child = dispatch_get(router.value(), "/api/Documents/nested%20folder");
     CHECK(child.status_code() == sparenode::http::HttpStatusCode::ok);
     CHECK(body_text(child).find("inside.txt") != std::string::npos);
 }
@@ -111,9 +112,39 @@ TEST_CASE("Filesystem API enforces read permission", "[http][filesystem-api][per
     auto router = sparenode::http::make_filesystem_api_router(make_server(directory, false));
     REQUIRE(router);
 
-    const auto response = dispatch_get(router.value(), "/api/files");
+    const auto response = dispatch_get(router.value(), "/api/Documents");
     CHECK(response.status_code() == sparenode::http::HttpStatusCode::forbidden);
     CHECK(body_text(response) == "{\"error\":\"read_forbidden\"}");
+}
+
+TEST_CASE("Filesystem API registers multiple configured locations with segment boundaries",
+          "[http][filesystem-api][locations]")
+{
+    const sparenode::test::TemporaryDirectory documents("sparenode-files-documents");
+    const sparenode::test::TemporaryDirectory media("sparenode-files-media");
+    REQUIRE(std::ofstream(documents.path() / "document.txt").good());
+    REQUIRE(std::ofstream(media.path() / "photo.jpg").good());
+    auto documents_root = sparenode::configuration::SharedRoot::create(documents.path());
+    auto media_root = sparenode::configuration::SharedRoot::create(media.path());
+    REQUIRE(documents_root);
+    REQUIRE(media_root);
+
+    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    locations.emplace_back("/api/docs", std::move(documents_root).value(),
+                           sparenode::configuration::runtime::LocationPermissions{});
+    locations.emplace_back("/api/media", std::move(media_root).value(),
+                           sparenode::configuration::runtime::LocationPermissions{});
+    const sparenode::configuration::runtime::ServerConfig server(
+        {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations));
+    auto router = sparenode::http::make_filesystem_api_router(server);
+    REQUIRE(router);
+
+    CHECK(body_text(dispatch_get(router.value(), "/api/docs")).find("document.txt") !=
+          std::string::npos);
+    CHECK(body_text(dispatch_get(router.value(), "/api/media")).find("photo.jpg") !=
+          std::string::npos);
+    CHECK(dispatch_get(router.value(), "/api/docs-old").status_code() ==
+          sparenode::http::HttpStatusCode::not_found);
 }
 
 TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-api][errors]")
@@ -123,25 +154,25 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
     REQUIRE(router);
 
-    const auto missing = dispatch_get(router.value(), "/api/files/missing");
+    const auto missing = dispatch_get(router.value(), "/api/Documents/missing");
     CHECK(missing.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(missing) == "{\"error\":\"not_found\"}");
 
-    const auto file = dispatch_get(router.value(), "/api/files/file.txt");
+    const auto file = dispatch_get(router.value(), "/api/Documents/file.txt");
     CHECK(file.status_code() == sparenode::http::HttpStatusCode::bad_request);
     CHECK(body_text(file) == "{\"error\":\"not_directory\"}");
 
-    const auto traversal = dispatch_get(router.value(), "/api/files/../outside");
+    const auto traversal = dispatch_get(router.value(), "/api/Documents/../outside");
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
 }
 
-TEST_CASE("Filesystem API rejects runtime configuration without a share",
+TEST_CASE("Filesystem API rejects runtime configuration without a location",
           "[http][filesystem-api][startup]")
 {
     const sparenode::configuration::runtime::ServerConfig server(
         {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, {});
     const auto router = sparenode::http::make_filesystem_api_router(server);
     REQUIRE_FALSE(router);
-    CHECK(router.error().code == sparenode::http::FilesystemApiErrorCode::missing_share);
+    CHECK(router.error().code == sparenode::http::FilesystemApiErrorCode::missing_location);
 }

@@ -34,7 +34,7 @@ The `log_level` server directive controls the minimum emitted severity:
 server {
     log_level "info";
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/documents";
     }
 }

@@ -3,15 +3,15 @@
 namespace sparenode::configuration::runtime
 {
 
-/// @brief Stores immutable filesystem operations allowed for one share.
-class SharePermissions final
+/// @brief Stores immutable filesystem operations allowed for one location.
+class LocationPermissions final
 {
   public:
     /// @brief Creates one complete permission set.
     /// @param[in] allow_read Permits reading files and directory metadata.
     /// @param[in] allow_write Permits creating or replacing file content.
     /// @param[in] allow_delete Permits deleting files or directories.
-    explicit constexpr SharePermissions(const bool allow_read = true,
+    explicit constexpr LocationPermissions(const bool allow_read = true,
                                         const bool allow_write = false,
                                         const bool allow_delete = false) noexcept
         : allow_read_(allow_read), allow_write_(allow_write), allow_delete_(allow_delete)
@@ -42,7 +42,7 @@ class SharePermissions final
     /// @brief Compares every permission flag.
     /// @param[in] other Permission set to compare with this instance.
     /// @return `true` when all three operation permissions match.
-    [[nodiscard]] bool operator==(const SharePermissions &other) const noexcept = default;
+    [[nodiscard]] bool operator==(const LocationPermissions &other) const noexcept = default;
 
   private:
     bool allow_read_;   ///< Immutable read permission.
