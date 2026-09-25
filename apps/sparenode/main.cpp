@@ -9,6 +9,7 @@
 #include "sparenode/application/command_line.hpp"
 #include "sparenode/application/running_application.hpp"
 #include "sparenode/configuration/config_loader.hpp"
+#include "sparenode/http/filesystem_api.hpp"
 #include "sparenode/http/http_connection_handler.hpp"
 #include "sparenode/http/http_router.hpp"
 #include "sparenode/logging/console_log_sink.hpp"
@@ -50,7 +51,19 @@ int main(const int argc, const char *const argv[])
     const auto minimum_severity = config_result->servers().front().minimum_log_severity();
     const sparenode::logging::Logger logger(console_sink, minimum_severity);
 
-    const auto router = std::make_shared<const sparenode::http::HttpRouter>();
+    auto router_result =
+        sparenode::http::make_filesystem_api_router(config_result->servers().front());
+    if (!router_result)
+    {
+        const std::string diagnostic =
+            std::string("error: ") + sparenode::http::to_string(router_result.error().code);
+        sparenode::logging::write_console_diagnostic(std::cerr, diagnostic,
+                                                     sparenode::logging::LogSeverity::error);
+        std::cerr << "\nSpareNode was not started.\n";
+        return 3;
+    }
+    const auto router =
+        std::make_shared<const sparenode::http::HttpRouter>(std::move(router_result).value());
     auto handler = sparenode::http::make_http_connection_handler(
         router,
         {.timeouts = config_result->servers().front().http_timeouts(), .deadline_provider = {}});

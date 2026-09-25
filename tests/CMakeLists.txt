@@ -22,9 +22,11 @@ add_executable(sparenode_tests
     configuration/config_validator_test.cpp
     configuration/runtime_config_mapper_test.cpp
     configuration/shared_root_test.cpp
+    filesystem/directory_listing_test.cpp
     filesystem/filesystem_security_test.cpp
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
+    http/filesystem_api_test.cpp
     http/http_connection_handler_test.cpp
     http/request_deadlines_test.cpp
     http/http_request_parser_test.cpp
