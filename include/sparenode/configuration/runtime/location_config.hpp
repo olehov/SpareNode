@@ -44,8 +44,8 @@ class LocationConfig final
     }
 
   private:
-    std::string api_path_;         ///< Validated public HTTP path prefix.
-    SharedRoot root_;              ///< Canonical filesystem boundary.
+    std::string api_path_;            ///< Validated public HTTP path prefix.
+    SharedRoot root_;                 ///< Canonical filesystem boundary.
     LocationPermissions permissions_; ///< Allowed operations inside the root.
 };
 

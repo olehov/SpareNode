@@ -12,8 +12,8 @@ class LocationPermissions final
     /// @param[in] allow_write Permits creating or replacing file content.
     /// @param[in] allow_delete Permits deleting files or directories.
     explicit constexpr LocationPermissions(const bool allow_read = true,
-                                        const bool allow_write = false,
-                                        const bool allow_delete = false) noexcept
+                                           const bool allow_write = false,
+                                           const bool allow_delete = false) noexcept
         : allow_read_(allow_read), allow_write_(allow_write), allow_delete_(allow_delete)
     {
     }
