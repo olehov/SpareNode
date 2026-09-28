@@ -15,9 +15,11 @@
 #include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/http/filesystem_api.hpp"
 #include "sparenode/http/http_request_parser.hpp"
+#include "sparenode/http/http_response_writer.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
+#include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -44,6 +46,23 @@ namespace
 {
     const auto body = response.memory_body();
     return {reinterpret_cast<const char *>(body.data()), body.size()};
+}
+
+/// @brief Receives one exact response size from a loopback test client.
+[[nodiscard]] std::string receive_exact(const sparenode::test::TestClientSocket &client,
+                                        const std::size_t size)
+{
+    std::string result(size, '\0');
+    std::size_t received = 0;
+    while (received < result.size())
+    {
+        auto destination =
+            std::as_writable_bytes(std::span(result.data() + received, result.size() - received));
+        const auto count = client.receive(destination);
+        REQUIRE(count > 0);
+        received += static_cast<std::size_t>(count);
+    }
+    return result;
 }
 
 /// @brief Creates one server backed by the supplied temporary location.
@@ -151,7 +170,11 @@ TEST_CASE("Filesystem API registers multiple configured locations with segment b
 TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-api][errors]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-files-api-errors");
-    REQUIRE(std::ofstream(directory.path() / "file.txt").good());
+    {
+        std::ofstream file_output(directory.path() / "file.txt", std::ios::binary);
+        file_output << "download";
+        REQUIRE(file_output.good());
+    }
     auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
     REQUIRE(router);
 
@@ -159,9 +182,17 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     CHECK(missing.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(missing) == "{\"error\":\"not_found\"}");
 
-    const auto file = dispatch_get(router.value(), "/api/Documents/file.txt");
-    CHECK(file.status_code() == sparenode::http::HttpStatusCode::bad_request);
-    CHECK(body_text(file) == "{\"error\":\"not_directory\"}");
+    auto file = dispatch_get(router.value(), "/api/Documents/file.txt");
+    CHECK(file.status_code() == sparenode::http::HttpStatusCode::ok);
+    CHECK(file.is_streaming());
+    CHECK(file.content_length() == 8);
+    REQUIRE(file.headers().size() == 1);
+    CHECK(file.headers().front().name == "Content-Type");
+    CHECK(file.headers().front().value == "application/octet-stream");
+    const std::string expected = sparenode::http::serialize_http_response_head(file) + "download";
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(sparenode::http::write_http_response(pair.server, file));
+    CHECK(receive_exact(pair.client, expected.size()) == expected);
 
     const auto traversal = dispatch_get(router.value(), "/api/Documents/../outside");
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);

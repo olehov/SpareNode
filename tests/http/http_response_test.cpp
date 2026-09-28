@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -305,6 +307,35 @@ TEST_CASE("HTTP response writer preserves a connection write failure",
     const auto &network_error = sparenode::test::require_optional(result.error().network_error);
     CHECK(network_error.domain == sparenode::network::NetworkErrorDomain::state);
     CHECK(open_connection.is_open());
+}
+
+TEST_CASE("HTTP response writer releases a streaming resource after client disconnection",
+          "[http][response][streaming][network][error]")
+{
+    auto resource = std::make_shared<int>(1);
+    const std::weak_ptr<int> resource_lifetime = resource;
+    constexpr std::uint64_t large_body_size = std::uint64_t{5} * 1024 * 1024 * 1024;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, large_body_size,
+        [resource = std::move(resource)](const std::span<std::byte> destination,
+                                         const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            static_cast<void>(resource);
+            std::ranges::fill(destination, std::byte{0x5A});
+            return destination.size();
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    pair.client.shutdown();
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
+    CHECK(resource_lifetime.expired());
+    CHECK_FALSE(response.is_streaming());
 }
 
 TEST_CASE("HTTP response writer contains body source exceptions", "[http][response][error]")

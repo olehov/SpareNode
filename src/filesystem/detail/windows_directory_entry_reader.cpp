@@ -1,4 +1,5 @@
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
+#include "windows_handle_path.hpp"
 
 #ifdef _WIN32
 
@@ -8,10 +9,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <string_view>
 #include <system_error>
 #include <utility>
-#include <vector>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -101,31 +100,6 @@ open_relative(const HANDLE directory, const std::filesystem::path &native_name,
                                           std::system_category()));
     }
     return UniqueHandle(handle);
-}
-
-/// @brief Reads the normalized final path owned by a stable Win32 handle.
-[[nodiscard]] Result<std::filesystem::path, std::error_code> query_final_path(const HANDLE handle)
-{
-    constexpr DWORD flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
-    constexpr std::size_t initial_capacity = 512;
-    std::vector<wchar_t> buffer(initial_capacity);
-    auto length =
-        GetFinalPathNameByHandleW(handle, buffer.data(), static_cast<DWORD>(buffer.size()), flags);
-    if (length == 0)
-    {
-        return unexpected(last_system_error());
-    }
-    if (length >= buffer.size())
-    {
-        buffer.resize(static_cast<std::size_t>(length) + 1);
-        length = GetFinalPathNameByHandleW(handle, buffer.data(), static_cast<DWORD>(buffer.size()),
-                                           flags);
-        if (length == 0 || length >= buffer.size())
-        {
-            return unexpected(last_system_error());
-        }
-    }
-    return std::filesystem::path(std::wstring_view(buffer.data(), length)).lexically_normal();
 }
 
 /// @brief Compares Windows path components with the filesystem's case-insensitive rules.
@@ -220,7 +194,7 @@ open_confined_directory(const std::filesystem::path &shared_root,
     {
         return unexpected(root_handle.error());
     }
-    auto stable_root = query_final_path(root_handle->get());
+    auto stable_root = query_final_windows_path(root_handle->get());
     if (!stable_root)
     {
         return unexpected(stable_root.error());
@@ -235,7 +209,7 @@ open_confined_directory(const std::filesystem::path &shared_root,
     {
         return unexpected(directory_handle.error());
     }
-    auto stable_directory = query_final_path(directory_handle->get());
+    auto stable_directory = query_final_windows_path(directory_handle->get());
     if (!stable_directory)
     {
         return unexpected(stable_directory.error());
@@ -266,7 +240,7 @@ read_confined_directory_entry(const ConfinedDirectory &directory,
     {
         return std::optional<ConfinedEntryMetadata>{};
     }
-    auto target_path = query_final_path(target_handle->get());
+    auto target_path = query_final_windows_path(target_handle->get());
     if (!target_path || !is_within_root(target_path.value(), context.shared_root))
     {
         return std::optional<ConfinedEntryMetadata>{};

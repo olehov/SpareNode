@@ -28,6 +28,13 @@ class HttpResponseWriterAccess final
     {
         return response.body_reader_(destination, stop_token);
     }
+
+    /// @brief Releases a consumed or failed streaming source immediately.
+    /// @param[in,out] response Response whose body-source resources are released.
+    static void release_body(HttpResponse &response) noexcept
+    {
+        response.body_reader_ = nullptr;
+    }
 };
 
 namespace
@@ -35,6 +42,32 @@ namespace
 
 constexpr std::size_t stream_buffer_size = std::size_t{16} * 1024;
 constexpr std::uint16_t minimum_response_status_code = 100;
+
+/// @brief Releases a non-HEAD streaming source at every terminal writer exit.
+class BodyReleaseGuard final
+{
+  public:
+    /// @brief Selects whether this transmission consumes the response body.
+    BodyReleaseGuard(HttpResponse &response, const bool active) noexcept
+        : response_(active ? &response : nullptr)
+    {
+    }
+
+    BodyReleaseGuard(const BodyReleaseGuard &) = delete;
+    BodyReleaseGuard &operator=(const BodyReleaseGuard &) = delete;
+
+    /// @brief Releases the source after success, cancellation, or failure.
+    ~BodyReleaseGuard()
+    {
+        if (response_ != nullptr)
+        {
+            HttpResponseWriterAccess::release_body(*response_);
+        }
+    }
+
+  private:
+    HttpResponse *response_; ///< Response to clear, or null for memory and HEAD responses.
+};
 
 /// @brief Identifies statuses whose response head must omit Content-Length.
 [[nodiscard]] constexpr bool status_omits_content_length(const HttpStatusCode status_code) noexcept
@@ -193,6 +226,8 @@ Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection 
                                                          const std::stop_token &stop_token,
                                                          const HttpMethod request_method)
 {
+    const BodyReleaseGuard body_release(response, request_method != HttpMethod::head &&
+                                                      response.is_streaming());
     try
     {
         const std::string head = serialize_http_response_head(response);

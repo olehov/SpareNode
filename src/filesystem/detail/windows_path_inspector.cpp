@@ -1,4 +1,5 @@
 #include "windows_path_inspector.hpp"
+#include "windows_handle_path.hpp"
 
 #ifdef _WIN32
 
@@ -11,7 +12,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -245,33 +245,6 @@ read_supported_target(const HANDLE handle, const std::filesystem::path &link_pat
     return std::optional<std::filesystem::path>(std::move(target).value());
 }
 
-/// @brief Reads the normalized final name represented by an open handle.
-/// @param[in] handle Handle whose path is queried.
-/// @return Absolute extended-length DOS or UNC path.
-[[nodiscard]] InspectionResult query_final_path(const HANDLE handle)
-{
-    constexpr DWORD flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
-    constexpr std::size_t initial_capacity = 512;
-    std::vector<wchar_t> buffer(initial_capacity);
-    auto length =
-        GetFinalPathNameByHandleW(handle, buffer.data(), static_cast<DWORD>(buffer.size()), flags);
-    if (length == 0)
-    {
-        return unexpected(WindowsPathInspectionError::system_error);
-    }
-    if (length >= buffer.size())
-    {
-        buffer.resize(static_cast<std::size_t>(length) + 1);
-        length = GetFinalPathNameByHandleW(handle, buffer.data(), static_cast<DWORD>(buffer.size()),
-                                           flags);
-        if (length == 0 || length >= buffer.size())
-        {
-            return unexpected(WindowsPathInspectionError::system_error);
-        }
-    }
-    return std::filesystem::path(std::wstring_view(buffer.data(), length)).lexically_normal();
-}
-
 /// @brief Appends unprocessed path components after a resolved redirection target.
 /// @param[in] target Target of the current reparse point.
 /// @param[in] current First unprocessed component from the original path.
@@ -329,8 +302,14 @@ inspect_windows_path(const std::filesystem::path &path)
         if (!redirected)
         {
             auto handle = open_path(pending, false);
-            return handle ? query_final_path(handle->get())
-                          : InspectionResult(unexpected(handle.error()));
+            if (!handle)
+            {
+                return unexpected(handle.error());
+            }
+            auto final_path = query_final_windows_path(handle->get());
+            return final_path
+                       ? InspectionResult(std::move(final_path).value())
+                       : InspectionResult(unexpected(WindowsPathInspectionError::system_error));
         }
     }
     return unexpected(WindowsPathInspectionError::system_error);
