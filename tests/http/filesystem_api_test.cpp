@@ -92,7 +92,8 @@ TEST_CASE("Filesystem API lists root and nested directories as JSON", "[http][fi
     CHECK(root.headers().front().name == "Content-Type");
     CHECK(root.headers().front().value == "application/json; charset=utf-8");
     const auto root_body = body_text(root);
-    CHECK(root_body.find("\"location\"") == std::string::npos);
+    CHECK(root_body.find("\"share\"") == std::string::npos);
+    CHECK(root_body.find("/api/Documents") == std::string::npos);
     CHECK(root_body.find("\"name\":\"nested folder\"") != std::string::npos);
     CHECK(root_body.find("\"name\":\"report.txt\"") != std::string::npos);
     CHECK(root_body.find("\"type\":\"file\"") != std::string::npos);
