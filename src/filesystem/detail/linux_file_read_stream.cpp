@@ -156,7 +156,8 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
             return unexpected(system_failure(stable_root.error()));
         }
 
-        auto file = open_descriptor(safe_path->path(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        auto file =
+            open_descriptor(safe_path->path(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
         if (!file)
         {
             return unexpected(system_failure(file.error()));
@@ -183,6 +184,15 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
         if (!S_ISREG(information.st_mode) || information.st_size < 0)
         {
             return unexpected(FileReadError{FileReadErrorCode::not_regular_file, {}, std::nullopt});
+        }
+        const int status_flags = ::fcntl(file->get(), F_GETFL);
+        if (status_flags < 0)
+        {
+            return unexpected(system_failure(last_system_error()));
+        }
+        if (::fcntl(file->get(), F_SETFL, status_flags & ~O_NONBLOCK) != 0)
+        {
+            return unexpected(system_failure(last_system_error()));
         }
         auto implementation = std::make_unique<Implementation>(Implementation{
             std::move(file).value(), static_cast<std::uint64_t>(information.st_size)});

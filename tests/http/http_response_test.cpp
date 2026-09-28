@@ -328,7 +328,7 @@ TEST_CASE("HTTP response writer releases a streaming resource after client disco
     REQUIRE(response_result);
     auto response = std::move(response_result).value();
     auto pair = sparenode::test::create_connected_tcp_pair();
-    pair.client.shutdown();
+    REQUIRE(pair.client.reset());
 
     const auto result = sparenode::http::write_http_response(pair.server, response);
 

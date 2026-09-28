@@ -7,6 +7,11 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <system_error>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
@@ -118,3 +123,48 @@ TEST_CASE("File read stream stays bound to the opened file after path replacemen
 
     CHECK(read_all(stream.value(), 2) == "original");
 }
+
+TEST_CASE("File read stream rejects a symbolic link outside the shared root",
+          "[filesystem][file-read][security][symlink]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-file-external-link");
+    const auto shared = directory.path() / "shared";
+    const auto outside = directory.path() / "outside.bin";
+    std::filesystem::create_directory(shared);
+    write_file(outside, "private");
+
+    std::error_code link_error;
+    std::filesystem::create_symlink(outside, shared / "escape.bin", link_error);
+#if defined(_WIN32) && !defined(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    constexpr int privilege_not_held = 1314; // Win32 ERROR_PRIVILEGE_NOT_HELD.
+    if (link_error == std::error_code(privilege_not_held, std::system_category()))
+    {
+        SKIP("Windows symbolic-link creation requires Developer Mode or the symlink privilege");
+    }
+#endif
+    INFO(link_error.message());
+    REQUIRE_FALSE(link_error);
+
+    auto root = sparenode::configuration::SharedRoot::create(shared);
+    REQUIRE(root);
+    const auto escaped = sparenode::filesystem::FileReadStream::open(root.value(), "escape.bin");
+    REQUIRE_FALSE(escaped);
+    CHECK(escaped.error().code == sparenode::filesystem::FileReadErrorCode::invalid_path);
+    CHECK(escaped.error().path_error ==
+          sparenode::filesystem::SafePathErrorCode::outside_shared_root);
+}
+
+#ifndef _WIN32
+TEST_CASE("File read stream rejects a FIFO without waiting for a writer",
+          "[filesystem][file-read][security][linux]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-file-fifo");
+    const auto fifo = directory.path() / "pipe";
+    REQUIRE(::mkfifo(fifo.c_str(), S_IRUSR | S_IWUSR) == 0);
+
+    const auto stream = sparenode::filesystem::FileReadStream::open(make_root(directory), "pipe");
+
+    REQUIRE_FALSE(stream);
+    CHECK(stream.error().code == sparenode::filesystem::FileReadErrorCode::not_regular_file);
+}
+#endif
