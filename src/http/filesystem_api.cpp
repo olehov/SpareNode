@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/runtime/share_config.hpp"
+#include "sparenode/configuration/runtime/location_config.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "sparenode/http/http_request.hpp"
@@ -23,7 +23,7 @@ namespace sparenode::http
 namespace
 {
 
-using configuration::runtime::ShareConfig;
+using configuration::runtime::LocationConfig;
 using filesystem::DirectoryListingEntry;
 using filesystem::DirectoryListingError;
 using filesystem::DirectoryListingErrorCode;
@@ -113,16 +113,15 @@ entry_type_name(const filesystem::DirectoryEntryType type) noexcept
 }
 
 /// @brief Serializes a bounded name-sorted listing without exposing native paths.
-[[nodiscard]] std::string serialize_listing(const ShareConfig &share,
-                                            const std::vector<DirectoryListingEntry> &entries)
+[[nodiscard]] std::string serialize_listing(const std::vector<DirectoryListingEntry> &entries)
 {
+    constexpr std::size_t outer_object_estimate = 16;
+    constexpr std::size_t typical_entry_estimate = 96;
     std::string output;
-    // Estimate 64 bytes for the outer object and share name, plus 96 per typical entry.
+    // Reserve a small outer JSON object plus typical serialized metadata for each entry.
     // This only reduces reallocations; the string still grows when names require more space.
-    output.reserve(64 + entries.size() * 96);
-    output.append("{\"share\":");
-    append_json_string(output, share.name());
-    output.append(",\"entries\":[");
+    output.reserve(outer_object_estimate + entries.size() * typical_entry_estimate);
+    output.append("{\"entries\":[");
     bool first = true;
     for (const auto &entry : entries)
     {
@@ -220,15 +219,15 @@ public_error(const DirectoryListingError &error) noexcept
 
 /// @brief Handles one exact or wildcard directory-listing route.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-handle_listing(const ShareConfig &share, const std::string_view requested_path)
+handle_listing(const LocationConfig &location, const std::string_view requested_path)
 {
     try
     {
-        if (!share.permissions().allows_read())
+        if (!location.permissions().allows_read())
         {
             return make_json_response(HttpStatusCode::forbidden, "{\"error\":\"read_forbidden\"}");
         }
-        const auto listing = filesystem::list_directory(share.root(), requested_path);
+        const auto listing = filesystem::list_directory(location.root(), requested_path);
         if (!listing)
         {
             const auto [status, identifier] = public_error(listing.error());
@@ -237,7 +236,7 @@ handle_listing(const ShareConfig &share, const std::string_view requested_path)
             body.push_back('}');
             return make_json_response(status, body);
         }
-        return make_json_response(HttpStatusCode::ok, serialize_listing(share, listing.value()));
+        return make_json_response(HttpStatusCode::ok, serialize_listing(listing.value()));
     }
     catch (const std::bad_alloc &)
     {
@@ -254,30 +253,34 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
 {
     try
     {
-        if (server.shares().empty())
+        if (server.locations().empty())
         {
-            return unexpected(FilesystemApiError{FilesystemApiErrorCode::missing_share, {}});
+            return unexpected(FilesystemApiError{FilesystemApiErrorCode::missing_location, {}});
         }
 
-        const auto share = server.shares().front();
         HttpRouter router;
-        auto exact =
-            router.register_route(HttpMethod::get, "/api/files",
-                                  [share](const HttpRequestView &, const HttpRouteParameters &)
-                                  { return handle_listing(share, {}); });
-        if (!exact)
+        for (const auto &location : server.locations())
         {
-            return unexpected(FilesystemApiError{FilesystemApiErrorCode::route_registration_failed,
-                                                 exact.error()});
-        }
-        auto nested = router.register_route(
-            HttpMethod::get, "/api/files/*",
-            [share](const HttpRequestView &, const HttpRouteParameters &parameters)
-            { return handle_listing(share, parameters.wildcard_suffix()); });
-        if (!nested)
-        {
-            return unexpected(FilesystemApiError{FilesystemApiErrorCode::route_registration_failed,
-                                                 nested.error()});
+            auto exact = router.register_route(
+                HttpMethod::get, location.api_path(),
+                [location](const HttpRequestView &, const HttpRouteParameters &)
+                { return handle_listing(location, {}); });
+            if (!exact)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, exact.error()});
+            }
+            const auto nested_path =
+                location.api_path() == "/" ? std::string("/*") : location.api_path() + "/*";
+            auto nested = router.register_route(
+                HttpMethod::get, nested_path,
+                [location](const HttpRequestView &, const HttpRouteParameters &parameters)
+                { return handle_listing(location, parameters.wildcard_suffix()); });
+            if (!nested)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, nested.error()});
+            }
         }
         return router;
     }
@@ -292,8 +295,8 @@ const char *to_string(const FilesystemApiErrorCode code) noexcept
 {
     switch (code)
     {
-    case FilesystemApiErrorCode::missing_share:
-        return "filesystem API requires a configured share";
+    case FilesystemApiErrorCode::missing_location:
+        return "filesystem API requires a configured location";
     case FilesystemApiErrorCode::route_registration_failed:
         return "filesystem API route registration failed";
     case FilesystemApiErrorCode::resource_allocation_failed:

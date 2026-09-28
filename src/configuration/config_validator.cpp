@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -27,10 +28,10 @@ constexpr std::uint64_t minimum_port = 1;
 constexpr std::uint64_t maximum_port = 65'535;
 constexpr std::uint64_t minimum_worker_threads = 2;
 constexpr std::uint64_t maximum_worker_threads = 64;
+using directives::LocationDirectiveKind;
+using directives::ParsedLocationDirective;
 using directives::ParsedServerDirective;
-using directives::ParsedShareDirective;
 using directives::ServerDirectiveKind;
-using directives::ShareDirectiveKind;
 
 /// @brief Reports whether text is exactly one numeric IPv4 or IPv6 address.
 [[nodiscard]] bool is_numeric_ip_address(const std::string &value) noexcept
@@ -53,6 +54,74 @@ using directives::ShareDirectiveKind;
     return std::filesystem::path(utf8_value);
 }
 
+/// @brief Reports whether one decoded location argument is a supported HTTP origin path.
+[[nodiscard]] bool is_valid_location_path(const std::string_view path) noexcept
+{
+    if (path.empty() || path.front() != '/' || (path.size() > 1 && path.back() == '/'))
+    {
+        return false;
+    }
+    constexpr std::string_view punctuation = "-._~!$&'()+,;=:@";
+    for (std::size_t index = 1; index < path.size(); ++index)
+    {
+        const auto byte = static_cast<unsigned char>(path[index]);
+        const bool alpha_numeric = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') ||
+                                   (byte >= 'a' && byte <= 'z');
+        if (byte == '/' || alpha_numeric || punctuation.contains(static_cast<char>(byte)))
+        {
+            continue;
+        }
+        if (byte != '%' || path.size() - index < 3)
+        {
+            return false;
+        }
+        const auto hexadecimal = [](const unsigned char digit)
+        {
+            return (digit >= '0' && digit <= '9') || (digit >= 'A' && digit <= 'F') ||
+                   (digit >= 'a' && digit <= 'f');
+        };
+        if (!hexadecimal(static_cast<unsigned char>(path[index + 1])) ||
+            !hexadecimal(static_cast<unsigned char>(path[index + 2])))
+        {
+            return false;
+        }
+        index += 2;
+    }
+    if (path == "/")
+    {
+        return true;
+    }
+    std::size_t segment_begin = 1;
+    while (segment_begin < path.size())
+    {
+        const auto separator = path.find('/', segment_begin);
+        const auto segment = path.substr(segment_begin, separator - segment_begin);
+        if (segment.empty() || segment == "." || segment == "..")
+        {
+            return false;
+        }
+        if (separator == std::string_view::npos)
+        {
+            break;
+        }
+        segment_begin = separator + 1;
+    }
+    return true;
+}
+
+/// @brief Reports whether two route prefixes overlap on a complete path-segment boundary.
+[[nodiscard]] bool location_paths_conflict(const std::string_view left,
+                                           const std::string_view right) noexcept
+{
+    const auto contains = [](const std::string_view parent, const std::string_view child)
+    {
+        return parent == child || parent == "/" ||
+               (child.starts_with(parent) && child.size() > parent.size() &&
+                child[parent.size()] == '/');
+    };
+    return contains(left, right) || contains(right, left);
+}
+
 /// @brief Collects semantic failures while retaining the original parser model.
 class ValidationState final
 {
@@ -69,17 +138,17 @@ class ValidationState final
     [[nodiscard]] std::vector<ConfigValidationError> validate()
     {
         validate_server_directives();
-        validate_shares();
+        validate_locations();
         std::ranges::stable_sort(errors_, {}, [](const ConfigValidationError &error)
                                  { return error.location.byte_offset; });
         return std::move(errors_);
     }
 
-    /// @brief Transfers canonical roots collected for successfully validated shares.
-    /// @return Roots in the same order as the parsed share blocks.
-    [[nodiscard]] std::vector<SharedRoot> release_shared_roots() &&
+    /// @brief Transfers canonical roots collected for successfully validated locations.
+    /// @return Roots in the same order as the parsed location blocks.
+    [[nodiscard]] std::vector<SharedRoot> release_location_roots() &&
     {
-        return std::move(shared_roots_);
+        return std::move(location_roots_);
     }
 
   private:
@@ -207,76 +276,75 @@ class ValidationState final
         }
     }
 
-    /// @brief Enforces share cardinality and validates every supplied share independently.
-    void validate_shares()
+    /// @brief Requires at least one location and validates every supplied block.
+    void validate_locations()
     {
-        if (configuration_.server.shares.empty())
+        if (configuration_.server.locations.empty())
         {
-            errors_.emplace_back(ConfigValidationErrorCode::missing_share,
+            errors_.emplace_back(ConfigValidationErrorCode::missing_location,
                                  configuration_.server.closing_brace_location);
             return;
         }
-        if (configuration_.server.shares.size() > 1)
-        {
-            errors_.emplace_back(ConfigValidationErrorCode::multiple_shares,
-                                 configuration_.server.shares[1].location);
-        }
 
-        std::unordered_set<std::string> share_names;
-        for (const auto &share : configuration_.server.shares)
+        std::vector<std::string_view> paths;
+        for (const auto &location : configuration_.server.locations)
         {
-            validate_share_identity(share, share_names);
-            validate_share_directives(share);
+            validate_location_identity(location, paths);
+            validate_location_directives(location);
         }
     }
 
-    /// @brief Validates one share name and detects an exact duplicate.
-    void validate_share_identity(const ParsedShareBlock &share,
-                                 std::unordered_set<std::string> &share_names)
+    /// @brief Validates one API path and rejects duplicate or nested route prefixes.
+    void validate_location_identity(const ParsedLocationBlock &location,
+                                    std::vector<std::string_view> &paths)
     {
-        if (share.name.empty())
+        if (!is_valid_location_path(location.api_path))
         {
-            add_share_error(ConfigValidationErrorCode::empty_share_name, share,
-                            share.name_location);
+            add_location_error(ConfigValidationErrorCode::invalid_location_path, location,
+                               location.api_path_location);
+            return;
         }
-        if (!share_names.insert(share.name).second)
+        if (std::ranges::any_of(paths, [&location](const std::string_view path)
+                                { return location_paths_conflict(path, location.api_path); }))
         {
-            add_share_error(ConfigValidationErrorCode::duplicate_share_name, share,
-                            share.name_location);
+            add_location_error(ConfigValidationErrorCode::conflicting_location_path, location,
+                               location.api_path_location);
+            return;
         }
+        paths.push_back(location.api_path);
     }
 
-    /// @brief Validates share directive cardinality and the first path value.
-    void validate_share_directives(const ParsedShareBlock &share)
+    /// @brief Validates location directive cardinality and its filesystem path.
+    void validate_location_directives(const ParsedLocationBlock &location)
     {
-        std::unordered_set<ShareDirectiveKind> encountered;
-        const ParsedShareDirective *path_directive = nullptr;
-        for (const auto &directive : share.directives)
+        std::unordered_set<LocationDirectiveKind> encountered;
+        const ParsedLocationDirective *path_directive = nullptr;
+        for (const auto &directive : location.directives)
         {
             if (!encountered.insert(directive.kind).second)
             {
-                add_share_directive_error(ConfigValidationErrorCode::duplicate_share_directive,
-                                          share, directive);
+                add_location_directive_error(
+                    ConfigValidationErrorCode::duplicate_location_directive, location, directive);
                 continue;
             }
-            if (directive.kind == ShareDirectiveKind::path)
+            if (directive.kind == LocationDirectiveKind::path)
             {
                 path_directive = &directive;
             }
         }
-        validate_share_path(share, path_directive);
+        validate_location_root(location, path_directive);
     }
 
     /// @brief Requires a path and delegates canonical filesystem checks to SharedRoot.
-    void validate_share_path(const ParsedShareBlock &share,
-                             const ParsedShareDirective *path_directive)
+    void validate_location_root(const ParsedLocationBlock &location,
+                                const ParsedLocationDirective *path_directive)
     {
         if (path_directive == nullptr)
         {
-            ConfigValidationError error{ConfigValidationErrorCode::missing_share_path,
-                                        share.closing_brace_location};
-            error.share_directive = ShareDirectiveKind::path;
-            error.share_name = share.name;
+            ConfigValidationError error{ConfigValidationErrorCode::missing_location_root,
+                                        location.closing_brace_location};
+            error.location_directive = LocationDirectiveKind::path;
+            error.location_path = location.api_path;
             errors_.push_back(std::move(error));
             return;
         }
@@ -285,15 +353,15 @@ class ValidationState final
         auto root_result = SharedRoot::create(path_from_utf8(path_text));
         if (!root_result)
         {
-            ConfigValidationError error{ConfigValidationErrorCode::invalid_share_path,
+            ConfigValidationError error{ConfigValidationErrorCode::invalid_location_root,
                                         path_directive->value.location};
-            error.share_directive = ShareDirectiveKind::path;
-            error.share_name = share.name;
+            error.location_directive = LocationDirectiveKind::path;
+            error.location_path = location.api_path;
             error.shared_root_error = std::move(root_result.error());
             errors_.push_back(std::move(error));
             return;
         }
-        shared_roots_.push_back(std::move(root_result).value());
+        location_roots_.push_back(std::move(root_result).value());
     }
 
     /// @brief Adds an error associated with one server directive.
@@ -312,29 +380,30 @@ class ValidationState final
         errors_.push_back(std::move(error));
     }
 
-    /// @brief Adds an error associated with one share block.
-    void add_share_error(const ConfigValidationErrorCode code, const ParsedShareBlock &share,
-                         const SourceLocation &location)
+    /// @brief Adds an error associated with one location block.
+    void add_location_error(const ConfigValidationErrorCode code,
+                            const ParsedLocationBlock &parsed_location,
+                            const SourceLocation &source_location)
     {
-        ConfigValidationError error{code, location};
-        error.share_name = share.name;
+        ConfigValidationError error{code, source_location};
+        error.location_path = parsed_location.api_path;
         errors_.push_back(std::move(error));
     }
 
-    /// @brief Adds an error associated with one share directive.
-    void add_share_directive_error(const ConfigValidationErrorCode code,
-                                   const ParsedShareBlock &share,
-                                   const ParsedShareDirective &directive)
+    /// @brief Adds an error associated with one location directive.
+    void add_location_directive_error(const ConfigValidationErrorCode code,
+                                      const ParsedLocationBlock &location,
+                                      const ParsedLocationDirective &directive)
     {
         ConfigValidationError error{code, directive.location};
-        error.share_directive = directive.kind;
-        error.share_name = share.name;
+        error.location_directive = directive.kind;
+        error.location_path = location.api_path;
         errors_.push_back(std::move(error));
     }
 
     const ParsedConfiguration &configuration_;
     std::vector<ConfigValidationError> errors_;
-    std::vector<SharedRoot> shared_roots_;
+    std::vector<SharedRoot> location_roots_;
     bool multithreading_enabled_{false};
     std::uint64_t worker_threads_{};
     const ParsedServerDirective *worker_threads_directive_{};
@@ -349,8 +418,8 @@ ConfigValidationError::ConfigValidationError(const ConfigValidationErrorCode err
 }
 
 ValidatedConfiguration::ValidatedConfiguration(ParsedConfiguration parsed_configuration,
-                                               std::vector<SharedRoot> shared_roots)
-    : parsed_(std::move(parsed_configuration)), shared_roots_(std::move(shared_roots))
+                                               std::vector<SharedRoot> location_roots)
+    : parsed_(std::move(parsed_configuration)), location_roots_(std::move(location_roots))
 {
 }
 
@@ -364,14 +433,14 @@ ParsedConfiguration ValidatedConfiguration::release_parsed() && noexcept
     return std::move(parsed_);
 }
 
-const std::vector<SharedRoot> &ValidatedConfiguration::shared_roots() const noexcept
+const std::vector<SharedRoot> &ValidatedConfiguration::location_roots() const noexcept
 {
-    return shared_roots_;
+    return location_roots_;
 }
 
-std::vector<SharedRoot> ValidatedConfiguration::release_shared_roots() && noexcept
+std::vector<SharedRoot> ValidatedConfiguration::release_location_roots() && noexcept
 {
-    return std::move(shared_roots_);
+    return std::move(location_roots_);
 }
 
 Result<ValidatedConfiguration, std::vector<ConfigValidationError>>
@@ -384,7 +453,7 @@ ConfigValidator::validate(ParsedConfiguration configuration)
         return unexpected(std::move(errors));
     }
     return ValidatedConfiguration(std::move(configuration),
-                                  std::move(validation).release_shared_roots());
+                                  std::move(validation).release_location_roots());
 }
 
 /// @brief Describes a validation failure, including the accepted receive-timeout range.
@@ -395,10 +464,8 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
     {
     case ConfigValidationErrorCode::duplicate_server_directive:
         return "server directive is repeated";
-    case ConfigValidationErrorCode::missing_share:
-        return "the required share block is missing";
-    case ConfigValidationErrorCode::multiple_shares:
-        return "version one permits exactly one share block";
+    case ConfigValidationErrorCode::missing_location:
+        return "at least one filesystem location is required";
     case ConfigValidationErrorCode::invalid_bind_address:
         return "bind must be a numeric IPv4 or IPv6 address";
     case ConfigValidationErrorCode::port_out_of_range:
@@ -413,16 +480,16 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
         return "log_level is not supported";
     case ConfigValidationErrorCode::timeout_out_of_range:
         return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
-    case ConfigValidationErrorCode::empty_share_name:
-        return "share name must not be empty";
-    case ConfigValidationErrorCode::duplicate_share_name:
-        return "share name is repeated";
-    case ConfigValidationErrorCode::duplicate_share_directive:
-        return "share directive is repeated";
-    case ConfigValidationErrorCode::missing_share_path:
-        return "the required share path is missing";
-    case ConfigValidationErrorCode::invalid_share_path:
-        return "share path was rejected as a shared root";
+    case ConfigValidationErrorCode::invalid_location_path:
+        return "location must be a supported absolute HTTP path";
+    case ConfigValidationErrorCode::conflicting_location_path:
+        return "location path conflicts with another filesystem location";
+    case ConfigValidationErrorCode::duplicate_location_directive:
+        return "location directive is repeated";
+    case ConfigValidationErrorCode::missing_location_root:
+        return "the required location filesystem path is missing";
+    case ConfigValidationErrorCode::invalid_location_root:
+        return "location filesystem path was rejected as a shared root";
     }
     return "unknown configuration validation error";
 }

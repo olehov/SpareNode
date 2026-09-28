@@ -145,14 +145,14 @@ class ParserState final
             return make_unexpected_error(ConfigParserExpectation::server_item);
         }
 
-        if (current_.lexeme == "share")
+        if (current_.lexeme == "location")
         {
-            ParsedShareBlock share;
-            if (auto error = parse_share(share); error.has_value())
+            ParsedLocationBlock location;
+            if (auto error = parse_location(location); error.has_value())
             {
                 return error;
             }
-            server.shares.push_back(std::move(share));
+            server.locations.push_back(std::move(location));
             return std::nullopt;
         }
 
@@ -172,12 +172,12 @@ class ParserState final
         return std::nullopt;
     }
 
-    /// @brief Parses one complete share block and its grammatical directives.
-    /// @param[out] share Owned representation receiving the parsed block.
+    /// @brief Parses one complete location block and its grammatical directives.
+    /// @param[out] location Owned representation receiving the parsed block.
     /// @return No value on success, otherwise a structured failure.
-    [[nodiscard]] std::optional<ConfigParserError> parse_share(ParsedShareBlock &share)
+    [[nodiscard]] std::optional<ConfigParserError> parse_location(ParsedLocationBlock &location)
     {
-        share.location = current_.location;
+        location.location = current_.location;
         if (auto error = advance(); error.has_value())
         {
             return error;
@@ -186,8 +186,8 @@ class ParserState final
         {
             return make_unexpected_error(ConfigParserExpectation::string_literal);
         }
-        share.name_location = current_.location;
-        share.name = current_.decoded_string.value_or(std::string{});
+        location.api_path_location = current_.location;
+        location.api_path = current_.decoded_string.value_or(std::string{});
         if (auto error = advance(); error.has_value())
         {
             return error;
@@ -201,26 +201,26 @@ class ParserState final
         while (current_.kind != ConfigTokenKind::right_brace &&
                current_.kind != ConfigTokenKind::end_of_input)
         {
-            const auto kind = share_directive_kind(current_.lexeme);
+            const auto kind = location_directive_kind(current_.lexeme);
             if (current_.kind != ConfigTokenKind::identifier || !kind.has_value())
             {
-                return make_unexpected_error(ConfigParserExpectation::share_item);
+                return make_unexpected_error(ConfigParserExpectation::location_item);
             }
-            directives::ParsedShareDirective directive;
+            directives::ParsedLocationDirective directive;
             if (auto error =
                     parse_directive(kind.value(), expectation_for(kind.value()), directive);
                 error.has_value())
             {
                 return error;
             }
-            share.directives.push_back(std::move(directive));
+            location.directives.push_back(std::move(directive));
         }
 
         if (current_.kind != ConfigTokenKind::right_brace)
         {
             return make_unexpected_error(ConfigParserExpectation::right_brace);
         }
-        share.closing_brace_location = current_.location;
+        location.closing_brace_location = current_.location;
         if (auto error = advance(); error.has_value())
         {
             return error;
@@ -351,27 +351,27 @@ class ParserState final
         return std::nullopt;
     }
 
-    /// @brief Maps a recognized share directive name to its stable identity.
+    /// @brief Maps a recognized location directive name to its stable identity.
     /// @param[in] name Identifier spelling from the lexer.
     /// @return Directive identity, or no value for an unknown/wrong-block name.
-    [[nodiscard]] static std::optional<directives::ShareDirectiveKind>
-    share_directive_kind(const std::string_view name) noexcept
+    [[nodiscard]] static std::optional<directives::LocationDirectiveKind>
+    location_directive_kind(const std::string_view name) noexcept
     {
         if (name == "path")
         {
-            return directives::ShareDirectiveKind::path;
+            return directives::LocationDirectiveKind::path;
         }
         if (name == "read")
         {
-            return directives::ShareDirectiveKind::read_permission;
+            return directives::LocationDirectiveKind::read_permission;
         }
         if (name == "write")
         {
-            return directives::ShareDirectiveKind::write_permission;
+            return directives::LocationDirectiveKind::write_permission;
         }
         if (name == "delete")
         {
-            return directives::ShareDirectiveKind::delete_permission;
+            return directives::LocationDirectiveKind::delete_permission;
         }
         return std::nullopt;
     }
@@ -399,22 +399,22 @@ class ParserState final
         return ConfigParserExpectation::server_item;
     }
 
-    /// @brief Selects the scalar syntax required by one recognized share directive.
-    /// @param[in] kind Share directive whose value grammar is requested.
+    /// @brief Selects the scalar syntax required by one recognized location directive.
+    /// @param[in] kind Location directive whose value grammar is requested.
     /// @return String or boolean expectation.
     [[nodiscard]] static ConfigParserExpectation
-    expectation_for(const directives::ShareDirectiveKind kind) noexcept
+    expectation_for(const directives::LocationDirectiveKind kind) noexcept
     {
         switch (kind)
         {
-        case directives::ShareDirectiveKind::path:
+        case directives::LocationDirectiveKind::path:
             return ConfigParserExpectation::string_literal;
-        case directives::ShareDirectiveKind::read_permission:
-        case directives::ShareDirectiveKind::write_permission:
-        case directives::ShareDirectiveKind::delete_permission:
+        case directives::LocationDirectiveKind::read_permission:
+        case directives::LocationDirectiveKind::write_permission:
+        case directives::LocationDirectiveKind::delete_permission:
             return ConfigParserExpectation::boolean_literal;
         }
-        return ConfigParserExpectation::share_item;
+        return ConfigParserExpectation::location_item;
     }
 
     /// @brief Converts a scalar parser expectation to its lexer token category.
@@ -474,9 +474,9 @@ const char *to_string(const ConfigParserExpectation expectation) noexcept
     case ConfigParserExpectation::semicolon:
         return "';'";
     case ConfigParserExpectation::server_item:
-        return "server directive or share block";
-    case ConfigParserExpectation::share_item:
-        return "share directive";
+        return "server directive or location block";
+    case ConfigParserExpectation::location_item:
+        return "location directive";
     case ConfigParserExpectation::string_literal:
         return "string literal";
     case ConfigParserExpectation::integer_literal:

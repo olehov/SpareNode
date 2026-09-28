@@ -57,17 +57,18 @@ require_validation_errors(const std::string_view input)
     return std::ranges::any_of(errors, [code](const auto &error) { return error.code == code; });
 }
 
-/// @brief Produces a quoted-path-safe configuration around one temporary share.
+/// @brief Produces a quoted-path-safe configuration around one temporary location.
 /// @param[in] path Existing or deliberately invalid host path.
-/// @param[in] server_directives Optional server directives inserted before the share.
-/// @param[in] share_directives Optional directives inserted after the required path.
+/// @param[in] server_directives Optional server directives inserted before the location.
+/// @param[in] location_directives Optional directives inserted after the required path.
 /// @return Complete syntactically valid configuration source.
 [[nodiscard]] std::string make_configuration(const std::filesystem::path &path,
                                              const std::string_view server_directives = {},
-                                             const std::string_view share_directives = {})
+                                             const std::string_view location_directives = {})
 {
-    return "server {\n" + std::string(server_directives) + "share \"Documents\" {\npath \"" +
-           path.generic_string() + "\";\n" + std::string(share_directives) + "}\n}";
+    return "server {\n" + std::string(server_directives) +
+           "location \"/api/Documents\" {\npath \"" + path.generic_string() + "\";\n" +
+           std::string(location_directives) + "}\n}";
 }
 
 } // namespace
@@ -114,9 +115,9 @@ TEST_CASE("Configuration validator accepts version one defaults and independent 
     auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(input));
 
     REQUIRE(result.has_value());
-    CHECK(result->parsed().server.shares.front().name == "Documents");
-    REQUIRE(result->shared_roots().size() == 1);
-    CHECK(std::filesystem::equivalent(result->shared_roots().front().path(), directory.path()));
+    CHECK(result->parsed().server.locations.front().api_path == "/api/Documents");
+    REQUIRE(result->location_roots().size() == 1);
+    CHECK(std::filesystem::equivalent(result->location_roots().front().path(), directory.path()));
 }
 
 TEST_CASE("Configuration validator collects independent server failures",
@@ -182,48 +183,81 @@ TEST_CASE("Configuration validator enforces worker thread relationships",
     }
 }
 
-TEST_CASE("Configuration validator enforces version one share cardinality",
+TEST_CASE("Configuration validator requires locations and rejects ambiguous paths",
           "[configuration][validator]")
 {
-    SECTION("missing share")
+    SECTION("missing location")
     {
         const auto errors = require_validation_errors("server {}");
         REQUIRE(errors.size() == 1);
-        CHECK(errors.front().code == ConfigValidationErrorCode::missing_share);
+        CHECK(errors.front().code == ConfigValidationErrorCode::missing_location);
         CHECK(errors.front().location == sparenode::configuration::SourceLocation{8, 1, 9});
     }
 
-    SECTION("multiple shares remain individually validated")
+    const sparenode::test::TemporaryDirectory directory("sparenode-location-validator");
+    const auto root = directory.path().generic_string();
+
+    SECTION("multiple distinct locations are accepted")
     {
-        constexpr std::string_view input = R"(server {
-share "same" { }
-share "same" { }
-})";
+        const auto input = "server { location \"/api/docs\" { path \"" + root +
+                           "\"; } location \"/api/media\" { path \"" + root + "\"; } }";
+        const auto result =
+            sparenode::configuration::ConfigValidator::validate(parse_configuration(input));
+        REQUIRE(result);
+        CHECK(result->parsed().server.locations.size() == 2);
+    }
+
+    SECTION("duplicate and nested paths conflict")
+    {
+        const std::string second_path = GENERATE("/api/docs", "/api/docs/private");
+        const auto input = "server { location \"/api/docs\" { path \"" + root +
+                           "\"; } location \"" + second_path + "\" { path \"" + root + "\"; } }";
         const auto errors = require_validation_errors(input);
-        CHECK(contains_error(errors, ConfigValidationErrorCode::multiple_shares));
-        CHECK(contains_error(errors, ConfigValidationErrorCode::duplicate_share_name));
-        CHECK(contains_error(errors, ConfigValidationErrorCode::missing_share_path));
+        REQUIRE(errors.size() == 1);
+        CHECK(errors.front().code == ConfigValidationErrorCode::conflicting_location_path);
+    }
+
+    SECTION("segment neighbors do not conflict")
+    {
+        const auto input = "server { location \"/api/docs\" { path \"" + root +
+                           "\"; } location \"/api/docs-old\" { path \"" + root + "\"; } }";
+        const auto result =
+            sparenode::configuration::ConfigValidator::validate(parse_configuration(input));
+        REQUIRE(result);
     }
 }
 
-TEST_CASE("Configuration validator reports share directive and filesystem failures",
+TEST_CASE("Configuration validator reports location directive and filesystem failures",
           "[configuration][validator]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-validator");
 
-    SECTION("empty share name and missing path")
+    SECTION("invalid API path and missing filesystem path")
     {
-        const auto errors = require_validation_errors("server { share \"\" {} }");
-        CHECK(contains_error(errors, ConfigValidationErrorCode::empty_share_name));
-        CHECK(contains_error(errors, ConfigValidationErrorCode::missing_share_path));
+        const auto errors = require_validation_errors("server { location \"\" {} }");
+        CHECK(contains_error(errors, ConfigValidationErrorCode::invalid_location_path));
+        CHECK(contains_error(errors, ConfigValidationErrorCode::missing_location_root));
+    }
+
+    SECTION("malformed API paths")
+    {
+        const std::string api_path =
+            GENERATE("relative", "/trailing/", "/double//segment", "/dot/../segment",
+                     "/query?value", "/fragment#value", "/wildcard/*", "/back\\\\slash");
+        const auto errors =
+            require_validation_errors("server { location \"" + api_path + "\" { path \"" +
+                                      directory.path().generic_string() + "\"; } }");
+        REQUIRE(errors.size() == 1);
+        CHECK(errors.front().code == ConfigValidationErrorCode::invalid_location_path);
     }
 
     SECTION("duplicate path")
     {
         const std::string path = directory.path().generic_string();
-        const auto errors = require_validation_errors("server { share \"Documents\" { path \"" +
-                                                      path + "\"; path \"" + path + "\"; } }");
-        CHECK(contains_error(errors, ConfigValidationErrorCode::duplicate_share_directive));
+        const auto errors =
+            require_validation_errors("server { location \"/api/Documents\" { path \"" + path +
+                                      "\"; path \"" + path + "\"; } }");
+        CHECK(contains_error(errors, ConfigValidationErrorCode::duplicate_location_directive));
     }
 
     SECTION("missing filesystem entry")

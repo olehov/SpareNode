@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "sparenode/application/running_application.hpp"
-#include "sparenode/configuration/runtime/share_config.hpp"
+#include "sparenode/configuration/runtime/location_config.hpp"
 #include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
@@ -16,19 +16,20 @@
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
-TEST_CASE("Running application starts from runtime settings and retains shares",
+TEST_CASE("Running application starts from runtime settings and retains locations",
           "[application][startup]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-application");
     auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
 
-    std::vector<sparenode::configuration::runtime::ShareConfig> shares;
-    shares.emplace_back("Documents", std::move(root_result).value(),
-                        sparenode::configuration::runtime::SharePermissions{true, false, false});
+    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    locations.emplace_back(
+        "/api/Documents", std::move(root_result).value(),
+        sparenode::configuration::runtime::LocationPermissions{true, false, false});
     std::vector<sparenode::configuration::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
-                         sparenode::logging::LogSeverity::info, std::move(shares));
+                         sparenode::logging::LogSeverity::info, std::move(locations));
     sparenode::configuration::runtime::AppConfig config(std::move(servers));
 
     auto handler = [](sparenode::network::TcpConnection, const std::stop_token &)
@@ -41,9 +42,9 @@ TEST_CASE("Running application starts from runtime settings and retains shares",
     const auto &local_endpoint = sparenode::test::require_optional(endpoint);
     CHECK(local_endpoint.address == "127.0.0.1");
     CHECK(local_endpoint.port != 0);
-    REQUIRE(result->config().servers().front().shares().size() == 1);
+    REQUIRE(result->config().servers().front().locations().size() == 1);
     CHECK(std::filesystem::equivalent(
-        result->config().servers().front().shares().front().root().path(), directory.path()));
+        result->config().servers().front().locations().front().root().path(), directory.path()));
 }
 
 TEST_CASE("Running application rejects an empty runtime server collection",
@@ -62,12 +63,13 @@ TEST_CASE("Running application installs connection failure observers on its disp
     const sparenode::test::TemporaryDirectory directory("sparenode-application-observer");
     auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
-    std::vector<sparenode::configuration::runtime::ShareConfig> shares;
-    shares.emplace_back("Documents", std::move(root_result).value(),
-                        sparenode::configuration::runtime::SharePermissions{true, false, false});
+    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    locations.emplace_back(
+        "/api/Documents", std::move(root_result).value(),
+        sparenode::configuration::runtime::LocationPermissions{true, false, false});
     std::vector<sparenode::configuration::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
-                         sparenode::logging::LogSeverity::info, std::move(shares));
+                         sparenode::logging::LogSeverity::info, std::move(locations));
 
     constexpr sparenode::network::NetworkError expected_error{
         sparenode::network::NetworkOperation::receive,

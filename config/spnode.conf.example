@@ -11,9 +11,9 @@ server {
     body_timeout_ms 10000;
     request_timeout_ms 30000;
 
-    share "Documents" {
+    location "/api/Documents" {
         # Replace this placeholder with an existing directory before starting SpareNode.
-        path "/absolute/path/to/share";
+        path "/absolute/path/to/files";
         read true;
         write false;
         delete false;

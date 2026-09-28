@@ -23,7 +23,7 @@ server {
     body_timeout_ms 10000;
     request_timeout_ms 30000;
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/home/user/Documents";
         read true;
         write false;
@@ -32,11 +32,11 @@ server {
 }
 ```
 
-On Windows, the share can instead use an escaped native path:
+On Windows, the location can instead use an escaped native path:
 
 ```conf
 server {
-    share "Documents" {
+    location "/api/Documents" {
         path "D:\\Shared\\Documents";
         read true;
         write false;
@@ -73,7 +73,7 @@ ASCII letters, decimal digits, underscores, or hyphens:
 identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 ```
 
-Version 1 reserves `server`, `share`, `bind`, `port`, `multithreading`,
+Version 1 reserves `server`, `location`, `bind`, `port`, `multithreading`,
 `worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
 `request_timeout_ms`, `path`, `read`, `write`, `delete`, `true`, and
 `false` according to their grammatical positions. Keywords must be written in
@@ -136,7 +136,7 @@ server-item              = bind-directive
                          | header-timeout-directive
                          | body-timeout-directive
                          | request-timeout-directive
-                         | share-block ;
+                         | location-block ;
 
 bind-directive           = "bind", string, ";" ;
 port-directive           = "port", integer, ";" ;
@@ -147,8 +147,8 @@ header-timeout-directive = "header_timeout_ms", integer, ";" ;
 body-timeout-directive   = "body_timeout_ms", integer, ";" ;
 request-timeout-directive = "request_timeout_ms", integer, ";" ;
 
-share-block              = "share", string, "{", { share-directive }, "}" ;
-share-directive          = path-directive
+location-block              = "location", string, "{", { location-directive }, "}" ;
+location-directive          = path-directive
                          | read-directive
                          | write-directive
                          | delete-directive ;
@@ -165,9 +165,9 @@ Directive order within a block is not significant.
 
 ## Version 1 semantics
 
-Version 1 requires exactly one top-level `server` block and exactly one `share`
-block within it. The share name must decode to a non-empty string. The name is a
-user-facing label and is not a filesystem path.
+Version 1 requires exactly one top-level `server` block and at least one filesystem
+`location` block within it. The quoted location argument is the public HTTP API path
+prefix for that filesystem root.
 
 ### Server directives
 
@@ -181,7 +181,7 @@ user-facing label and is not a filesystem path.
 | `header_timeout_ms` | zero or one | `10000` | Header receive inactivity, 1 through 86400000 milliseconds |
 | `body_timeout_ms` | zero or one | `10000` | Body receive inactivity, 1 through 86400000 milliseconds |
 | `request_timeout_ms` | zero or one | `30000` | Total request receive time, 1 through 86400000 milliseconds |
-| `share` | exactly one | none | Defines the sole MVP shared directory |
+| `location` | one or more | none | Defines an HTTP prefix and its filesystem root |
 
 Hostnames are not accepted by `bind` in version 1. IPv6 addresses remain quoted
 strings, for example `bind "::";` or `bind "::1";`.
@@ -206,7 +206,7 @@ upper bound prevents an accidental configuration value from attempting to
 create an unbounded number of operating-system threads; a later resource-profile
 issue may revise this policy deliberately.
 
-### Share directives
+### Location directives
 
 | Directive | Cardinality | Default | Semantic requirement |
 |---|---:|---|---|
@@ -220,29 +220,27 @@ enable `write`, and `write true` does not implicitly enable `delete`. Filesystem
 operations must still pass through the `SharedRoot` and `SafePath` security
 boundaries; configuration permissions cannot bypass them.
 
-The single-share restriction belongs to the version 1 semantic model rather
-than the lexical grammar. A future version may permit multiple uniquely named
-`share` blocks without changing how a block is tokenized.
+Location API paths must be absolute origin paths such as `/api/Documents`. A path
+cannot contain a query, fragment, backslash, control character, wildcard, empty
+segment, `.` segment, or `..` segment, and non-root paths cannot end in `/`.
+Duplicate paths and segment-nested paths are rejected because their exact and
+descendant routes would overlap. Segment neighbors such as `/api/docs` and
+`/api/docs-old` remain distinct.
 
 ### Relationship to HTTP requests
 
-The quoted share name is a display label, not an HTTP route identifier. Because
-version 1 has exactly one share, file endpoints select that share from the
-validated runtime configuration and pass only the request's relative file path
-through `SafePath`. Before an operation starts, its handler must also enforce the
-corresponding `read`, `write`, or `delete` permission.
-
-HTTP routing and handlers remain outside this format specification. A future
-multi-share configuration should introduce a separate stable share identifier
-and routes such as `/api/shares/{share_id}/files/...`. Using the display label as
-that identifier would make URLs unstable under renaming and introduce avoidable
-Unicode and percent-encoding ambiguity.
+The exact configured path addresses the filesystem root. Descendant requests beneath
+that prefix are passed to the same location as relative paths and resolved through
+`SafePath`. Before an operation starts, its handler must also enforce the corresponding
+`read`, `write`, or `delete` permission. The argument is not a display name; UI-facing
+metadata may be added later when its requirements are known.
 
 ## Duplicate and unknown names
 
 - Repeating a singleton directive in the same block is an error, even when both
   values are identical.
-- A second `server` block or a second `share` block is an error in version 1.
+- A second `server` block is an error. Multiple non-conflicting locations are allowed.
+- Duplicate or segment-nested location API paths are errors.
 - An unknown directive or block is an error. It is not ignored and does not
   produce a warning-only fallback.
 - A recognized directive in the wrong block is an error.
@@ -255,7 +253,7 @@ changing the server's security or network behaviour.
 
 Each of the following configurations must fail as a whole.
 
-Missing the required share:
+Missing the required location:
 
 ```conf
 server {
@@ -270,7 +268,7 @@ server {
     port 8080;
     port 9090;
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/documents";
     }
 }
@@ -282,7 +280,7 @@ Unknown directive:
 server {
     listen_port 8080;
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/documents";
     }
 }
@@ -294,7 +292,7 @@ Missing statement terminator:
 server {
     port 8080
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/documents";
     }
 }
@@ -304,7 +302,7 @@ Invalid string escape in a Windows path:
 
 ```conf
 server {
-    share "Documents" {
+    location "/api/Documents" {
         path "D:\Shared";
     }
 }
@@ -314,7 +312,7 @@ The last example contains unsupported `\S`; it must use
 `path "D:\\Shared";` or `path "D:/Shared";`.
 
 Semantic errors are also fatal, including port `0`, an unsupported log level,
-an empty share name, an empty path, or a path that does not identify an
+an invalid location API path, an empty filesystem path, or a path that does not identify an
 acceptable directory on the host platform.
 
 A threading configuration is invalid when the switch and count disagree:
@@ -324,7 +322,7 @@ server {
     multithreading false;
     worker_threads 4;
 
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/documents";
     }
 }
@@ -358,7 +356,7 @@ the error category and relevant directive without echoing secrets. Later stages
 must not reinterpret or decode string escapes a second time.
 
 When a required directive is absent, its semantic error points at the closing
-`}` of the block that should contain it. This applies to a missing `share` and to
+`}` of the block that should contain it. This applies to a missing `location` and to
 `worker_threads` when `multithreading true` is present. If the relevant closing
 delimiter is unavailable, including when the entire `server` block is absent,
 the error points at end-of-input. End-of-input is the position immediately after
@@ -373,7 +371,7 @@ directory before the server starts.
 ## Future compatibility
 
 Version 1 intentionally excludes include files, environment-variable expansion,
-hot reload, serialization, authentication values, expressions, and multiple
-shares. Adding any of these requires a dedicated issue and an explicit format
+hot reload, serialization, authentication values, expressions, and UI display
+metadata for locations. Adding any of these requires a dedicated issue and an explicit format
 revision. A future settings UI must read and write the same configuration model;
 it must not introduce an independent source of truth.

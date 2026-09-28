@@ -26,8 +26,8 @@ enum class ConfigParserExpectation : std::uint8_t
     left_brace,      ///< `{`.
     right_brace,     ///< `}`.
     semicolon,       ///< `;`.
-    server_item,     ///< A server directive or `share` block.
-    share_item,      ///< A share directive.
+    server_item,     ///< A server directive or `location` block.
+    location_item,   ///< A location directive.
     string_literal,  ///< A quoted string value.
     integer_literal, ///< An unsigned decimal integer value.
     boolean_literal, ///< Lowercase `true` or `false`.

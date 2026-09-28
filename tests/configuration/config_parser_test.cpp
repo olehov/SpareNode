@@ -59,7 +59,7 @@ TEST_CASE("Configuration receive timeouts require server-scoped unsigned integer
     SECTION("wrong block")
     {
         const auto error =
-            require_parser_error("server { share \"docs\" { " + directive + " 1000; } }");
+            require_parser_error("server { location \"docs\" { " + directive + " 1000; } }");
         CHECK(error.code == sparenode::configuration::ConfigParserErrorCode::unexpected_token);
     }
 }
@@ -72,7 +72,7 @@ TEST_CASE("Configuration parser accepts an empty server block", "[configuration]
     CHECK(configuration.server.closing_brace_location ==
           sparenode::configuration::SourceLocation{8, 1, 9});
     CHECK(configuration.server.directives.empty());
-    CHECK(configuration.server.shares.empty());
+    CHECK(configuration.server.locations.empty());
     CHECK(configuration.end_of_input_location ==
           sparenode::configuration::SourceLocation{9, 1, 10});
 }
@@ -86,7 +86,7 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     multithreading true;
     worker_threads 4;
     log_level "debug";
-    share "Documents" {
+    location "/api/Documents" {
         path "/srv/Documents";
         read true;
         write false;
@@ -104,16 +104,16 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     CHECK(std::get<std::uint64_t>(configuration.server.directives[3].value.scalar) == 4);
     CHECK(std::get<std::string>(configuration.server.directives[4].value.scalar) == "debug");
 
-    REQUIRE(configuration.server.shares.size() == 1);
-    const auto &share = configuration.server.shares.front();
-    CHECK(share.name == "Documents");
-    REQUIRE(share.directives.size() == 4);
-    CHECK(share.directives[0].kind ==
-          sparenode::configuration::directives::ShareDirectiveKind::path);
-    CHECK(std::get<std::string>(share.directives[0].value.scalar) == "/srv/Documents");
-    CHECK(std::get<bool>(share.directives[1].value.scalar));
-    CHECK_FALSE(std::get<bool>(share.directives[2].value.scalar));
-    CHECK_FALSE(std::get<bool>(share.directives[3].value.scalar));
+    REQUIRE(configuration.server.locations.size() == 1);
+    const auto &location = configuration.server.locations.front();
+    CHECK(location.api_path == "/api/Documents");
+    REQUIRE(location.directives.size() == 4);
+    CHECK(location.directives[0].kind ==
+          sparenode::configuration::directives::LocationDirectiveKind::path);
+    CHECK(std::get<std::string>(location.directives[0].value.scalar) == "/srv/Documents");
+    CHECK(std::get<bool>(location.directives[1].value.scalar));
+    CHECK_FALSE(std::get<bool>(location.directives[2].value.scalar));
+    CHECK_FALSE(std::get<bool>(location.directives[3].value.scalar));
 }
 
 TEST_CASE("Configuration parser preserves repeated syntax for semantic validation",
@@ -122,8 +122,8 @@ TEST_CASE("Configuration parser preserves repeated syntax for semantic validatio
     constexpr std::string_view input = R"(server {
     port 8080;
     port 9090;
-    share "First" { path "/first"; }
-    share "Second" { path "/second"; }
+    location "/api/First" { path "/first"; }
+    location "/api/Second" { path "/second"; }
 })";
 
     const auto configuration = require_configuration(input);
@@ -131,9 +131,9 @@ TEST_CASE("Configuration parser preserves repeated syntax for semantic validatio
     REQUIRE(configuration.server.directives.size() == 2);
     CHECK(std::get<std::uint64_t>(configuration.server.directives[0].value.scalar) == 8080);
     CHECK(std::get<std::uint64_t>(configuration.server.directives[1].value.scalar) == 9090);
-    REQUIRE(configuration.server.shares.size() == 2);
-    CHECK(configuration.server.shares[0].name == "First");
-    CHECK(configuration.server.shares[1].name == "Second");
+    REQUIRE(configuration.server.locations.size() == 2);
+    CHECK(configuration.server.locations[0].api_path == "/api/First");
+    CHECK(configuration.server.locations[1].api_path == "/api/Second");
 }
 
 TEST_CASE("Configuration parser rejects missing punctuation and delimiters",
@@ -170,9 +170,9 @@ TEST_CASE("Configuration parser rejects missing punctuation and delimiters",
               ConfigTokenKind::end_of_input);
     }
 
-    SECTION("premature end of share block")
+    SECTION("premature end of location block")
     {
-        const auto error = require_parser_error("server { share \"x\" {");
+        const auto error = require_parser_error("server { location \"x\" {");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::right_brace);
         CHECK(sparenode::test::require_optional(error.actual_token_kind) ==
@@ -188,7 +188,7 @@ TEST_CASE("Configuration parser rejects unexpected names nesting and value types
 
     SECTION("unknown top-level token")
     {
-        const auto error = require_parser_error("share {}");
+        const auto error = require_parser_error("location {}");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::server_keyword);
     }
@@ -201,23 +201,23 @@ TEST_CASE("Configuration parser rejects unexpected names nesting and value types
         CHECK(sparenode::test::require_optional(error.actual_identifier) == "listen");
     }
 
-    SECTION("server directive inside share")
+    SECTION("server directive inside location")
     {
-        const auto error = require_parser_error("server { share \"x\" { port 8; } }");
+        const auto error = require_parser_error("server { location \"x\" { port 8; } }");
         CHECK(sparenode::test::require_optional(error.expected) ==
-              ConfigParserExpectation::share_item);
+              ConfigParserExpectation::location_item);
     }
 
-    SECTION("missing share name")
+    SECTION("missing location name")
     {
-        const auto error = require_parser_error("server { share { } }");
+        const auto error = require_parser_error("server { location { } }");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::string_literal);
     }
 
-    SECTION("wrong share directive value type")
+    SECTION("wrong location directive value type")
     {
-        const auto error = require_parser_error("server { share \"x\" { read \"yes\"; } }");
+        const auto error = require_parser_error("server { location \"x\" { read \"yes\"; } }");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::boolean_literal);
     }
@@ -264,7 +264,7 @@ TEST_CASE("Configuration parser reports integer overflow without semantic range 
 
 TEST_CASE("Configuration parser propagates terminal lexer errors", "[configuration][parser]")
 {
-    const auto error = require_parser_error("server { bind \"D:\\Share\"; }");
+    const auto error = require_parser_error("server { bind \"D:\\Location\"; }");
 
     CHECK(error.code == sparenode::configuration::ConfigParserErrorCode::lexical_error);
     const auto &lexer_error = sparenode::test::require_optional(error.lexer_error);

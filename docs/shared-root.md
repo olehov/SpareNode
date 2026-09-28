@@ -1,13 +1,13 @@
 # Shared-root configuration
 
-SpareNode v0.1 exposes exactly one host directory. The directory is selected by
-the required `path` directive inside the sole `share` block of `spnode.conf`:
+Each filesystem `location` exposes one host directory. The directory is selected by
+the required `path` directive inside its `location` block in `spnode.conf`:
 
 ```conf
 # Windows
 server {
-    share "Documents" {
-        path "D:\\Share";
+    location "/api/Documents" {
+        path "D:\\Location";
     }
 }
 ```
@@ -15,13 +15,13 @@ server {
 ```conf
 # Linux
 server {
-    share "Documents" {
-        path "/home/user/share";
+    location "/api/Documents" {
+        path "/home/user/location";
     }
 }
 ```
 
-Copy `config/spnode.conf.example` to `config/spnode.conf`, update the share path,
+Copy `config/spnode.conf.example` to `config/spnode.conf`, update the location path,
 and start SpareNode with `--config config/spnode.conf`. Configuration strings use
 double quotes; backslashes must be escaped, while forward slashes are also valid
 on Windows. See the [configuration format](configuration-format.md) for the full

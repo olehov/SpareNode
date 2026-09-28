@@ -100,7 +100,7 @@ server {
     multithreading true;
     worker_threads 4;
     log_level "info";
-    share "Documents" {
+    location "/api/Documents" {
         path "/home/user/Documents";
         read true;
         write false;

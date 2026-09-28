@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "sparenode/configuration/config_loader.hpp"
-#include "sparenode/configuration/runtime/share_permissions.hpp"
+#include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -47,22 +47,23 @@ write_config(const sparenode::test::TemporaryDirectory &directory, const std::st
            "header_timeout_ms 1200;\n"
            "body_timeout_ms 2400;\n"
            "request_timeout_ms 3600;\n"
-           "share \"Documents\" {\n"
+           "location \"/api/Documents\" {\n"
            "path \"" +
            shared_root.generic_string() + "\";\nread false;\nwrite true;\ndelete true;\n}\n}";
 }
 
-/// @brief Wraps server directives and share source in a complete configuration document.
+/// @brief Wraps server directives and location source in a complete configuration document.
 [[nodiscard]] std::string make_config(const std::string_view server_directives,
-                                      const std::string_view shares)
+                                      const std::string_view locations)
 {
-    return "server {\n" + std::string(server_directives) + std::string(shares) + "\n}";
+    return "server {\n" + std::string(server_directives) + std::string(locations) + "\n}";
 }
 
-/// @brief Creates one share block with caller-selected name and body.
-[[nodiscard]] std::string make_share(const std::string_view name, const std::string_view body)
+/// @brief Creates one location block with a caller-selected API path and body.
+[[nodiscard]] std::string make_location(const std::string_view api_path,
+                                        const std::string_view body)
 {
-    return "share \"" + std::string(name) + "\" {\n" + std::string(body) + "\n}\n";
+    return "location \"" + std::string(api_path) + "\" {\n" + std::string(body) + "\n}\n";
 }
 
 /// @brief Returns whether validation output contains one expected semantic category.
@@ -96,10 +97,10 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1200});
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2400});
     CHECK(server.http_timeouts().total == std::chrono::milliseconds{3600});
-    REQUIRE(server.shares().size() == 1);
-    CHECK(std::filesystem::equivalent(server.shares().front().root().path(), directory.path()));
-    CHECK(server.shares().front().permissions() ==
-          sparenode::configuration::runtime::SharePermissions{false, true, true});
+    REQUIRE(server.locations().size() == 1);
+    CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
+    CHECK(server.locations().front().permissions() ==
+          sparenode::configuration::runtime::LocationPermissions{false, true, true});
 }
 
 TEST_CASE("Configuration loader preserves file lexer parser and validation failures",
@@ -174,7 +175,7 @@ TEST_CASE("Configuration loader formats source-located diagnostics", "[configura
 
     CHECK(diagnostic.find(path.generic_string() + ":1:15: error:") != std::string::npos);
     CHECK(diagnostic.find("port must be between 1 and 65535") != std::string::npos);
-    CHECK(diagnostic.find("required share block is missing") != std::string::npos);
+    CHECK(diagnostic.find("at least one filesystem location is required") != std::string::npos);
 }
 
 TEST_CASE("Configuration loader formats both file I/O failure categories",
@@ -290,29 +291,30 @@ TEST_CASE("Configuration loader covers every semantic validation failure categor
     using Code = sparenode::configuration::ConfigValidationErrorCode;
     const sparenode::test::TemporaryDirectory directory("sparenode-config-validation-error");
     const std::string root = directory.path().generic_string();
-    const std::string valid_share = make_share("Documents", "path \"" + root + "\";");
-    const std::string second_share = make_share("Backup", "path \"" + root + "\";");
+    const std::string valid_location = make_location("/api/Documents", "path \"" + root + "\";");
+    const std::string nested_location =
+        make_location("/api/Documents/private", "path \"" + root + "\";");
     const std::vector<std::pair<Code, std::string>> cases{
-        {Code::duplicate_server_directive, make_config("port 8080;\nport 8081;\n", valid_share)},
-        {Code::missing_share, make_config("", "")},
-        {Code::multiple_shares, make_config("", valid_share + second_share)},
-        {Code::invalid_bind_address, make_config("bind \"localhost\";\n", valid_share)},
-        {Code::port_out_of_range, make_config("port 0;\n", valid_share)},
-        {Code::missing_worker_threads, make_config("multithreading true;\n", valid_share)},
-        {Code::unexpected_worker_threads, make_config("worker_threads 4;\n", valid_share)},
+        {Code::duplicate_server_directive, make_config("port 8080;\nport 8081;\n", valid_location)},
+        {Code::missing_location, make_config("", "")},
+        {Code::invalid_bind_address, make_config("bind \"localhost\";\n", valid_location)},
+        {Code::port_out_of_range, make_config("port 0;\n", valid_location)},
+        {Code::missing_worker_threads, make_config("multithreading true;\n", valid_location)},
+        {Code::unexpected_worker_threads, make_config("worker_threads 4;\n", valid_location)},
         {Code::worker_threads_out_of_range,
-         make_config("multithreading true;\nworker_threads 65;\n", valid_share)},
-        {Code::invalid_log_level, make_config("log_level \"trace\";\n", valid_share)},
-        {Code::empty_share_name, make_config("", make_share("", "path \"" + root + "\";"))},
-        {Code::duplicate_share_name, make_config("", valid_share + valid_share)},
-        {Code::duplicate_share_directive,
-         make_config("",
-                     make_share("Documents", "path \"" + root + "\";\npath \"" + root + "\";"))},
-        {Code::missing_share_path, make_config("", make_share("Documents", "read true;"))},
-        {Code::invalid_share_path,
-         make_config(
-             "", make_share("Documents",
-                            "path \"" + (directory.path() / "missing").generic_string() + "\";"))}};
+         make_config("multithreading true;\nworker_threads 65;\n", valid_location)},
+        {Code::invalid_log_level, make_config("log_level \"trace\";\n", valid_location)},
+        {Code::invalid_location_path, make_config("", make_location("", "path \"" + root + "\";"))},
+        {Code::conflicting_location_path, make_config("", valid_location + nested_location)},
+        {Code::duplicate_location_directive,
+         make_config("", make_location("/api/Documents",
+                                       "path \"" + root + "\";\npath \"" + root + "\";"))},
+        {Code::missing_location_root,
+         make_config("", make_location("/api/Documents", "read true;"))},
+        {Code::invalid_location_root,
+         make_config("", make_location("/api/Documents",
+                                       "path \"" + (directory.path() / "missing").generic_string() +
+                                           "\";"))}};
 
     for (const auto &[expected, source] : cases)
     {

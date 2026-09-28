@@ -22,12 +22,12 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - the multithreading switch and configured worker count;
 - the minimum `logging::LogSeverity`;
 - grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
-- an ordered collection of `runtime::ShareConfig` values.
+- an ordered collection of `runtime::LocationConfig` values.
 
-Each share contains its decoded display name, a canonical `SharedRoot`, and independent
+Each location contains its validated HTTP API path, a canonical `SharedRoot`, and independent
 `allow_read`, `allow_write`, and `allow_delete` permissions. Filesystem and HTTP code can
 therefore enforce permissions without interpreting parser directives or validating the
-share path again.
+location path again.
 
 The aggregate runtime types remain convenient for tests and a future settings UI to
 construct programmatically. The persistent-file startup path still uses the validator

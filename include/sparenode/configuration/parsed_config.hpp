@@ -3,21 +3,21 @@
 #include <string>
 #include <vector>
 
+#include "sparenode/configuration/directives/parsed_location_directive.hpp"
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
-#include "sparenode/configuration/directives/parsed_share_directive.hpp"
 #include "sparenode/configuration/source_location.hpp"
 
 namespace sparenode::configuration
 {
 
-/// @brief Represents one parsed `share` block without applying semantic cardinality rules.
-struct ParsedShareBlock
+/// @brief Represents one parsed filesystem-backed `location` block.
+struct ParsedLocationBlock
 {
-    std::string name;                      ///< Once-decoded display name.
-    SourceLocation location;               ///< Position of the `share` keyword.
-    SourceLocation name_location;          ///< Position of the name literal.
+    std::string api_path;                  ///< Once-decoded public HTTP path prefix.
+    SourceLocation location;               ///< Position of the `location` keyword.
+    SourceLocation api_path_location;      ///< Position of the API path literal.
     SourceLocation closing_brace_location; ///< Position of the closing block delimiter.
-    std::vector<directives::ParsedShareDirective> directives; ///< Directives in source order.
+    std::vector<directives::ParsedLocationDirective> directives; ///< Directives in source order.
 };
 
 /// @brief Represents the parsed top-level `server` block.
@@ -26,7 +26,7 @@ struct ParsedServerBlock
     SourceLocation location;               ///< Position of the `server` keyword.
     SourceLocation closing_brace_location; ///< Position of the closing block delimiter.
     std::vector<directives::ParsedServerDirective> directives; ///< Server directives in order.
-    std::vector<ParsedShareBlock> shares;                      ///< Share blocks in source order.
+    std::vector<ParsedLocationBlock> locations; ///< Filesystem locations in source order.
 };
 
 /// @brief Owns the complete syntactic representation of one configuration document.

@@ -7,8 +7,8 @@
 #include <variant>
 #include <vector>
 
+#include "sparenode/configuration/directives/parsed_location_directive.hpp"
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
-#include "sparenode/configuration/directives/parsed_share_directive.hpp"
 #include "sparenode/logging/log_severity.hpp"
 
 namespace sparenode::configuration
@@ -16,8 +16,8 @@ namespace sparenode::configuration
 namespace
 {
 
+using directives::LocationDirectiveKind;
 using directives::ServerDirectiveKind;
-using directives::ShareDirectiveKind;
 
 /// @brief Holds mapper-local server values before immutable runtime construction.
 struct ServerValues
@@ -84,23 +84,23 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
     }
 }
 
-/// @brief Applies one validated share permission while ignoring its consumed path.
+/// @brief Applies one validated location permission while ignoring its consumed root path.
 /// @param[in] directive Parsed directive whose semantic constraints already passed.
 /// @param[in,out] permissions Runtime permission flags receiving the mapped value.
-void apply_share_directive(const directives::ParsedShareDirective &directive,
-                           PermissionValues &permissions)
+void apply_location_directive(const directives::ParsedLocationDirective &directive,
+                              PermissionValues &permissions)
 {
     switch (directive.kind)
     {
-    case ShareDirectiveKind::path:
+    case LocationDirectiveKind::path:
         break;
-    case ShareDirectiveKind::read_permission:
+    case LocationDirectiveKind::read_permission:
         permissions.allow_read = std::get<bool>(directive.value.scalar);
         break;
-    case ShareDirectiveKind::write_permission:
+    case LocationDirectiveKind::write_permission:
         permissions.allow_write = std::get<bool>(directive.value.scalar);
         break;
-    case ShareDirectiveKind::delete_permission:
+    case LocationDirectiveKind::delete_permission:
         permissions.allow_delete = std::get<bool>(directive.value.scalar);
         break;
     }
@@ -109,7 +109,7 @@ void apply_share_directive(const directives::ParsedShareDirective &directive,
 } // namespace
 
 /// @brief Applies validated directives over defaults, preserving HTTP receive budgets.
-/// @return Runtime servers and shares without parser metadata.
+/// @return Runtime servers and locations without parser metadata.
 runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration)
 {
     ServerValues server;
@@ -119,25 +119,25 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
         apply_server_directive(directive, server);
     }
 
-    const auto &roots = configuration.shared_roots();
-    std::vector<runtime::ShareConfig> shares;
-    shares.reserve(parsed_server.shares.size());
-    for (std::size_t index = 0; index < parsed_server.shares.size(); ++index)
+    const auto &roots = configuration.location_roots();
+    std::vector<runtime::LocationConfig> locations;
+    locations.reserve(parsed_server.locations.size());
+    for (std::size_t index = 0; index < parsed_server.locations.size(); ++index)
     {
-        const auto &parsed_share = parsed_server.shares[index];
+        const auto &parsed_location = parsed_server.locations[index];
         PermissionValues permissions;
-        for (const auto &directive : parsed_share.directives)
+        for (const auto &directive : parsed_location.directives)
         {
-            apply_share_directive(directive, permissions);
+            apply_location_directive(directive, permissions);
         }
-        shares.emplace_back(parsed_share.name, roots[index],
-                            runtime::SharePermissions{permissions.allow_read,
-                                                      permissions.allow_write,
-                                                      permissions.allow_delete});
+        locations.emplace_back(parsed_location.api_path, roots[index],
+                               runtime::LocationPermissions{permissions.allow_read,
+                                                            permissions.allow_write,
+                                                            permissions.allow_delete});
     }
     std::vector<runtime::ServerConfig> servers;
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
-                         server.worker_threads, server.minimum_log_severity, std::move(shares),
+                         server.worker_threads, server.minimum_log_severity, std::move(locations),
                          server.http_timeouts);
     return runtime::AppConfig(std::move(servers));
 }
