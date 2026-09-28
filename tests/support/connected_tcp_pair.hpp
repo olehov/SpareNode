@@ -214,6 +214,24 @@ class TestClientSocket final
 #endif
     }
 
+    /// Forces a TCP reset and releases the client socket immediately.
+    /// @return `true` when the abortive-close socket option was installed.
+    [[nodiscard]] bool reset() noexcept
+    {
+        linger option{1, 0};
+#ifdef _WIN32
+        const bool configured =
+            ::setsockopt(socket_, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char *>(&option),
+                         sizeof(option)) == 0;
+#else
+        const bool configured =
+            ::setsockopt(socket_, SOL_SOCKET, SO_LINGER, &option, sizeof(option)) == 0;
+#endif
+        close_test_socket(socket_);
+        socket_ = invalid_test_socket;
+        return configured;
+    }
+
   private:
     NativeTestSocket socket_{invalid_test_socket};
 };

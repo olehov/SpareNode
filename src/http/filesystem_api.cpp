@@ -13,6 +13,7 @@
 
 #include "sparenode/configuration/runtime/location_config.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
+#include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "sparenode/http/http_request.hpp"
 #include "sparenode/http/http_response.hpp"
@@ -27,6 +28,8 @@ using configuration::runtime::LocationConfig;
 using filesystem::DirectoryListingEntry;
 using filesystem::DirectoryListingError;
 using filesystem::DirectoryListingErrorCode;
+using filesystem::FileReadError;
+using filesystem::FileReadErrorCode;
 
 /// @brief Appends one string using JSON escaping without changing valid UTF-8 bytes.
 void append_json_string(std::string &output, const std::string_view value)
@@ -217,9 +220,91 @@ public_error(const DirectoryListingError &error) noexcept
     return {HttpStatusCode::internal_server_error, "internal_error"};
 }
 
-/// @brief Handles one exact or wildcard directory-listing route.
+/// @brief Maps one file-open failure to a public status and stable error identifier.
+[[nodiscard]] std::pair<HttpStatusCode, std::string_view>
+public_error(const FileReadError &error) noexcept
+{
+    switch (error.code)
+    {
+    case FileReadErrorCode::invalid_path:
+        if (error.path_error == filesystem::SafePathErrorCode::outside_shared_root ||
+            error.path_error == filesystem::SafePathErrorCode::resolution_failed ||
+            error.path_error == filesystem::SafePathErrorCode::unsupported_reparse_point)
+        {
+            return {HttpStatusCode::not_found, "not_found"};
+        }
+        return {HttpStatusCode::bad_request, "invalid_path"};
+    case FileReadErrorCode::not_found:
+    case FileReadErrorCode::not_regular_file:
+    case FileReadErrorCode::outside_shared_root:
+        return {HttpStatusCode::not_found, "not_found"};
+    case FileReadErrorCode::permission_denied:
+        return {HttpStatusCode::forbidden, "permission_denied"};
+    case FileReadErrorCode::filesystem_failure:
+    case FileReadErrorCode::cancelled:
+    case FileReadErrorCode::resource_allocation_failed:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
+/// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-handle_listing(const LocationConfig &location, const std::string_view requested_path)
+make_file_response(filesystem::FileReadStream stream)
+{
+    const auto content_length = stream.size();
+    HttpBodyReader reader = [stream = std::move(stream)](const std::span<std::byte> destination,
+                                                         const std::stop_token &stop_token) mutable
+        -> Result<std::size_t, HttpBodyReadError>
+    {
+        auto chunk = stream.read(destination, stop_token);
+        if (chunk)
+        {
+            return chunk.value();
+        }
+        const auto &error = chunk.error();
+        const auto domain = error.code == FileReadErrorCode::cancelled
+                                ? HttpBodyReadErrorDomain::cancellation
+                                : HttpBodyReadErrorDomain::filesystem;
+        return unexpected(HttpBodyReadError{domain, static_cast<int>(error.code)});
+    };
+    auto response = HttpResponse::create_streaming(HttpStatusCode::ok, "OK",
+                                                   {{"Content-Type", "application/octet-stream"}},
+                                                   content_length, std::move(reader));
+    if (!response)
+    {
+        return unexpected(HttpRouteError{HttpRouteErrorCode::response_validation_failure,
+                                         static_cast<int>(response.error().code)});
+    }
+    return std::move(response).value();
+}
+
+/// @brief Creates a JSON response from one public status and error identifier.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+make_public_error_response(const std::pair<HttpStatusCode, std::string_view> public_failure)
+{
+    const auto [status, identifier] = public_failure;
+    std::string body("{\"error\":");
+    append_json_string(body, identifier);
+    body.push_back('}');
+    return make_json_response(status, body);
+}
+
+/// @brief Opens one file request and creates its streaming response.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_file(const LocationConfig &location, const std::string_view requested_path)
+{
+    auto file = filesystem::FileReadStream::open(location.root(), requested_path);
+    if (!file)
+    {
+        return make_public_error_response(public_error(file.error()));
+    }
+    return make_file_response(std::move(file).value());
+}
+
+/// @brief Handles one exact or wildcard directory-listing or file-download route.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_resource(const LocationConfig &location, const std::string_view requested_path)
 {
     try
     {
@@ -230,11 +315,11 @@ handle_listing(const LocationConfig &location, const std::string_view requested_
         const auto listing = filesystem::list_directory(location.root(), requested_path);
         if (!listing)
         {
-            const auto [status, identifier] = public_error(listing.error());
-            std::string body("{\"error\":");
-            append_json_string(body, identifier);
-            body.push_back('}');
-            return make_json_response(status, body);
+            if (listing.error().code == DirectoryListingErrorCode::not_directory)
+            {
+                return handle_file(location, requested_path);
+            }
+            return make_public_error_response(public_error(listing.error()));
         }
         return make_json_response(HttpStatusCode::ok, serialize_listing(listing.value()));
     }
@@ -264,7 +349,7 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
             auto exact = router.register_route(
                 HttpMethod::get, location.api_path(),
                 [location](const HttpRequestView &, const HttpRouteParameters &)
-                { return handle_listing(location, {}); });
+                { return handle_resource(location, {}); });
             if (!exact)
             {
                 return unexpected(FilesystemApiError{
@@ -275,7 +360,7 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
             auto nested = router.register_route(
                 HttpMethod::get, nested_path,
                 [location](const HttpRequestView &, const HttpRouteParameters &parameters)
-                { return handle_listing(location, parameters.wildcard_suffix()); });
+                { return handle_resource(location, parameters.wildcard_suffix()); });
             if (!nested)
             {
                 return unexpected(FilesystemApiError{
