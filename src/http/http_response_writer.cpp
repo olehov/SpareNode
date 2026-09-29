@@ -47,7 +47,9 @@ constexpr std::uint16_t minimum_response_status_code = 100;
 class BodyReleaseGuard final
 {
   public:
-    /// @brief Selects whether this transmission consumes the response body.
+    /// @brief Selects whether the writer will consume the response body.
+    /// @param[in,out] response Response that owns the streaming source.
+    /// @param[in] active Whether this transmission consumes a streaming body.
     BodyReleaseGuard(HttpResponse &response, const bool active) noexcept
         : response_(active ? &response : nullptr)
     {

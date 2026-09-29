@@ -53,18 +53,25 @@ producing a truncated response.
 
 The body reader may retain a file, generator, or other move-only cursor. It must
 not report more bytes than the supplied destination can hold. Reader errors and
-exceptions are contained as structured `HttpResponseWriteError` values.
+exceptions are contained as structured `HttpResponseWriteError` values. After a
+non-HEAD transmission succeeds or terminates with an error, the writer immediately
+destroys the reader and releases resources captured by it. This happens even while
+the consumed `HttpResponse` object remains in scope.
 
 ## Network behavior
 
 `write_http_response()` retries partial TCP sends until each supplied span is
-complete. The same stop token is passed to the TCP connection and streaming body
-reader, so application shutdown can cancel either boundary. Network failures,
-body-source failures, invalid source results, early end-of-body, and allocation
-failures remain distinguishable.
+complete before asking the body reader for another chunk. A slow client therefore
+applies TCP backpressure to the current 16 KiB span instead of causing the server
+to accumulate queued body chunks. The same stop token is passed to the TCP connection
+and streaming body reader, so application shutdown can cancel either boundary.
+Network failures, body-source failures, invalid source results, early end-of-body,
+and allocation failures remain distinguishable.
 
-One streaming response is a one-shot value: transmitting it advances its owned
-reader. A failed or completed streaming response must not be transmitted again.
+One streaming response is a one-shot value: transmitting it advances and then
+releases its owned reader. A failed or completed streaming response must not be
+transmitted again.
+
 Request deadlines and routing belong to the HTTP session layer. It passes the
 original request method to `write_http_response()`. For HEAD, the writer sends the
 same serialized response head, including the selected representation's Content-Length,
@@ -73,10 +80,11 @@ invocation. Existing bodyless-status rules still omit Content-Length for 204/304
 The default writer method is GET for callers that do not supply request context.
 
 For large files, construct a known-length streaming response using representation
-metadata and a lazy body reader. Open the transfer handle inside that reader when
-possible; HEAD never calls it. Response construction and authorization still run.
-The transport cannot prevent eager file I/O or other work inside an endpoint handler.
-Explicit HEAD handlers must describe the GET representation, not substitute a zero
-length simply because HEAD sends no content.
+metadata and a lazy body reader. The filesystem API opens a confined handle to obtain
+the exact representation length and transfers that handle into the reader. HEAD never
+invokes the reader; destroying its response still releases the retained handle.
+Response construction and authorization still run. Explicit HEAD handlers must
+describe the GET representation, not substitute a zero length simply because HEAD
+sends no content.
 
 These semantics follow [RFC 9110 section 9.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2).
