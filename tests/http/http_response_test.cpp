@@ -342,9 +342,37 @@ TEST_CASE("HTTP response writer bounds multi-gigabyte streams and releases inter
     CHECK(sparenode::http::serialize_http_response_head(response).contains(
         "Content-Length: 5368709120\r\n"));
     auto pair = sparenode::test::create_connected_tcp_pair();
+    std::stop_source writer_stop_source;
+    constexpr std::size_t stream_chunk_bytes = std::size_t{16} * 1024;
+    constexpr std::size_t chunks_before_interruption = 2;
+    constexpr std::size_t produced_body_bytes = chunks_before_interruption * stream_chunk_bytes;
+    const std::size_t expected_wire_bytes =
+        sparenode::http::serialize_http_response_head(response).size() + produced_body_bytes;
+    constexpr auto test_timeout = std::chrono::seconds{5};
 
-    const auto result = sparenode::http::write_http_response(pair.server, response);
+    auto writer = std::async(std::launch::async,
+                             [&pair, &response, &writer_stop_source]
+                             {
+                                 return sparenode::http::write_http_response(
+                                     pair.server, response, writer_stop_source.get_token());
+                             });
+    const auto received = receive_exact_within(pair.client, expected_wire_bytes, test_timeout);
+    if (!received.has_value())
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+    }
 
+    bool writer_finished = writer.wait_for(test_timeout) == std::future_status::ready;
+    if (!writer_finished)
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+        writer_finished = writer.wait_for(test_timeout) == std::future_status::ready;
+    }
+    REQUIRE(writer_finished);
+
+    const auto result = writer.get();
     REQUIRE_FALSE(result);
     CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::body_source_failure);
     const auto &body_error = sparenode::test::require_optional(result.error().body_error);
