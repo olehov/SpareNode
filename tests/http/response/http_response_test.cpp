@@ -1,0 +1,588 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "sparenode/http/response/detail/response_date.hpp"
+#include "sparenode/http/response/http_response.hpp"
+#include "sparenode/http/response/http_response_writer.hpp"
+#include "support/connected_tcp_pair.hpp"
+#include "support/optional.hpp"
+#include "support/temporary_directory.hpp"
+
+namespace
+{
+
+using HttpStatusCode = sparenode::http::HttpStatusCode;
+
+[[nodiscard]] std::vector<std::byte> bytes_of(const std::string_view text)
+{
+    const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
+    return {bytes.begin(), bytes.end()};
+}
+
+[[nodiscard]] std::string receive_exact(const sparenode::test::TestClientSocket &client,
+                                        const std::size_t expected_size)
+{
+    std::vector<std::byte> received(expected_size);
+    std::size_t offset = 0;
+    while (offset < received.size())
+    {
+        const std::ptrdiff_t count = client.receive(std::span(received).subspan(offset));
+        REQUIRE(count > 0);
+        offset += static_cast<std::size_t>(count);
+    }
+    return {reinterpret_cast<const char *>(received.data()), received.size()};
+}
+
+[[nodiscard]] std::optional<std::string>
+receive_exact_within(const sparenode::test::TestClientSocket &client,
+                     const std::size_t expected_size, const std::chrono::milliseconds timeout)
+{
+    std::vector<std::byte> received(expected_size);
+    std::size_t offset = 0;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (offset < received.size())
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+        {
+            return std::nullopt;
+        }
+        const auto remaining =
+            (std::max)(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now),
+                       std::chrono::milliseconds{1});
+        const auto count = client.receive_within(std::span(received).subspan(offset), remaining);
+        if (!count.has_value() || count.value() <= 0)
+        {
+            return std::nullopt;
+        }
+        offset += static_cast<std::size_t>(count.value());
+    }
+    return std::string(reinterpret_cast<const char *>(received.data()), received.size());
+}
+
+using HttpResponseWriteResult = sparenode::Result<void, sparenode::http::HttpResponseWriteError>;
+
+/// @brief Captures a deadline-bounded writer result and the bytes drained by its peer.
+struct TimedResponseWrite
+{
+    std::optional<std::string> received;           ///< Exact requested wire prefix, when received.
+    std::optional<HttpResponseWriteResult> result; ///< Writer result, when it stopped in time.
+};
+
+/// @brief Runs one response writer while draining its peer to avoid socket-buffer dependence.
+[[nodiscard]] TimedResponseWrite write_and_receive_within(sparenode::http::HttpResponse &response,
+                                                          const std::size_t expected_wire_bytes,
+                                                          const std::chrono::milliseconds timeout)
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    std::stop_source writer_stop_source;
+    auto writer = std::async(std::launch::async,
+                             [&pair, &response, &writer_stop_source]
+                             {
+                                 return sparenode::http::write_http_response(
+                                     pair.server, response, writer_stop_source.get_token());
+                             });
+    auto received = receive_exact_within(pair.client, expected_wire_bytes, timeout);
+    if (!received.has_value())
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+    }
+
+    bool writer_finished = writer.wait_for(timeout) == std::future_status::ready;
+    if (!writer_finished)
+    {
+        static_cast<void>(writer_stop_source.request_stop());
+        pair.client.shutdown();
+        writer_finished = writer.wait_for(timeout) == std::future_status::ready;
+    }
+    if (!writer_finished)
+    {
+        return {std::move(received), std::nullopt};
+    }
+    return {std::move(received), writer.get()};
+}
+
+[[nodiscard]] sparenode::http::HttpResponse make_memory_response(const std::string_view body)
+{
+    auto result = sparenode::http::HttpResponse::create(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "text/plain"}}, bytes_of(body));
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
+} // namespace
+
+TEST_CASE("HTTP response validates status fields and managed framing", "[http][response]")
+{
+    using Code = sparenode::http::HttpResponseValidationErrorCode;
+
+    const HttpStatusCode invalid_status_code{};
+    const auto invalid_status =
+        sparenode::http::HttpResponse::create(invalid_status_code, "Invalid", {}, {});
+    const auto invalid_reason =
+        sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK\r\nInjected", {}, {});
+    const auto invalid_name = sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK",
+                                                                    {{"Bad Header", "value"}}, {});
+    const auto invalid_value =
+        sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK", {{"X-Test", "a\nb"}}, {});
+    const auto content_length = sparenode::http::HttpResponse::create(
+        HttpStatusCode::ok, "OK", {{"content-length", "0"}}, {});
+    const auto forbidden_body = sparenode::http::HttpResponse::create(
+        HttpStatusCode::no_content, "No Content", {}, bytes_of("x"));
+    const auto forbidden_stream = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::reset_content, "Reset Content", {}, 0,
+        [](std::span<std::byte>, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { return 0; });
+
+    REQUIRE_FALSE(invalid_status.has_value());
+    CHECK(invalid_status.error().code == Code::invalid_status_code);
+    REQUIRE_FALSE(invalid_reason.has_value());
+    CHECK(invalid_reason.error().code == Code::invalid_reason_phrase);
+    REQUIRE_FALSE(invalid_name.has_value());
+    CHECK(invalid_name.error().code == Code::invalid_header_name);
+    REQUIRE_FALSE(invalid_value.has_value());
+    CHECK(invalid_value.error().code == Code::invalid_header_value);
+    REQUIRE_FALSE(content_length.has_value());
+    CHECK(content_length.error().code == Code::managed_framing_header);
+    REQUIRE_FALSE(forbidden_body.has_value());
+    CHECK(forbidden_body.error().code == Code::body_not_allowed);
+    REQUIRE_FALSE(forbidden_stream.has_value());
+    CHECK(forbidden_stream.error().code == Code::body_not_allowed);
+}
+
+TEST_CASE("HTTP response enforces bounded owned state", "[http][response][limits]")
+{
+    using Code = sparenode::http::HttpResponseValidationErrorCode;
+
+    std::vector<sparenode::http::HttpResponseHeader> headers(
+        sparenode::http::HttpResponse::maximum_header_count + 1, {"X-Test", "value"});
+    const auto too_many =
+        sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK", std::move(headers), {});
+    std::vector<std::byte> body(sparenode::http::HttpResponse::maximum_memory_body_bytes + 1);
+    const auto too_large =
+        sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK", {}, std::move(body));
+    const auto head_too_large = sparenode::http::HttpResponse::create(
+        HttpStatusCode::ok, std::string(sparenode::http::HttpResponse::maximum_head_bytes, 'r'), {},
+        {});
+    const auto missing_reader = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1, sparenode::http::HttpBodyReader{});
+
+    REQUIRE_FALSE(too_many.has_value());
+    CHECK(too_many.error().code == Code::too_many_headers);
+    REQUIRE_FALSE(too_large.has_value());
+    CHECK(too_large.error().code == Code::memory_body_too_large);
+    REQUIRE_FALSE(head_too_large.has_value());
+    CHECK(head_too_large.error().code == Code::response_head_too_large);
+    REQUIRE_FALSE(missing_reader.has_value());
+    CHECK(missing_reader.error().code == Code::missing_body_reader);
+}
+
+TEST_CASE("HTTP response head serialization generates exact framing", "[http][response]")
+{
+    auto response = make_memory_response("hello");
+    CHECK(sparenode::http::serialize_http_response_head(response) ==
+          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: "
+          "close\r\nDate: " +
+              std::string(response.date_value()) + "\r\n\r\n");
+
+    auto no_content_result = sparenode::http::HttpResponse::create(
+        HttpStatusCode::no_content, "No Content", {{"X-Test", "yes"}}, {});
+    REQUIRE(no_content_result.has_value());
+    CHECK(sparenode::http::serialize_http_response_head(no_content_result.value()) ==
+          "HTTP/1.1 204 No Content\r\nX-Test: yes\r\nConnection: close\r\nDate: " +
+              std::string(no_content_result->date_value()) + "\r\n\r\n");
+}
+
+TEST_CASE("HTTP response writer sends an in-memory response completely",
+          "[http][response][network]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    auto response = make_memory_response("hello");
+    const std::string expected = sparenode::http::serialize_http_response_head(response) + "hello";
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE(result.has_value());
+    CHECK(receive_exact(pair.client, expected.size()) == expected);
+}
+
+TEST_CASE("HTTP response writer streams through a fixed caller-bounded destination",
+          "[http][response][streaming]")
+{
+    std::string payload(40000, 's');
+    std::size_t source_offset = 0;
+    std::size_t largest_destination = 0;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, payload.size(),
+        [&payload, &source_offset, &largest_destination](const std::span<std::byte> destination,
+                                                         const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            largest_destination = (std::max)(largest_destination, destination.size());
+            const std::size_t count =
+                (std::min)(destination.size(), payload.size() - source_offset);
+            for (std::size_t index = 0; index < count; ++index)
+            {
+                destination[index] = static_cast<std::byte>(payload[source_offset + index]);
+            }
+            source_offset += count;
+            return count;
+        });
+    REQUIRE(response_result.has_value());
+    auto response = std::move(response_result).value();
+    const std::string expected = sparenode::http::serialize_http_response_head(response) + payload;
+    constexpr auto test_timeout = std::chrono::seconds{5};
+
+    auto transfer = write_and_receive_within(response, expected.size(), test_timeout);
+    const auto &result = sparenode::test::require_optional(transfer.result);
+    REQUIRE(result.has_value());
+    const auto &complete_response = sparenode::test::require_optional(transfer.received);
+    CHECK(source_offset == payload.size());
+    CHECK(largest_destination <= std::size_t{16} * 1024);
+    CHECK(complete_response == expected);
+}
+
+TEST_CASE("HTTP response writer incrementally transfers an owned file stream",
+          "[http][response][streaming][filesystem]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-response-stream");
+    const auto file_path = directory.path() / "payload.bin";
+    std::string payload(40000, 'f');
+    {
+        std::ofstream output(file_path, std::ios::binary);
+        REQUIRE(output.write(payload.data(), static_cast<std::streamsize>(payload.size())));
+    }
+    auto input = std::make_unique<std::ifstream>(file_path, std::ios::binary);
+    REQUIRE(*input);
+    std::size_t largest_destination = 0;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, payload.size(),
+        [input = std::move(input), &largest_destination](const std::span<std::byte> destination,
+                                                         const std::stop_token &stop_token) mutable
+        -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            if (stop_token.stop_requested())
+            {
+                return sparenode::unexpected(sparenode::http::HttpBodyReadError{
+                    sparenode::http::HttpBodyReadErrorDomain::cancellation, 0});
+            }
+            largest_destination = (std::max)(largest_destination, destination.size());
+            input->read(reinterpret_cast<char *>(destination.data()),
+                        static_cast<std::streamsize>(destination.size()));
+            if (input->bad())
+            {
+                return sparenode::unexpected(sparenode::http::HttpBodyReadError{
+                    sparenode::http::HttpBodyReadErrorDomain::filesystem, 0});
+            }
+            return static_cast<std::size_t>(input->gcount());
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    const std::string expected = sparenode::http::serialize_http_response_head(response) + payload;
+    constexpr auto test_timeout = std::chrono::seconds{5};
+
+    auto transfer = write_and_receive_within(response, expected.size(), test_timeout);
+    REQUIRE(sparenode::test::require_optional(transfer.result));
+    CHECK(sparenode::test::require_optional(transfer.received) == expected);
+    CHECK(largest_destination <= std::size_t{16} * 1024);
+    CHECK_FALSE(response.is_streaming());
+    CHECK(std::filesystem::remove(file_path));
+}
+
+TEST_CASE("HTTP response writer bounds multi-gigabyte streams and releases interrupted sources",
+          "[http][response][streaming][cancel]")
+{
+    constexpr std::uint64_t representation_bytes = std::uint64_t{5} * 1024 * 1024 * 1024;
+    constexpr int interruption_code = 77;
+    std::size_t reads = 0;
+    std::size_t largest_destination = 0;
+    auto resource = std::make_shared<int>(1);
+    const std::weak_ptr<int> resource_lifetime = resource;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}},
+        representation_bytes,
+        [resource = std::move(resource), &reads,
+         &largest_destination](const std::span<std::byte> destination, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            static_cast<void>(resource);
+            largest_destination = (std::max)(largest_destination, destination.size());
+            ++reads;
+            if (reads > 2)
+            {
+                return sparenode::unexpected(sparenode::http::HttpBodyReadError{
+                    sparenode::http::HttpBodyReadErrorDomain::cancellation, interruption_code});
+            }
+            std::ranges::fill(destination, std::byte{0x5A});
+            return destination.size();
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    CHECK(sparenode::http::serialize_http_response_head(response).contains(
+        "Content-Length: 5368709120\r\n"));
+    constexpr std::size_t stream_chunk_bytes = std::size_t{16} * 1024;
+    constexpr std::size_t chunks_before_interruption = 2;
+    constexpr std::size_t produced_body_bytes = chunks_before_interruption * stream_chunk_bytes;
+    const std::size_t expected_wire_bytes =
+        sparenode::http::serialize_http_response_head(response).size() + produced_body_bytes;
+    constexpr auto test_timeout = std::chrono::seconds{5};
+
+    auto transfer = write_and_receive_within(response, expected_wire_bytes, test_timeout);
+    const auto &result = sparenode::test::require_optional(transfer.result);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::body_source_failure);
+    const auto &body_error = sparenode::test::require_optional(result.error().body_error);
+    CHECK(body_error.domain == sparenode::http::HttpBodyReadErrorDomain::cancellation);
+    CHECK(body_error.code == interruption_code);
+    CHECK(reads == 3);
+    CHECK(largest_destination == std::size_t{16} * 1024);
+    CHECK(resource_lifetime.expired());
+    CHECK_FALSE(response.is_streaming());
+}
+
+TEST_CASE("HTTP response writer preserves body source failures", "[http][response][error]")
+{
+    const sparenode::http::HttpBodyReadError expected_error{
+        sparenode::http::HttpBodyReadErrorDomain::filesystem, 17};
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [expected_error](std::span<std::byte>, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        { return sparenode::unexpected(expected_error); });
+    REQUIRE(response_result.has_value());
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::body_source_failure);
+    const auto &body_error = sparenode::test::require_optional(result.error().body_error);
+    CHECK(body_error.domain == expected_error.domain);
+    CHECK(body_error.code == expected_error.code);
+}
+
+TEST_CASE("HTTP response writer rejects an early streaming EOF", "[http][response][error]")
+{
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [](std::span<std::byte>, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { return 0; });
+    REQUIRE(response_result.has_value());
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::body_ended_early);
+}
+
+TEST_CASE("HTTP response writer rejects an invalid body source count", "[http][response][error]")
+{
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [](const std::span<std::byte> destination, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        { return destination.size() + 1; });
+    REQUIRE(response_result.has_value());
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code ==
+          sparenode::http::HttpResponseWriteErrorCode::body_source_contract_violation);
+}
+
+TEST_CASE("HTTP response writer preserves a connection write failure",
+          "[http][response][network][error]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    auto open_connection = std::move(pair.server);
+    auto response = make_memory_response("hello");
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
+    const auto &network_error = sparenode::test::require_optional(result.error().network_error);
+    CHECK(network_error.domain == sparenode::network::NetworkErrorDomain::state);
+    CHECK(open_connection.is_open());
+}
+
+TEST_CASE("HTTP response writer releases a streaming resource after client disconnection",
+          "[http][response][streaming][network][error]")
+{
+    auto resource = std::make_shared<int>(1);
+    const std::weak_ptr<int> resource_lifetime = resource;
+    constexpr std::uint64_t large_body_size = std::uint64_t{5} * 1024 * 1024 * 1024;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, large_body_size,
+        [resource = std::move(resource)](const std::span<std::byte> destination,
+                                         const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            static_cast<void>(resource);
+            std::ranges::fill(destination, std::byte{0x5A});
+            return destination.size();
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(pair.client.reset());
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
+    CHECK(resource_lifetime.expired());
+    CHECK_FALSE(response.is_streaming());
+}
+
+TEST_CASE("HTTP response writer contains body source exceptions", "[http][response][error]")
+{
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [](std::span<std::byte>, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { throw 17; });
+    REQUIRE(response_result.has_value());
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+
+    const auto result = sparenode::http::write_http_response(pair.server, response);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code ==
+          sparenode::http::HttpResponseWriteErrorCode::body_source_exception);
+}
+
+TEST_CASE("HTTP response writer preserves cancellation before transmission",
+          "[http][response][cancel]")
+{
+    auto response = make_memory_response("hello");
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    std::stop_source stop_source;
+    REQUIRE(stop_source.request_stop());
+
+    const auto result =
+        sparenode::http::write_http_response(pair.server, response, stop_source.get_token());
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
+    const auto &network_error = sparenode::test::require_optional(result.error().network_error);
+    CHECK(network_error.domain == sparenode::network::NetworkErrorDomain::cancellation);
+}
+
+TEST_CASE("HTTP response error descriptions cover every category", "[http][response]")
+{
+    using Code = sparenode::http::HttpResponseWriteErrorCode;
+    CHECK(std::string_view(sparenode::http::to_string(Code::network_failure)).starts_with("HTTP"));
+    CHECK(
+        std::string_view(sparenode::http::to_string(Code::connection_closed)).starts_with("HTTP"));
+    CHECK(std::string_view(sparenode::http::to_string(Code::body_source_failure))
+              .starts_with("HTTP"));
+    CHECK(std::string_view(sparenode::http::to_string(Code::body_source_exception))
+              .starts_with("HTTP"));
+    CHECK(std::string_view(sparenode::http::to_string(Code::body_source_contract_violation))
+              .starts_with("HTTP"));
+    CHECK(std::string_view(sparenode::http::to_string(Code::body_ended_early)).starts_with("HTTP"));
+    CHECK(std::string_view(sparenode::http::to_string(Code::resource_allocation_failed))
+              .starts_with("HTTP"));
+}
+
+TEST_CASE("HTTP response connection policy belongs to the transport", "[http][response][close]")
+{
+    using Code = sparenode::http::HttpResponseValidationErrorCode;
+    for (const auto name : {"Connection", "cOnNeCtIoN", "Keep-Alive"})
+    {
+        auto rejected = sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK",
+                                                              {{name, "keep-alive"}}, {});
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == Code::managed_connection_header);
+    }
+    for (const auto status : {100, 103, 200, 204, 205, 304, 404, 500})
+    {
+        auto response = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {}, {});
+        REQUIRE(response);
+        const auto head = sparenode::http::serialize_http_response_head(response.value());
+        CHECK(head.contains("Connection: close\r\n") == (status >= 200));
+    }
+}
+
+TEST_CASE("HTTP response head boundary includes generated connection policy",
+          "[http][response][close]")
+{
+    for (const auto status : {200, 204, 205, 304})
+    {
+        auto baseline = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {{"X-Pad", ""}}, {});
+        REQUIRE(baseline);
+        const auto padding = sparenode::http::HttpResponse::maximum_head_bytes -
+                             sparenode::http::serialize_http_response_head(baseline.value()).size();
+        auto exact =
+            sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status), "Test",
+                                                  {{"X-Pad", std::string(padding, 'x')}}, {});
+        REQUIRE(exact);
+        CHECK(sparenode::http::serialize_http_response_head(exact.value()).size() ==
+              sparenode::http::HttpResponse::maximum_head_bytes);
+        auto oversized =
+            sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status), "Test",
+                                                  {{"X-Pad", std::string(padding + 1, 'x')}}, {});
+        REQUIRE_FALSE(oversized);
+        CHECK(oversized.error().code ==
+              sparenode::http::HttpResponseValidationErrorCode::response_head_too_large);
+    }
+}
+
+TEST_CASE("HTTP Date uses stable UTC IMF-fixdate formatting", "[http][response][date]")
+{
+    using namespace std::chrono;
+    CHECK(sparenode::http::detail::format_response_date(system_clock::time_point{}) ==
+          "Thu, 01 Jan 1970 00:00:00 GMT");
+    CHECK(sparenode::http::detail::format_response_date(system_clock::time_point{} - seconds{1}) ==
+          "Wed, 31 Dec 1969 23:59:59 GMT");
+    CHECK(sparenode::http::detail::format_response_date(sys_days{year{1994} / 11 / 6} + hours{8} +
+                                                        minutes{49} + seconds{37}) ==
+          "Sun, 06 Nov 1994 08:49:37 GMT");
+    CHECK(sparenode::http::detail::format_response_date(sys_days{year{2000} / 2 / 29}) ==
+          "Tue, 29 Feb 2000 00:00:00 GMT");
+    for (const auto status : {100, 200, 204, 301, 304, 400, 500})
+    {
+        auto response = sparenode::http::HttpResponse::create(static_cast<HttpStatusCode>(status),
+                                                              "Test", {}, {});
+        REQUIRE(response);
+        const auto wire = sparenode::http::serialize_http_response_head(response.value());
+        CHECK(wire.contains("\r\nDate: ") == (status >= 200));
+        CHECK(response->date_value().size() == (status >= 200 ? 29 : 0));
+        CHECK(sparenode::http::serialize_http_response_head(response.value()) == wire);
+    }
+    for (const auto name : {"Date", "dAtE"})
+    {
+        auto response = sparenode::http::HttpResponse::create(HttpStatusCode::ok, "OK",
+                                                              {{name, "bad date"}}, {});
+        REQUIRE_FALSE(response);
+        CHECK(response.error().code ==
+              sparenode::http::HttpResponseValidationErrorCode::managed_date_header);
+    }
+}

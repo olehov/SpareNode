@@ -8,7 +8,7 @@
 #include <utility>
 #include <variant>
 
-#include "sparenode/http/http_request_timeouts.hpp"
+#include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/logging/log_severity.hpp"
 
 #ifdef _WIN32

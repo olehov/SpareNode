@@ -49,19 +49,19 @@ add_library(sparenode_core STATIC
     src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/directory_listing.cpp
     src/filesystem/safe_path.cpp
-    src/http/filesystem_api.cpp
-    src/http/http_connection_handler.cpp
-    src/http/http_request.cpp
-    src/http/http_request_parser.cpp
-    src/http/http_body_decoder.cpp
-    src/http/detail/host_authority.cpp
-    src/http/detail/request_target.cpp
-    src/http/detail/response_date.cpp
-    src/http/detail/request_deadlines.cpp
-    src/http/detail/buffered_request.cpp
-    src/http/http_router.cpp
-    src/http/http_response.cpp
-    src/http/http_response_writer.cpp
+    src/http/api/filesystem_api.cpp
+    src/http/session/http_connection_handler.cpp
+    src/http/request/http_request.cpp
+    src/http/request/http_request_parser.cpp
+    src/http/request/http_body_decoder.cpp
+    src/http/request/detail/host_authority.cpp
+    src/http/request/detail/request_target.cpp
+    src/http/response/detail/response_date.cpp
+    src/http/session/detail/request_deadlines.cpp
+    src/http/session/detail/buffered_request.cpp
+    src/http/routing/http_router.cpp
+    src/http/response/http_response.cpp
+    src/http/response/http_response_writer.cpp
     src/logging/console_log_sink.cpp
     src/logging/logger.cpp
     src/logging/log_severity.cpp
