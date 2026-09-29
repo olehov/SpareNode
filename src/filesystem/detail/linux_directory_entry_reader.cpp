@@ -1,3 +1,5 @@
+#include "path_containment.hpp"
+#include "posix_file_descriptor.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 
 #ifndef _WIN32
@@ -19,92 +21,6 @@ namespace sparenode::filesystem::detail
 namespace
 {
 
-/// @brief Owns one POSIX file descriptor.
-class FileDescriptor final
-{
-  public:
-    /// @brief Takes ownership of a descriptor returned by open or openat.
-    explicit FileDescriptor(const int descriptor) noexcept : descriptor_(descriptor)
-    {
-    }
-
-    FileDescriptor(const FileDescriptor &) = delete;
-    FileDescriptor &operator=(const FileDescriptor &) = delete;
-
-    /// @brief Transfers descriptor ownership.
-    FileDescriptor(FileDescriptor &&other) noexcept
-        : descriptor_(std::exchange(other.descriptor_, -1))
-    {
-    }
-
-    FileDescriptor &operator=(FileDescriptor &&) = delete;
-
-    /// @brief Closes the owned descriptor.
-    ~FileDescriptor()
-    {
-        if (descriptor_ >= 0)
-        {
-            static_cast<void>(::close(descriptor_));
-        }
-    }
-
-    /// @brief Returns the descriptor without releasing ownership.
-    [[nodiscard]] int get() const noexcept
-    {
-        return descriptor_;
-    }
-
-  private:
-    int descriptor_{-1}; ///< Owned descriptor, or -1 after ownership transfer.
-};
-
-/// @brief Captures the current errno value as a portable error code.
-[[nodiscard]] std::error_code last_system_error() noexcept
-{
-    return {errno, std::generic_category()};
-}
-
-/// @brief Gives a root path a distinct type at containment call sites.
-struct PathBoundary
-{
-    const std::filesystem::path &path; ///< Canonical root required as a complete prefix.
-};
-
-/// @brief Checks component-wise containment for canonical absolute paths.
-[[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const PathBoundary root) noexcept
-{
-    auto candidate_component = candidate.begin();
-    for (const auto &root_component : root.path)
-    {
-        if (candidate_component == candidate.end() || *candidate_component != root_component)
-        {
-            return false;
-        }
-        ++candidate_component;
-    }
-    return true;
-}
-
-/// @brief Resolves the stable object currently owned by a Linux descriptor.
-[[nodiscard]] Result<std::filesystem::path, std::error_code>
-descriptor_path(const FileDescriptor &descriptor)
-{
-    const auto proc_path =
-        std::filesystem::path("/proc/self/fd") / std::to_string(descriptor.get());
-    std::error_code error;
-    auto path = std::filesystem::read_symlink(proc_path, error);
-    if (error)
-    {
-        return unexpected(error);
-    }
-    if (!path.is_absolute())
-    {
-        return unexpected(std::make_error_code(std::errc::operation_not_permitted));
-    }
-    return path.lexically_normal();
-}
-
 /// @brief Opens a stable directory descriptor without following its final component.
 [[nodiscard]] Result<FileDescriptor, std::error_code>
 open_directory(const std::filesystem::path &path)
@@ -112,7 +28,7 @@ open_directory(const std::filesystem::path &path)
     const auto descriptor = ::open(path.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (descriptor < 0)
     {
-        return unexpected(last_system_error());
+        return unexpected(last_posix_error());
     }
     return FileDescriptor(descriptor);
 }

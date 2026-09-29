@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "detail/path_containment.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
 #ifdef _WIN32
 #include "detail/windows_path_inspector.hpp"
@@ -87,43 +88,6 @@ namespace
     return true;
 }
 
-/// @brief Compares two native path components under host filesystem name rules.
-/// @param[in] left First component to compare.
-/// @param[in] right Second component to compare.
-/// @return `true` when both components name the same native path element.
-[[nodiscard]] bool path_component_equal(const std::filesystem::path &left,
-                                        const std::filesystem::path &right) noexcept
-{
-    return left == right;
-}
-
-/// @brief Gives a root path a distinct type at containment call sites.
-struct PathBoundary
-{
-    const std::filesystem::path &path; ///< Absolute root prefix required for containment.
-};
-
-/// @brief Checks path containment using complete native path components.
-/// @param[in] candidate Absolute path whose prefix is inspected.
-/// @param[in] root Absolute root required as the complete prefix.
-/// @return `true` when candidate is the root or one of its descendants.
-[[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const PathBoundary root) noexcept
-{
-    auto candidate_component = candidate.begin();
-    for (const auto &root_component : root.path)
-    {
-        if (candidate_component == candidate.end() ||
-            !path_component_equal(*candidate_component, root_component))
-        {
-            return false;
-        }
-        ++candidate_component;
-    }
-
-    return true;
-}
-
 /// @brief Resolves one existing object using the host's native path semantics.
 /// @param[in] path Existing filesystem path to canonicalize.
 /// @return Fully resolved path or a fail-closed resolution error.
@@ -169,8 +133,8 @@ recheck_root(const configuration::SharedRoot &shared_root)
         return unexpected(inspected_root.error());
     }
     auto resolved = std::move(inspected_root).value();
-    if (!is_within_root(resolved, PathBoundary{shared_root.path()}) ||
-        !is_within_root(shared_root.path(), PathBoundary{resolved}))
+    if (!detail::is_within_root(resolved, detail::PathBoundary{shared_root.path()}) ||
+        !detail::is_within_root(shared_root.path(), detail::PathBoundary{resolved}))
     {
         return unexpected(SafePathErrorCode::outside_shared_root);
     }
@@ -234,7 +198,7 @@ resolve_existing_prefixes(const std::filesystem::path &candidate,
             return unexpected(inspected_path.error());
         }
         resolved = std::move(inspected_path).value();
-        if (!is_within_root(resolved, PathBoundary{canonical_root}))
+        if (!detail::is_within_root(resolved, detail::PathBoundary{canonical_root}))
         {
             return unexpected(SafePathErrorCode::outside_shared_root);
         }
@@ -429,7 +393,7 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
     auto resolved_path = normalized_relative_path.empty() || normalized_relative_path == "."
                              ? shared_root.path()
                              : (shared_root.path() / normalized_relative_path).lexically_normal();
-    if (!is_within_root(resolved_path, PathBoundary{shared_root.path()}))
+    if (!detail::is_within_root(resolved_path, detail::PathBoundary{shared_root.path()}))
     {
         return unexpected(
             SafePathError{SafePathErrorCode::outside_shared_root, std::string(requested_path)});

@@ -1,4 +1,6 @@
+#include "path_containment.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
+#include "windows_handle.hpp"
 #include "windows_handle_path.hpp"
 
 #ifdef _WIN32
@@ -23,30 +25,9 @@ namespace sparenode::filesystem::detail
 namespace
 {
 
-/// @brief Closes an owned Win32 filesystem handle.
-struct HandleCloser
-{
-    /// @brief Releases a valid handle returned by CreateFileW.
-    void operator()(void *handle) const noexcept
-    {
-        if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
-        {
-            static_cast<void>(CloseHandle(handle));
-        }
-    }
-};
-
-using UniqueHandle = std::unique_ptr<void, HandleCloser>;
-
-/// @brief Captures the current Win32 error as a system-category error code.
-[[nodiscard]] std::error_code last_system_error() noexcept
-{
-    return {static_cast<int>(GetLastError()), std::system_category()};
-}
-
 /// @brief Opens a filesystem object with optional final reparse traversal suppression.
-[[nodiscard]] Result<UniqueHandle, std::error_code> open_path(const std::filesystem::path &path,
-                                                              const bool open_reparse_point)
+[[nodiscard]] Result<UniqueWindowsHandle, std::error_code>
+open_path(const std::filesystem::path &path, const bool open_reparse_point)
 {
     constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     auto flags = FILE_FLAG_BACKUP_SEMANTICS;
@@ -58,13 +39,13 @@ using UniqueHandle = std::unique_ptr<void, HandleCloser>;
                                     OPEN_EXISTING, flags, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
     {
-        return unexpected(last_system_error());
+        return unexpected(last_windows_error());
     }
-    return UniqueHandle(handle);
+    return UniqueWindowsHandle(handle);
 }
 
 /// @brief Opens one basename relative to a retained directory handle.
-[[nodiscard]] Result<UniqueHandle, std::error_code>
+[[nodiscard]] Result<UniqueWindowsHandle, std::error_code>
 open_relative(const HANDLE directory, const std::filesystem::path &native_name,
               const bool open_reparse_point)
 {
@@ -99,42 +80,15 @@ open_relative(const HANDLE directory, const std::filesystem::path &native_name,
         return unexpected(std::error_code(static_cast<int>(RtlNtStatusToDosError(status)),
                                           std::system_category()));
     }
-    return UniqueHandle(handle);
-}
-
-/// @brief Compares Windows path components with the filesystem's case-insensitive rules.
-[[nodiscard]] bool components_equal(const std::filesystem::path &left,
-                                    const std::filesystem::path &right) noexcept
-{
-    const auto &left_text = left.native();
-    const auto &right_text = right.native();
-    return CompareStringOrdinal(left_text.c_str(), static_cast<int>(left_text.size()),
-                                right_text.c_str(), static_cast<int>(right_text.size()),
-                                TRUE) == CSTR_EQUAL;
-}
-
-/// @brief Checks component-wise containment for normalized Windows paths.
-[[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const std::filesystem::path &root) noexcept
-{
-    auto candidate_component = candidate.begin();
-    for (const auto &root_component : root)
-    {
-        if (candidate_component == candidate.end() ||
-            !components_equal(*candidate_component, root_component))
-        {
-            return false;
-        }
-        ++candidate_component;
-    }
-    return true;
+    return UniqueWindowsHandle(handle);
 }
 
 /// @brief Reports whether two normalized Windows paths identify the same spelling-insensitive path.
 [[nodiscard]] bool paths_equal(const std::filesystem::path &left,
                                const std::filesystem::path &right) noexcept
 {
-    return is_within_root(left, right) && is_within_root(right, left);
+    return is_within_root(left, PathBoundary{right}, windows_path_components_equal) &&
+           is_within_root(right, PathBoundary{left}, windows_path_components_equal);
 }
 
 /// @brief Converts a Win32 timestamp into Unix-epoch system seconds.
@@ -172,7 +126,7 @@ classify_entry(const FILE_ATTRIBUTE_TAG_INFO &link_information,
 /// @brief Holds the stable Windows parent handle and verified root path.
 struct ConfinedDirectory::Implementation
 {
-    UniqueHandle directory;            ///< Parent used for every relative entry open.
+    UniqueWindowsHandle directory;     ///< Parent used for every relative entry open.
     std::filesystem::path shared_root; ///< Root path resolved from its stable handle.
 };
 
@@ -214,7 +168,8 @@ open_confined_directory(const std::filesystem::path &shared_root,
     {
         return unexpected(stable_directory.error());
     }
-    if (!is_within_root(stable_directory.value(), stable_root.value()))
+    if (!is_within_root(stable_directory.value(), PathBoundary{stable_root.value()},
+                        windows_path_components_equal))
     {
         return unexpected(std::make_error_code(std::errc::operation_not_permitted));
     }
@@ -241,7 +196,8 @@ read_confined_directory_entry(const ConfinedDirectory &directory,
         return std::optional<ConfinedEntryMetadata>{};
     }
     auto target_path = query_final_windows_path(target_handle->get());
-    if (!target_path || !is_within_root(target_path.value(), context.shared_root))
+    if (!target_path || !is_within_root(target_path.value(), PathBoundary{context.shared_root},
+                                        windows_path_components_equal))
     {
         return std::optional<ConfinedEntryMetadata>{};
     }

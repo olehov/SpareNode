@@ -1,4 +1,6 @@
+#include "path_containment.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
+#include "windows_handle.hpp"
 #include "windows_handle_path.hpp"
 
 #ifdef _WIN32
@@ -21,24 +23,6 @@ namespace sparenode::filesystem
 namespace
 {
 
-struct HandleCloser
-{
-    void operator()(void *handle) const noexcept
-    {
-        if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
-        {
-            static_cast<void>(CloseHandle(handle));
-        }
-    }
-};
-
-using UniqueHandle = std::unique_ptr<void, HandleCloser>;
-
-[[nodiscard]] std::error_code last_system_error() noexcept
-{
-    return {static_cast<int>(GetLastError()), std::system_category()};
-}
-
 [[nodiscard]] FileReadError system_failure(const std::error_code error) noexcept
 {
     if (error.value() == ERROR_FILE_NOT_FOUND || error.value() == ERROR_PATH_NOT_FOUND ||
@@ -53,48 +37,17 @@ using UniqueHandle = std::unique_ptr<void, HandleCloser>;
     return {FileReadErrorCode::filesystem_failure, error, std::nullopt};
 }
 
-[[nodiscard]] Result<UniqueHandle, std::error_code> open_path(const std::filesystem::path &path,
-                                                              const DWORD access, const DWORD flags)
+[[nodiscard]] Result<detail::UniqueWindowsHandle, std::error_code>
+open_path(const std::filesystem::path &path, const DWORD access, const DWORD flags)
 {
     constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     const auto handle =
         CreateFileW(path.c_str(), access, sharing, nullptr, OPEN_EXISTING, flags, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
     {
-        return unexpected(last_system_error());
+        return unexpected(detail::last_windows_error());
     }
-    return UniqueHandle(handle);
-}
-
-[[nodiscard]] bool components_equal(const std::filesystem::path &left,
-                                    const std::filesystem::path &right) noexcept
-{
-    const auto &left_text = left.native();
-    const auto &right_text = right.native();
-    return CompareStringOrdinal(left_text.c_str(), static_cast<int>(left_text.size()),
-                                right_text.c_str(), static_cast<int>(right_text.size()),
-                                TRUE) == CSTR_EQUAL;
-}
-
-struct PathBoundary
-{
-    const std::filesystem::path &path; ///< Root required as a complete component prefix.
-};
-
-[[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const PathBoundary root) noexcept
-{
-    auto candidate_component = candidate.begin();
-    for (const auto &root_component : root.path)
-    {
-        if (candidate_component == candidate.end() ||
-            !components_equal(*candidate_component, root_component))
-        {
-            return false;
-        }
-        ++candidate_component;
-    }
-    return true;
+    return detail::UniqueWindowsHandle(handle);
 }
 
 } // namespace
@@ -102,8 +55,8 @@ struct PathBoundary
 /// @brief Retains the stable Win32 handle and captured file length.
 struct FileReadStream::Implementation
 {
-    UniqueHandle handle;  ///< Handle used for every incremental read.
-    std::uint64_t size{}; ///< Length captured from the opened handle.
+    detail::UniqueWindowsHandle handle; ///< Handle used for every incremental read.
+    std::uint64_t size{};               ///< Length captured from the opened handle.
 };
 
 FileReadStream::FileReadStream(std::unique_ptr<Implementation> implementation) noexcept
@@ -150,7 +103,8 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
         {
             return unexpected(system_failure(stable_file.error()));
         }
-        if (!is_within_root(stable_file.value(), PathBoundary{stable_root.value()}))
+        if (!detail::is_within_root(stable_file.value(), detail::PathBoundary{stable_root.value()},
+                                    detail::windows_path_components_equal))
         {
             return unexpected(FileReadError{FileReadErrorCode::outside_shared_root,
                                             {},
@@ -164,7 +118,7 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
             GetFileInformationByHandleEx(file->get(), FileStandardInfo, &information,
                                          sizeof(information)) == FALSE)
         {
-            return unexpected(system_failure(last_system_error()));
+            return unexpected(system_failure(detail::last_windows_error()));
         }
         if ((attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U ||
             GetFileType(file->get()) != FILE_TYPE_DISK || information.EndOfFile.QuadPart < 0)
@@ -209,7 +163,7 @@ Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byt
     if (ReadFile(implementation_->handle.get(), destination.data(), requested, &count, nullptr) ==
         FALSE)
     {
-        return unexpected(system_failure(last_system_error()));
+        return unexpected(system_failure(detail::last_windows_error()));
     }
     return static_cast<std::size_t>(count);
 }

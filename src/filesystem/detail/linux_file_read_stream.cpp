@@ -1,3 +1,5 @@
+#include "path_containment.hpp"
+#include "posix_file_descriptor.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
 
 #ifndef _WIN32
@@ -16,40 +18,9 @@ namespace sparenode::filesystem
 namespace
 {
 
-/// @brief Owns one POSIX file descriptor.
-class FileDescriptor final
-{
-  public:
-    explicit FileDescriptor(const int descriptor) noexcept : descriptor_(descriptor)
-    {
-    }
-    FileDescriptor(const FileDescriptor &) = delete;
-    FileDescriptor &operator=(const FileDescriptor &) = delete;
-    FileDescriptor(FileDescriptor &&other) noexcept
-        : descriptor_(std::exchange(other.descriptor_, -1))
-    {
-    }
-    FileDescriptor &operator=(FileDescriptor &&) = delete;
-    ~FileDescriptor()
-    {
-        if (descriptor_ >= 0)
-        {
-            static_cast<void>(::close(descriptor_));
-        }
-    }
-    [[nodiscard]] int get() const noexcept
-    {
-        return descriptor_;
-    }
-
-  private:
-    int descriptor_{-1};
-};
-
-[[nodiscard]] std::error_code last_system_error() noexcept
-{
-    return {errno, std::generic_category()};
-}
+using detail::descriptor_path;
+using detail::FileDescriptor;
+using detail::last_posix_error;
 
 [[nodiscard]] FileReadError system_failure(const std::error_code error) noexcept
 {
@@ -70,47 +41,9 @@ open_descriptor(const std::filesystem::path &path, const int flags)
     const auto descriptor = ::open(path.c_str(), flags);
     if (descriptor < 0)
     {
-        return unexpected(last_system_error());
+        return unexpected(last_posix_error());
     }
     return FileDescriptor(descriptor);
-}
-
-[[nodiscard]] Result<std::filesystem::path, std::error_code>
-descriptor_path(const FileDescriptor &descriptor)
-{
-    const auto proc_path =
-        std::filesystem::path("/proc/self/fd") / std::to_string(descriptor.get());
-    std::error_code error;
-    auto path = std::filesystem::read_symlink(proc_path, error);
-    if (error)
-    {
-        return unexpected(error);
-    }
-    if (!path.is_absolute())
-    {
-        return unexpected(std::make_error_code(std::errc::operation_not_permitted));
-    }
-    return path.lexically_normal();
-}
-
-struct PathBoundary
-{
-    const std::filesystem::path &path; ///< Root required as a complete component prefix.
-};
-
-[[nodiscard]] bool is_within_root(const std::filesystem::path &candidate,
-                                  const PathBoundary root) noexcept
-{
-    auto candidate_component = candidate.begin();
-    for (const auto &root_component : root.path)
-    {
-        if (candidate_component == candidate.end() || *candidate_component != root_component)
-        {
-            return false;
-        }
-        ++candidate_component;
-    }
-    return true;
 }
 
 } // namespace
@@ -167,7 +100,7 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
         {
             return unexpected(system_failure(stable_file.error()));
         }
-        if (!is_within_root(stable_file.value(), PathBoundary{stable_root.value()}))
+        if (!detail::is_within_root(stable_file.value(), detail::PathBoundary{stable_root.value()}))
         {
             return unexpected(FileReadError{FileReadErrorCode::outside_shared_root,
                                             {},
@@ -179,7 +112,7 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
         };
         if (::fstat(file->get(), &information) != 0)
         {
-            return unexpected(system_failure(last_system_error()));
+            return unexpected(system_failure(last_posix_error()));
         }
         if (!S_ISREG(information.st_mode) || information.st_size < 0)
         {
@@ -188,11 +121,11 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
         const int status_flags = ::fcntl(file->get(), F_GETFL);
         if (status_flags < 0)
         {
-            return unexpected(system_failure(last_system_error()));
+            return unexpected(system_failure(last_posix_error()));
         }
         if (::fcntl(file->get(), F_SETFL, status_flags & ~O_NONBLOCK) != 0)
         {
-            return unexpected(system_failure(last_system_error()));
+            return unexpected(system_failure(last_posix_error()));
         }
         auto implementation = std::make_unique<Implementation>(Implementation{
             std::move(file).value(), static_cast<std::uint64_t>(information.st_size)});
@@ -233,7 +166,7 @@ Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byt
         {
             return static_cast<std::size_t>(count);
         }
-        const auto error = last_system_error();
+        const auto error = last_posix_error();
         if (error != std::errc::interrupted)
         {
             return unexpected(system_failure(error));

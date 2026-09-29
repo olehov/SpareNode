@@ -80,6 +80,7 @@ add_library(sparenode_core STATIC
 
 if(WIN32)
     target_sources(sparenode_core PRIVATE
+        src/filesystem/detail/windows_handle.cpp
         src/filesystem/detail/windows_handle_path.cpp
         src/filesystem/detail/windows_file_read_stream.cpp
         src/filesystem/detail/windows_directory_entry_reader.cpp
