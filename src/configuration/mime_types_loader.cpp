@@ -14,11 +14,17 @@ namespace sparenode::configuration
 namespace
 {
 
+/// @brief Reports whether a byte separates tokens inside one MIME source line.
+/// @param[in] value Byte to classify.
+/// @return `true` for a space or horizontal tab.
 [[nodiscard]] bool is_horizontal_space(const char value) noexcept
 {
     return value == ' ' || value == '\t';
 }
 
+/// @brief Splits one MIME source line into non-owning tokens before its comment.
+/// @param[in] line Bounded physical line retained by the caller.
+/// @return Media type and extension tokens, or an empty collection for trivia.
 [[nodiscard]] std::vector<std::string_view> split_tokens(std::string_view line)
 {
     std::vector<std::string_view> tokens;
@@ -48,6 +54,9 @@ namespace
     return tokens;
 }
 
+/// @brief Maps a registry validation category to its loader-facing equivalent.
+/// @param[in] code Registry failure to expose through configuration loading.
+/// @return Stable MIME loader error category.
 [[nodiscard]] MimeTypesLoadErrorCode
 load_error_code(const http::MimeTypeRegistryErrorCode code) noexcept
 {

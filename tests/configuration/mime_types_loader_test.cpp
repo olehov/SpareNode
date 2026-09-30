@@ -48,6 +48,8 @@ TEST_CASE("MIME registry forces browser-executable content to plain text",
     auto registry = sparenode::http::MimeTypeRegistry::create({{"html", "image/png"},
                                                                {"custom", "text/html"},
                                                                {"legacy", "text/ecmascript"},
+                                                               {"jscript", "text/jscript"},
+                                                               {"livescript", "text/livescript"},
                                                                {"feed", "application/atom+xml"},
                                                                {"svg", "image/svg+xml"}});
 
@@ -55,6 +57,8 @@ TEST_CASE("MIME registry forces browser-executable content to plain text",
     CHECK(registry->content_type_for_path("page.html") == "text/plain; charset=utf-8");
     CHECK(registry->content_type_for_path("page.custom") == "text/plain; charset=utf-8");
     CHECK(registry->content_type_for_path("script.legacy") == "text/plain; charset=utf-8");
+    CHECK(registry->content_type_for_path("script.jscript") == "text/plain; charset=utf-8");
+    CHECK(registry->content_type_for_path("script.livescript") == "text/plain; charset=utf-8");
     CHECK(registry->content_type_for_path("news.feed") == "text/plain; charset=utf-8");
     CHECK(registry->content_type_for_path("icon.svg") == "text/plain; charset=utf-8");
 }

@@ -125,6 +125,49 @@ TEST_CASE("Configuration loader resolves and loads MIME mappings beside the main
     CHECK(result->servers().front().mime_types().content_type_for_path("image.PNG") == "image/png");
 }
 
+TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
+          "[configuration][loader][mime-types][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-symlink");
+    const auto target = directory.path() / "target";
+    const auto nested = target / "nested";
+    std::filesystem::create_directories(nested);
+    const auto link = directory.path() / "link";
+    std::error_code symlink_error;
+    std::filesystem::create_directory_symlink(nested, link, symlink_error);
+    if (symlink_error)
+    {
+        SKIP("Directory symlink creation is unavailable: " << symlink_error.message());
+    }
+
+    {
+        std::ofstream mime_file(target / "custom.types", std::ios::binary);
+        REQUIRE(mime_file.is_open());
+        mime_file << "image/png png\n";
+        REQUIRE(mime_file.good());
+    }
+    const auto location =
+        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
+    const std::vector<std::pair<std::string, std::string>> configured_paths{
+        {"relative", "link/../custom.types"},
+        {"absolute", (link / ".." / "custom.types").generic_string()},
+    };
+
+    for (const auto &[name, configured_path] : configured_paths)
+    {
+        DYNAMIC_SECTION(name)
+        {
+            const auto config_path = write_config(
+                directory, make_config("mime_types_file \"" + configured_path + "\";\n", location));
+            const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+
+            REQUIRE(result.has_value());
+            CHECK(result->servers().front().mime_types().content_type_for_path("image.png") ==
+                  "image/png");
+        }
+    }
+}
+
 TEST_CASE("Configuration loader attributes MIME failures to the resolved MIME file",
           "[configuration][loader][mime-types]")
 {

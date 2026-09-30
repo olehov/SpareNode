@@ -157,12 +157,12 @@ mime_types_path(const ValidatedConfiguration &configuration,
     }
     const auto &configured = std::get<std::string>(directive->value.scalar);
     const std::u8string utf8(configured.begin(), configured.end());
-    const std::filesystem::path path(utf8);
+    std::filesystem::path path(utf8);
     if (path.is_absolute())
     {
-        return path.lexically_normal();
+        return path;
     }
-    return (config_path.parent_path() / path).lexically_normal();
+    return config_path.parent_path() / path;
 }
 
 } // namespace

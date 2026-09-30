@@ -28,6 +28,9 @@ constexpr std::array active_extensions{
     std::string_view{".xml"},  std::string_view{".xsl"}, std::string_view{".xslt"},
 };
 
+/// @brief Reports whether one ASCII byte is valid in an HTTP token.
+/// @param[in] byte Byte to classify without locale-dependent rules.
+/// @return `true` for an ASCII alphanumeric or permitted token punctuation byte.
 [[nodiscard]] bool is_token_character(const unsigned char byte) noexcept
 {
     constexpr std::string_view punctuation = "!#$%&'*+-.^_`|~";
@@ -36,12 +39,18 @@ constexpr std::array active_extensions{
     return alpha_numeric || punctuation.contains(static_cast<char>(byte));
 }
 
+/// @brief Converts one ASCII uppercase byte to lowercase.
+/// @param[in] byte Byte to normalize without locale-dependent rules.
+/// @return Lowercase ASCII byte, or the original byte when no conversion is needed.
 [[nodiscard]] constexpr char ascii_lower(const unsigned char byte) noexcept
 {
     return byte >= 'A' && byte <= 'Z' ? static_cast<char>(byte + ('a' - 'A'))
                                       : static_cast<char>(byte);
 }
 
+/// @brief Validates one bounded parameter-free `type/subtype` value.
+/// @param[in] value Media type to validate.
+/// @return `true` when both sides of its single slash are valid HTTP tokens.
 [[nodiscard]] bool is_valid_media_type(const std::string_view value) noexcept
 {
     if (value.empty() || value.size() > MimeTypeRegistry::maximum_media_type_bytes)
@@ -58,6 +67,9 @@ constexpr std::array active_extensions{
                                { return byte == '/' || is_token_character(byte); });
 }
 
+/// @brief Normalizes one configured extension to lowercase with a leading dot.
+/// @param[in,out] extension Extension to validate and normalize in place.
+/// @return `true` when the extension satisfies the registry policy.
 [[nodiscard]] bool normalize_extension(std::string &extension)
 {
     if (!extension.empty() && extension.front() == '.')
@@ -82,11 +94,17 @@ constexpr std::array active_extensions{
     return true;
 }
 
+/// @brief Reports whether an extension is covered by the fixed active-content policy.
+/// @param[in] extension Normalized lowercase extension including its leading dot.
+/// @return `true` when the file must be served as plain text.
 [[nodiscard]] bool is_active_extension(const std::string_view extension) noexcept
 {
     return std::ranges::binary_search(active_extensions, extension);
 }
 
+/// @brief Reports whether a media type could activate browser-controlled content.
+/// @param[in] media_type Validated lowercase parameter-free media type.
+/// @return `true` when the configured type must be replaced with safe plain text.
 [[nodiscard]] bool is_active_media_type(const std::string_view media_type) noexcept
 {
     if (media_type == "application/wasm" || media_type == "text/css" || media_type == "text/html" ||
@@ -96,7 +114,8 @@ constexpr std::array active_extensions{
     }
     const auto separator = media_type.find('/');
     const auto subtype = media_type.substr(separator + 1);
-    return subtype == "xml" || subtype.contains("javascript") || subtype.contains("ecmascript");
+    return subtype == "xml" || subtype.contains("javascript") || subtype.contains("ecmascript") ||
+           media_type == "text/jscript" || media_type == "text/livescript";
 }
 
 } // namespace
