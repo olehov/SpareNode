@@ -148,9 +148,9 @@ TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
 // Windows normalizes `..` before traversing a reparse point, while POSIX resolves it after
 // following the directory symlink. Place the fixture where each platform resolves the raw path.
 #ifdef _WIN32
-    const auto resolved_parent = directory.path();
+    const auto &resolved_parent = directory.path();
 #else
-    const auto resolved_parent = target;
+    const auto &resolved_parent = target;
 #endif
     {
         std::ofstream mime_file(resolved_parent / "custom.types", std::ios::binary);
