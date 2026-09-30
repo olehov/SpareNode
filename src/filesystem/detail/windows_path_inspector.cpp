@@ -249,6 +249,7 @@ append_remaining(std::filesystem::path target, std::filesystem::path::const_iter
 
 } // namespace
 
+/// @brief Resolves a Windows path while enforcing the supported reparse-point policy.
 Result<std::filesystem::path, WindowsPathInspectionError>
 inspect_windows_path(const std::filesystem::path &path)
 {

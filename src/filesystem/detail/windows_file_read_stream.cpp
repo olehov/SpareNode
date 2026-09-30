@@ -23,6 +23,7 @@ namespace sparenode::filesystem
 namespace
 {
 
+/// @brief Maps a native Windows failure into the file-read error domain.
 [[nodiscard]] FileReadError system_failure(const std::error_code error) noexcept
 {
     if (error.value() == ERROR_FILE_NOT_FOUND || error.value() == ERROR_PATH_NOT_FOUND ||
@@ -37,6 +38,7 @@ namespace
     return {FileReadErrorCode::filesystem_failure, error, std::nullopt};
 }
 
+/// @brief Opens one Windows path with the requested access and object flags.
 [[nodiscard]] Result<detail::UniqueWindowsHandle, std::error_code>
 open_path(const std::filesystem::path &path, const DWORD access, const DWORD flags)
 {
@@ -68,6 +70,7 @@ FileReadStream::FileReadStream(FileReadStream &&) noexcept = default;
 FileReadStream &FileReadStream::operator=(FileReadStream &&) noexcept = default;
 FileReadStream::~FileReadStream() = default;
 
+/// @brief Opens a regular Windows file and verifies its post-open containment.
 Result<FileReadStream, FileReadError>
 FileReadStream::open(const configuration::SharedRoot &shared_root,
                      const std::string_view requested_path)
@@ -146,6 +149,7 @@ std::uint64_t FileReadStream::size() const noexcept
     return implementation_->size;
 }
 
+/// @brief Reads the next bounded block from the owned Windows file handle.
 Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byte> destination,
                                                         const std::stop_token &stop_token)
 {

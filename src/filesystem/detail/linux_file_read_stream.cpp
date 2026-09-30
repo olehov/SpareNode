@@ -22,6 +22,7 @@ using detail::descriptor_path;
 using detail::FileDescriptor;
 using detail::last_posix_error;
 
+/// @brief Maps a native POSIX failure into the file-read error domain.
 [[nodiscard]] FileReadError system_failure(const std::error_code error) noexcept
 {
     if (error == std::errc::no_such_file_or_directory || error == std::errc::not_a_directory)
@@ -35,6 +36,7 @@ using detail::last_posix_error;
     return {FileReadErrorCode::filesystem_failure, error, std::nullopt};
 }
 
+/// @brief Opens one POSIX path with close-on-exec and the requested access flags.
 [[nodiscard]] Result<FileDescriptor, std::error_code>
 open_descriptor(const std::filesystem::path &path, const int flags)
 {
@@ -64,6 +66,7 @@ FileReadStream::FileReadStream(FileReadStream &&) noexcept = default;
 FileReadStream &FileReadStream::operator=(FileReadStream &&) noexcept = default;
 FileReadStream::~FileReadStream() = default;
 
+/// @brief Opens a regular POSIX file and verifies its post-open containment.
 Result<FileReadStream, FileReadError>
 FileReadStream::open(const configuration::SharedRoot &shared_root,
                      const std::string_view requested_path)
@@ -147,6 +150,7 @@ std::uint64_t FileReadStream::size() const noexcept
     return implementation_->size;
 }
 
+/// @brief Reads the next bounded block from the owned POSIX descriptor.
 Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byte> destination,
                                                         const std::stop_token &stop_token)
 {

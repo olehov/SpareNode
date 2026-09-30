@@ -333,6 +333,7 @@ handle_resource(const LocationConfig &location, const std::string_view requested
 
 } // namespace
 
+/// @brief Registers filesystem endpoints for every validated runtime location.
 Result<HttpRouter, FilesystemApiError>
 make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
 {

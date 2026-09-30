@@ -70,6 +70,7 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+/// @brief Opens a POSIX directory whose descriptor path remains inside the shared root.
 Result<ConfinedDirectory, std::error_code>
 open_confined_directory(const std::filesystem::path &shared_root,
                         const std::filesystem::path &directory)

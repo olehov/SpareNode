@@ -230,6 +230,7 @@ constexpr std::size_t ipv4_ipv6_group_count = 2;
 
 } // namespace
 
+/// @brief Validates host or IP authority syntax with an optional numeric port.
 bool is_valid_host_authority(const std::string_view authority) noexcept
 {
     if (authority.empty())

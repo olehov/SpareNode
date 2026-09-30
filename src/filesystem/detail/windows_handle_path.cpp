@@ -15,6 +15,7 @@
 namespace sparenode::filesystem::detail
 {
 
+/// @brief Applies ordinal case-insensitive equality to two Windows path components.
 bool windows_path_components_equal(const std::filesystem::path &left,
                                    const std::filesystem::path &right) noexcept
 {
@@ -25,6 +26,7 @@ bool windows_path_components_equal(const std::filesystem::path &left,
                                 TRUE) == CSTR_EQUAL;
 }
 
+/// @brief Resolves the normalized DOS or UNC path represented by an open handle.
 Result<std::filesystem::path, std::error_code> query_final_windows_path(void *handle)
 {
     constexpr DWORD flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;

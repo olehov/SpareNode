@@ -342,6 +342,7 @@ SafePath::SafePath(std::filesystem::path resolved_path) : path_(std::move(resolv
 {
 }
 
+/// @brief Resolves one decoded request path within the configured shared root.
 Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoot &shared_root,
                                                   const std::string_view requested_path)
 {

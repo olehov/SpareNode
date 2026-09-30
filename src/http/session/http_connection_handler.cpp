@@ -411,6 +411,7 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
     }
 }
 
+/// @brief Binds immutable routing and timeout configuration into a connection handler.
 network::ConnectionHandler make_http_connection_handler(std::shared_ptr<const HttpRouter> router,
                                                         HttpConnectionHandlerConfig config)
 {

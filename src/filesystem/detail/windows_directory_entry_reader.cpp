@@ -139,6 +139,7 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+/// @brief Opens a Windows directory whose final handle path remains inside the shared root.
 Result<ConfinedDirectory, std::error_code>
 open_confined_directory(const std::filesystem::path &shared_root,
                         const std::filesystem::path &directory)
@@ -180,6 +181,7 @@ open_confined_directory(const std::filesystem::path &shared_root,
     return ConfinedDirectory(std::move(implementation));
 }
 
+/// @brief Reads metadata through the already-confined Windows directory handle.
 std::optional<ConfinedEntryMetadata>
 read_confined_directory_entry(const ConfinedDirectory &directory,
                               const std::filesystem::path &native_name)

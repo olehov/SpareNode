@@ -36,6 +36,7 @@ namespace
 }
 } // namespace
 
+/// @brief Returns the pending Expect decision once and clears it from the request state.
 RequestExpectation BufferedRequest::take_expectation()
 {
     if (!head_.has_value() || expectation_checked_)
