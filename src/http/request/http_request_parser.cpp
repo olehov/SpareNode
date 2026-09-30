@@ -1,0 +1,637 @@
+#include "sparenode/http/request/http_request_parser.hpp"
+
+#include "sparenode/http/detail/ascii.hpp"
+#include "sparenode/http/request/detail/body_decode_buffer.hpp"
+#include "sparenode/http/request/detail/host_authority.hpp"
+#include "sparenode/http/request/detail/http_request_view_access.hpp"
+#include "sparenode/http/request/detail/request_target.hpp"
+#include "sparenode/http/request/http_body_decoder.hpp"
+
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <optional>
+#include <string_view>
+#include <utility>
+
+namespace sparenode::http
+{
+namespace
+{
+
+/// @brief Stores the byte offset immediately before a validated CRLF delimiter.
+struct LineEnd
+{
+    std::size_t offset{}; ///< Offset of the carriage return that begins the CRLF pair.
+};
+
+/// @brief Groups offsets and limits required while scanning a header line.
+struct HeaderLineSearch
+{
+    std::size_t line_start{};          ///< Offset at which the current header line begins.
+    std::size_t header_start{};        ///< Offset at which the header section begins.
+    std::size_t maximum_header_size{}; ///< Maximum header bytes including the final CRLF.
+};
+
+/// @brief Collects the bounded header result needed to finish one request.
+struct ParsedHeaderSection
+{
+    std::vector<HttpHeaderView> headers; ///< Parsed fields in source order.
+    std::size_t body_start{};            ///< Offset immediately after the header terminator.
+    std::size_t body_size{};             ///< Strict parsed Content-Length, or zero when absent.
+    bool chunked{};                      ///< Validated chunked framing.
+};
+
+/// @brief Preserves one validated field and the positions needed for diagnostics.
+struct ParsedHeaderField
+{
+    HttpHeaderView field;      ///< Borrowed validated name and trimmed value.
+    std::size_t line_start{};  ///< Offset at which the complete header line begins.
+    std::size_t value_start{}; ///< Offset immediately after the field-name colon.
+};
+
+/// @brief Accumulates bounded header and framing state during one parse.
+struct HeaderParseState
+{
+    std::vector<HttpHeaderView> headers;    ///< Parsed fields in source order.
+    std::optional<std::size_t> body_size;   ///< Validated Content-Length when supplied.
+    bool host_seen{};                       ///< Whether the required Host field was observed.
+    bool transfer_encoding_seen{};          ///< Whether Transfer-Encoding was observed.
+    std::string_view transfer_encoding;     ///< Borrowed coding list, validated after all fields.
+    std::size_t transfer_encoding_offset{}; ///< Coding field diagnostic offset.
+};
+
+/// @brief Searches for and validates the request-line terminator within its byte limit.
+/// @param[in] input Complete caller-provided byte view.
+/// @param[in] maximum_size Maximum request-line bytes excluding CRLF.
+/// @return A terminator when available, no value for incomplete input, or a protocol error.
+[[nodiscard]] Result<std::optional<LineEnd>, HttpRequestParseError>
+find_request_line_end(const std::string_view input, const std::size_t maximum_size)
+{
+    for (std::size_t index = 0; index < input.size(); ++index)
+    {
+        if (input[index] == '\n')
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::invalid_line_ending, index});
+        }
+        if (input[index] == '\r')
+        {
+            if (index + 1 >= input.size())
+            {
+                return std::optional<LineEnd>{};
+            }
+            if (input[index + 1] != '\n')
+            {
+                return unexpected(
+                    HttpRequestParseError{HttpRequestParseErrorCode::invalid_line_ending, index});
+            }
+            if (index > maximum_size)
+            {
+                return unexpected(HttpRequestParseError{
+                    HttpRequestParseErrorCode::request_line_too_large, maximum_size});
+            }
+            return std::optional<LineEnd>{LineEnd{index}};
+        }
+        if (index >= maximum_size)
+        {
+            return unexpected(HttpRequestParseError{
+                HttpRequestParseErrorCode::request_line_too_large, maximum_size});
+        }
+    }
+    return std::optional<LineEnd>{};
+}
+
+/// @brief Searches for one header-line terminator while enforcing the total header limit.
+/// @param[in] input Complete caller-provided byte view.
+/// @param[in] search Grouped source offsets and configured header boundary.
+/// @return A terminator when available, no value for incomplete input, or a protocol error.
+[[nodiscard]] Result<std::optional<LineEnd>, HttpRequestParseError>
+find_header_line_end(const std::string_view input, const HeaderLineSearch &search)
+{
+    for (std::size_t index = search.line_start; index < input.size(); ++index)
+    {
+        if (index - search.header_start >= search.maximum_header_size)
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::headers_too_large,
+                                      search.header_start + search.maximum_header_size});
+        }
+        if (input[index] == '\n')
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::invalid_line_ending, index});
+        }
+        if (input[index] != '\r')
+        {
+            continue;
+        }
+        if (index + 1 >= input.size())
+        {
+            return std::optional<LineEnd>{};
+        }
+        if (input[index + 1] != '\n')
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::invalid_line_ending, index});
+        }
+        if (index + 2 - search.header_start > search.maximum_header_size)
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::headers_too_large,
+                                      search.header_start + search.maximum_header_size});
+        }
+        return std::optional<LineEnd>{LineEnd{index}};
+    }
+    return std::optional<LineEnd>{};
+}
+
+/// @brief Validates and maps the request method token into the supported method set.
+/// @param[in] method Method bytes from the request line.
+/// @param[in] offset Source offset associated with a method failure.
+/// @return Parsed method or a structured invalid/unsupported method error.
+[[nodiscard]] Result<HttpMethod, HttpRequestParseError> parse_method(const std::string_view method,
+                                                                     const std::size_t offset)
+{
+    if (method.empty())
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::malformed_request_line, offset});
+    }
+    if (!std::ranges::all_of(method, detail::is_http_token_character))
+    {
+        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::invalid_method, offset});
+    }
+    if (method == "GET")
+    {
+        return HttpMethod::get;
+    }
+    if (method == "HEAD")
+    {
+        return HttpMethod::head;
+    }
+    if (method == "POST")
+    {
+        return HttpMethod::post;
+    }
+    if (method == "PUT")
+    {
+        return HttpMethod::put;
+    }
+    if (method == "DELETE")
+    {
+        return HttpMethod::delete_method;
+    }
+    if (method == "OPTIONS")
+    {
+        return HttpMethod::options;
+    }
+    return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::unsupported_method, offset});
+}
+
+/// @brief Parses a strict unsigned decimal Content-Length value.
+/// @param[in] value Trimmed header value to convert.
+/// @param[in] offset Source offset associated with a conversion failure.
+/// @return Parsed length or an invalid-content-length error.
+[[nodiscard]] Result<std::size_t, HttpRequestParseError>
+parse_content_length(const std::string_view value, const std::size_t offset)
+{
+    if (value.empty())
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::invalid_content_length, offset});
+    }
+    std::size_t length = 0;
+    const auto conversion = std::from_chars(value.data(), value.data() + value.size(), length);
+    if (conversion.ec != std::errc{} || conversion.ptr != value.data() + value.size())
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::invalid_content_length, offset});
+    }
+    return length;
+}
+
+/// @brief Parses the method, supported target form, and HTTP version from one request line.
+/// @param[in] line Request line excluding its CRLF terminator.
+/// @param[out] target Validated routing target and optional absolute authority.
+/// @return Supported method or a structured request-line failure.
+[[nodiscard]] Result<HttpMethod, HttpRequestParseError>
+parse_request_line(const std::string_view line, detail::ParsedRequestTarget &target)
+{
+    const std::size_t first_space = line.find(' ');
+    if (first_space == std::string_view::npos)
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::malformed_request_line, 0});
+    }
+    const std::size_t second_space = line.find(' ', first_space + 1);
+    if (second_space == std::string_view::npos ||
+        line.find(' ', second_space + 1) != std::string_view::npos)
+    {
+        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::malformed_request_line,
+                                                first_space + 1});
+    }
+
+    auto method_result = parse_method(line.substr(0, first_space), 0);
+    if (!method_result)
+    {
+        return unexpected(method_result.error());
+    }
+    auto target_result =
+        detail::parse_request_target(line.substr(first_space + 1, second_space - first_space - 1),
+                                     method_result.value(), first_space + 1);
+    if (!target_result)
+    {
+        return unexpected(target_result.error());
+    }
+    if (const auto version =
+            detail::validate_request_version(line.substr(second_space + 1), second_space + 1);
+        !version)
+    {
+        return unexpected(version.error());
+    }
+    target = std::move(target_result.value());
+    return method_result;
+}
+
+/// @brief Removes HTTP optional whitespace from both ends of a header value.
+/// @param[in] value Untrimmed field value.
+/// @return Borrowed view containing no leading or trailing spaces or horizontal tabs.
+[[nodiscard]] std::string_view trim_optional_whitespace(std::string_view value) noexcept
+{
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+    {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+    {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+/// @brief Rejects control bytes forbidden inside a parsed HTTP field value.
+/// @param[in] value Trimmed header value to validate.
+/// @return `true` when the value contains only permitted bytes.
+[[nodiscard]] bool valid_header_value(const std::string_view value) noexcept
+{
+    return std::ranges::none_of(value, [](const unsigned char byte)
+                                { return (byte < 0x20U && byte != '\t') || byte == 0x7FU; });
+}
+
+/// @brief Validates and separates one non-empty HTTP header line.
+/// @param[in] line Header line excluding its CRLF terminator.
+/// @param[in] line_start Source offset at which the header line begins.
+/// @return Borrowed field views and diagnostic offsets, or a syntax error.
+[[nodiscard]] Result<ParsedHeaderField, HttpRequestParseError>
+parse_header_field(const std::string_view line, const std::size_t line_start)
+{
+    if (line.front() == ' ' || line.front() == '\t')
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::folded_header, line_start});
+    }
+    const std::size_t colon = line.find(':');
+    if (colon == std::string_view::npos || colon == 0)
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::malformed_header, line_start});
+    }
+    const std::string_view name = line.substr(0, colon);
+    if (!std::ranges::all_of(name, detail::is_http_token_character))
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::malformed_header, line_start});
+    }
+    const std::string_view untrimmed_value = line.substr(colon + 1);
+    const std::size_t leading_whitespace = untrimmed_value.find_first_not_of(" \t");
+    const std::string_view value = trim_optional_whitespace(untrimmed_value);
+    if (!valid_header_value(value))
+    {
+        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::malformed_header,
+                                                line_start + colon + 1});
+    }
+    const std::size_t value_start =
+        line_start + colon + 1 +
+        (leading_whitespace == std::string_view::npos ? untrimmed_value.size()
+                                                      : leading_whitespace);
+    return ParsedHeaderField{{name, value}, line_start, value_start};
+}
+
+/// @brief Applies Host and message-framing rules to one syntactically valid field.
+/// @param[in] parsed Validated header field and its diagnostic offsets.
+/// @param[in] limits Configured request body boundary.
+/// @param[in,out] state Accumulated Host, Content-Length, and header state.
+/// @return Success or a structured semantic/framing failure.
+[[nodiscard]] Result<void, HttpRequestParseError>
+apply_header_field(const ParsedHeaderField &parsed, const HttpRequestParserLimits &limits,
+                   HeaderParseState &state)
+{
+    const HttpHeaderView &field = parsed.field;
+    if (detail::ascii_case_insensitive_equal(field.name, "Host"))
+    {
+        if (state.host_seen)
+        {
+            return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::duplicate_host,
+                                                    parsed.line_start});
+        }
+        if (field.value.empty())
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::missing_host, parsed.value_start});
+        }
+        if (!detail::is_valid_host_authority(field.value))
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::invalid_host, parsed.value_start});
+        }
+        state.host_seen = true;
+    }
+    else if (detail::ascii_case_insensitive_equal(field.name, "Content-Length"))
+    {
+        if (state.body_size.has_value())
+        {
+            return unexpected(HttpRequestParseError{
+                HttpRequestParseErrorCode::duplicate_content_length, parsed.line_start});
+        }
+        auto length_result = parse_content_length(field.value, parsed.value_start);
+        if (!length_result)
+        {
+            return unexpected(length_result.error());
+        }
+        if (length_result.value() > limits.max_body_bytes)
+        {
+            return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::body_too_large,
+                                                    parsed.value_start});
+        }
+        state.body_size = length_result.value();
+    }
+    else if (detail::ascii_case_insensitive_equal(field.name, "Transfer-Encoding"))
+    {
+        if (state.transfer_encoding_seen)
+        {
+            return unexpected(HttpRequestParseError{
+                HttpRequestParseErrorCode::invalid_transfer_encoding, parsed.line_start});
+        }
+        state.transfer_encoding_seen = true;
+        state.transfer_encoding = field.value;
+        state.transfer_encoding_offset = parsed.value_start;
+    }
+    state.headers.push_back(field);
+    return {};
+}
+
+/// @brief Resolves framing only after the complete header set is available.
+[[nodiscard]] Result<void, HttpRequestParseError> validate_framing(const HeaderParseState &state)
+{
+    if (!state.transfer_encoding_seen)
+    {
+        return {};
+    }
+    const auto offset = state.transfer_encoding_offset;
+    if (state.body_size.has_value())
+    {
+        return unexpected(
+            HttpRequestParseError{HttpRequestParseErrorCode::conflicting_message_length, offset});
+    }
+    if (detail::ascii_case_insensitive_equal(state.transfer_encoding, "chunked"))
+    {
+        return {};
+    }
+    // Only a single coding is supported. Lists and parameters are rejected as ambiguous.
+    const auto code =
+        !state.transfer_encoding.empty() &&
+                std::ranges::all_of(state.transfer_encoding, detail::is_http_token_character)
+            ? HttpRequestParseErrorCode::unsupported_transfer_encoding
+            : HttpRequestParseErrorCode::invalid_transfer_encoding;
+    return unexpected(HttpRequestParseError{code, offset});
+}
+
+/// @brief Parses and validates the complete header section when it is available.
+/// @param[in] input Complete caller-provided byte view.
+/// @param[in] header_start Offset immediately after the request-line CRLF.
+/// @param[in] limits Explicit header, count, and body boundaries.
+/// @return Parsed header state, no value for incomplete input, or a protocol error.
+[[nodiscard]] Result<std::optional<ParsedHeaderSection>, HttpRequestParseError>
+parse_header_section(const std::string_view input, const std::size_t header_start,
+                     const HttpRequestParserLimits &limits)
+{
+    std::size_t line_start = header_start;
+    HeaderParseState state;
+    while (true)
+    {
+        const HeaderLineSearch search{line_start, header_start, limits.max_header_bytes};
+        auto line_end_result = find_header_line_end(input, search);
+        if (!line_end_result)
+        {
+            return unexpected(line_end_result.error());
+        }
+        if (!line_end_result->has_value())
+        {
+            return std::optional<ParsedHeaderSection>{};
+        }
+        const std::size_t line_end = line_end_result->value_or(LineEnd{}).offset;
+        if (line_end == line_start)
+        {
+            if (!state.host_seen)
+            {
+                return unexpected(
+                    HttpRequestParseError{HttpRequestParseErrorCode::missing_host, header_start});
+            }
+            if (const auto framing = validate_framing(state); !framing)
+            {
+                return unexpected(framing.error());
+            }
+            return std::optional<ParsedHeaderSection>{
+                ParsedHeaderSection{std::move(state.headers), line_end + 2,
+                                    state.body_size.value_or(0), state.transfer_encoding_seen}};
+        }
+        if (state.headers.size() >= limits.max_header_count)
+        {
+            return unexpected(
+                HttpRequestParseError{HttpRequestParseErrorCode::too_many_headers, line_start});
+        }
+        auto field_result =
+            parse_header_field(input.substr(line_start, line_end - line_start), line_start);
+        if (!field_result)
+        {
+            return unexpected(field_result.error());
+        }
+        auto apply_result = apply_header_field(field_result.value(), limits, state);
+        if (!apply_result)
+        {
+            return unexpected(apply_result.error());
+        }
+        line_start = line_end + 2;
+    }
+}
+
+} // namespace
+
+/// @brief Validates request metadata independently of body arrival and storage policy.
+Result<std::optional<HttpRequestHead>, HttpRequestParseError>
+parse_http_request_head(const std::span<const std::byte> input,
+                        const HttpRequestParserLimits &limits)
+{
+    if (input.empty())
+    {
+        return std::optional<HttpRequestHead>{};
+    }
+    const std::string_view text(reinterpret_cast<const char *>(input.data()), input.size());
+    auto request_line_end_result = find_request_line_end(text, limits.max_request_line_bytes);
+    if (!request_line_end_result)
+    {
+        return unexpected(request_line_end_result.error());
+    }
+    if (!request_line_end_result->has_value())
+    {
+        return std::optional<HttpRequestHead>{};
+    }
+
+    const std::size_t request_line_end = request_line_end_result->value_or(LineEnd{}).offset;
+    detail::ParsedRequestTarget target;
+    auto method_result = parse_request_line(text.substr(0, request_line_end), target);
+    if (!method_result)
+    {
+        return unexpected(method_result.error());
+    }
+
+    const std::size_t header_start = request_line_end + 2;
+    auto header_result = parse_header_section(text, header_start, limits);
+    if (!header_result)
+    {
+        return unexpected(header_result.error());
+    }
+    if (!header_result->has_value())
+    {
+        return std::optional<HttpRequestHead>{};
+    }
+    ParsedHeaderSection parsed_headers = header_result->value_or(ParsedHeaderSection{});
+    // RFC 9112 absolute-form authority overrides Host for all downstream consumers.
+    if (!target.authority.empty())
+    {
+        for (auto &field : parsed_headers.headers)
+        {
+            if (detail::ascii_case_insensitive_equal(field.name, "Host"))
+            {
+                field.value = target.authority;
+            }
+        }
+    }
+    return std::optional<HttpRequestHead>{HttpRequestHead{
+        method_result.value(), target.routing_target, std::move(parsed_headers.headers),
+        parsed_headers.body_start, parsed_headers.body_size, parsed_headers.chunked,
+        std::move(target.storage)}};
+}
+
+/// @brief Parses a bounded complete request; chunked payload owns decoded storage.
+Result<HttpRequestParseResult, HttpRequestParseError>
+parse_http_request(const std::span<const std::byte> input, const HttpRequestParserLimits &limits)
+{
+    auto parsed = parse_http_request_head(input, limits);
+    if (!parsed)
+    {
+        return unexpected(parsed.error());
+    }
+    if (!parsed->has_value())
+    {
+        return HttpRequestParseResult::incomplete();
+    }
+    auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
+    if (!head.chunked)
+    {
+        if (input.size() - head.consumed_bytes < head.content_length)
+        {
+            return HttpRequestParseResult::incomplete();
+        }
+        const auto consumed = head.consumed_bytes + head.content_length;
+        const auto body = input.subspan(head.consumed_bytes, head.content_length);
+        return HttpRequestParseResult::complete(
+            consumed, detail::HttpRequestViewAccess::create(std::move(head), body));
+    }
+    HttpBodyDecoder decoder(head, limits);
+    auto storage = std::make_shared<std::vector<std::byte>>();
+    std::array<std::byte, detail::body_decode_buffer_bytes> output{};
+    std::size_t consumed = head.consumed_bytes;
+    while (consumed < input.size() && !decoder.complete())
+    {
+        const auto progress = decoder.feed(input.subspan(consumed), output);
+        if (!progress)
+        {
+            return unexpected(progress.error());
+        }
+        storage->insert(storage->end(), output.begin(),
+                        output.begin() + static_cast<std::ptrdiff_t>(progress->produced));
+        consumed += progress->consumed;
+    }
+    if (!decoder.complete())
+    {
+        return HttpRequestParseResult::incomplete();
+    }
+    const std::span<const std::byte> body(*storage);
+    return HttpRequestParseResult::complete(
+        consumed, detail::HttpRequestViewAccess::create(std::move(head), body, std::move(storage)));
+}
+
+/// @brief Converts a portable HTTP parse failure into stable diagnostic text.
+const char *to_string(const HttpRequestParseErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case HttpRequestParseErrorCode::request_line_too_large:
+        return "HTTP request line exceeds its configured limit";
+    case HttpRequestParseErrorCode::headers_too_large:
+        return "HTTP headers exceed their configured limit";
+    case HttpRequestParseErrorCode::too_many_headers:
+        return "HTTP request contains too many headers";
+    case HttpRequestParseErrorCode::body_too_large:
+        return "HTTP request body exceeds its configured limit";
+    case HttpRequestParseErrorCode::invalid_line_ending:
+        return "HTTP protocol lines must end with CRLF";
+    case HttpRequestParseErrorCode::malformed_request_line:
+        return "HTTP request line is malformed";
+    case HttpRequestParseErrorCode::invalid_method:
+        return "HTTP method is not a valid token";
+    case HttpRequestParseErrorCode::unsupported_method:
+        return "HTTP method is not supported";
+    case HttpRequestParseErrorCode::invalid_request_target:
+        return "HTTP request target is invalid";
+    case HttpRequestParseErrorCode::unsupported_http_version:
+        return "HTTP version is not supported";
+    case HttpRequestParseErrorCode::malformed_http_version:
+        return "HTTP version is malformed";
+    case HttpRequestParseErrorCode::malformed_header:
+        return "HTTP header is malformed";
+    case HttpRequestParseErrorCode::folded_header:
+        return "folded HTTP headers are not supported";
+    case HttpRequestParseErrorCode::missing_host:
+        return "HTTP/1.1 Host header is missing";
+    case HttpRequestParseErrorCode::duplicate_host:
+        return "HTTP/1.1 Host header is repeated";
+    case HttpRequestParseErrorCode::invalid_host:
+        return "HTTP/1.1 Host header is invalid";
+    case HttpRequestParseErrorCode::invalid_content_length:
+        return "HTTP Content-Length is invalid";
+    case HttpRequestParseErrorCode::duplicate_content_length:
+        return "HTTP Content-Length is repeated";
+    case HttpRequestParseErrorCode::unsupported_transfer_encoding:
+        return "HTTP Transfer-Encoding is not supported";
+    case HttpRequestParseErrorCode::invalid_transfer_encoding:
+        return "HTTP Transfer-Encoding is ambiguous or malformed";
+    case HttpRequestParseErrorCode::conflicting_message_length:
+        return "HTTP Transfer-Encoding conflicts with Content-Length";
+    case HttpRequestParseErrorCode::malformed_chunk:
+        return "HTTP chunk framing is malformed";
+    case HttpRequestParseErrorCode::chunk_metadata_too_large:
+        return "HTTP chunk metadata exceeds its configured limit";
+    case HttpRequestParseErrorCode::invalid_trailer:
+        return "HTTP trailer is invalid or forbidden";
+    case HttpRequestParseErrorCode::trailers_too_large:
+        return "HTTP trailers exceed their configured limit";
+    case HttpRequestParseErrorCode::incomplete_body:
+        return "HTTP request body ended before framing completed";
+    }
+    return "unknown HTTP request parse error";
+}
+
+} // namespace sparenode::http

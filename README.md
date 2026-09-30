@@ -18,14 +18,25 @@ limits, and tracked compatibility gaps are recorded in the
 ```text
 SpareNode/
 |-- apps/       # Executable entry points
-|-- src/        # Implementation files
-|-- include/    # Public headers
-|-- tests/      # Automated tests
+|-- src/        # Implementation files, grouped by subsystem
+|   `-- http/
+|       |-- request/   # Request parsing and body decoding
+|       |-- response/  # Response validation, serialization, and streaming
+|       |-- session/   # Per-connection HTTP orchestration
+|       |-- routing/   # Route registration and dispatch
+|       `-- api/       # HTTP endpoint composition
+|-- include/    # Public headers mirroring production subsystem ownership
+|-- tests/      # Automated tests mirroring the production layout
 |-- web/        # Web client assets
 |-- cmake/      # Reusable CMake modules
 |-- docs/       # Project documentation
 `-- CMakeLists.txt
 ```
+
+Directories named `detail` contain implementation support and are not stable
+external interfaces. Shared HTTP primitives remain directly under
+`include/sparenode/http`; request, response, session, routing, and API headers
+live under their corresponding responsibility.
 
 ## Requirements
 

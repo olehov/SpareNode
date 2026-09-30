@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/http/http_request_timeouts.hpp"
+#include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 

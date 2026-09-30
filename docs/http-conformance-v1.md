@@ -99,7 +99,7 @@ Host or request-target values do not authorize access to a configured location.
 Streaming readers own their cursors and must honor cancellation and buffer bounds.
 Endpoints must not implement their own competing message-framing policy.
 
-Current behavior is exercised by `tests/http/http_request_parser_test.cpp`,
+Current behavior is exercised by `tests/http/request/http_request_parser_test.cpp`,
 `http_connection_handler_test.cpp`, `http_response_test.cpp`, `http_router_test.cpp`,
 `http_body_decoder_test.cpp`, and `request_deadlines_test.cpp`, plus configuration
 and network tests. `request_target_test.cpp` and router/session tests cover

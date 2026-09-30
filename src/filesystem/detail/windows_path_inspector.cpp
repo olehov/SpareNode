@@ -1,4 +1,5 @@
 #include "windows_path_inspector.hpp"
+#include "windows_handle.hpp"
 #include "windows_handle_path.hpp"
 
 #ifdef _WIN32
@@ -24,21 +25,6 @@ namespace sparenode::filesystem::detail
 namespace
 {
 
-/// @brief Closes an owned Win32 handle.
-struct HandleCloser
-{
-    /// @brief Releases a valid Win32 handle.
-    /// @param[in] handle Handle returned by CreateFileW.
-    void operator()(void *handle) const noexcept
-    {
-        if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
-        {
-            static_cast<void>(CloseHandle(handle));
-        }
-    }
-};
-
-using UniqueHandle = std::unique_ptr<void, HandleCloser>;
 using InspectionResult = Result<std::filesystem::path, WindowsPathInspectionError>;
 using ReparseTargetResult =
     Result<std::optional<std::filesystem::path>, WindowsPathInspectionError>;
@@ -72,7 +58,7 @@ using ReparseTargetResult =
 /// @param[in] path Existing object to open.
 /// @param[in] open_reparse_point Whether the handle names the final redirection object itself.
 /// @return Owned handle, or a system inspection error.
-[[nodiscard]] Result<UniqueHandle, WindowsPathInspectionError>
+[[nodiscard]] Result<UniqueWindowsHandle, WindowsPathInspectionError>
 open_path(const std::filesystem::path &path, const bool open_reparse_point)
 {
     constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
@@ -87,7 +73,7 @@ open_path(const std::filesystem::path &path, const bool open_reparse_point)
     {
         return unexpected(WindowsPathInspectionError::system_error);
     }
-    return UniqueHandle(handle);
+    return UniqueWindowsHandle(handle);
 }
 
 /// @brief Reads an unsigned integer from an alignment-independent native buffer.
@@ -263,6 +249,7 @@ append_remaining(std::filesystem::path target, std::filesystem::path::const_iter
 
 } // namespace
 
+/// @brief Resolves a Windows path while enforcing the supported reparse-point policy.
 Result<std::filesystem::path, WindowsPathInspectionError>
 inspect_windows_path(const std::filesystem::path &path)
 {
