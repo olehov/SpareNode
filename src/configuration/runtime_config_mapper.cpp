@@ -66,6 +66,8 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
             server.minimum_log_severity = *severity;
         }
         break;
+    case ServerDirectiveKind::mime_types_file:
+        break;
     case ServerDirectiveKind::header_timeout_ms:
         server.http_timeouts.headers =
             std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
@@ -110,7 +112,8 @@ void apply_location_directive(const directives::ParsedLocationDirective &directi
 
 /// @brief Applies validated directives over defaults, preserving HTTP receive budgets.
 /// @return Runtime servers and locations without parser metadata.
-runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration)
+runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration,
+                                            http::MimeTypeRegistry mime_types)
 {
     ServerValues server;
     const auto &parsed_server = configuration.parsed().server;
@@ -138,7 +141,7 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
     std::vector<runtime::ServerConfig> servers;
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
                          server.worker_threads, server.minimum_log_severity, std::move(locations),
-                         server.http_timeouts);
+                         server.http_timeouts, std::move(mime_types));
     return runtime::AppConfig(std::move(servers));
 }
 

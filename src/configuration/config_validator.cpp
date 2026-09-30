@@ -189,6 +189,9 @@ class ValidationState final
         case ServerDirectiveKind::log_level:
             validate_log_level(directive);
             break;
+        case ServerDirectiveKind::mime_types_file:
+            validate_mime_types_file(directive);
+            break;
         case ServerDirectiveKind::header_timeout_ms:
         case ServerDirectiveKind::body_timeout_ms:
         case ServerDirectiveKind::request_timeout_ms:
@@ -239,6 +242,20 @@ class ValidationState final
         if (!logging::parse_log_severity(value).has_value())
         {
             add_server_error(ConfigValidationErrorCode::invalid_log_level, directive,
+                             directive.value.location);
+        }
+    }
+
+    /// @brief Rejects an empty external MIME mapping path.
+    ///
+    /// The parser requires exactly one string value, and server directive
+    /// cardinality is checked before this function. Consequently, only one
+    /// non-empty `mime_types_file` path can reach validated configuration.
+    void validate_mime_types_file(const ParsedServerDirective &directive)
+    {
+        if (std::get<std::string>(directive.value.scalar).empty())
+        {
+            add_server_error(ConfigValidationErrorCode::invalid_mime_types_file, directive,
                              directive.value.location);
         }
     }
@@ -478,6 +495,8 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
         return "worker_threads must be between 2 and 64";
     case ConfigValidationErrorCode::invalid_log_level:
         return "log_level is not supported";
+    case ConfigValidationErrorCode::invalid_mime_types_file:
+        return "mime_types_file must not be empty";
     case ConfigValidationErrorCode::timeout_out_of_range:
         return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
     case ConfigValidationErrorCode::invalid_location_path:

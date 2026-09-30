@@ -22,6 +22,7 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - the multithreading switch and configured worker count;
 - the minimum `logging::LogSeverity`;
 - grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
+- an immutable MIME type registry loaded once from the optional external mapping file;
 - an ordered collection of `runtime::LocationConfig` values.
 
 Each location contains its validated HTTP API path, a canonical `SharedRoot`, and independent
@@ -44,6 +45,7 @@ Omitted directives map to these values:
 | multithreading | `false` |
 | worker threads | `1` |
 | log level | `info` |
+| MIME registry | empty (`application/octet-stream` fallback) |
 | header timeout | `10000 ms` |
 | body timeout | `10000 ms` |
 | total request timeout | `30000 ms` |

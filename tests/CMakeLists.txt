@@ -18,6 +18,7 @@ add_executable(sparenode_tests
     application/running_application_test.cpp
     configuration/config_lexer_test.cpp
     configuration/config_loader_test.cpp
+    configuration/mime_types_loader_test.cpp
     configuration/config_parser_test.cpp
     configuration/config_validator_test.cpp
     configuration/runtime_config_mapper_test.cpp

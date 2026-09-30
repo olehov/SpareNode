@@ -9,6 +9,7 @@
 #include "sparenode/configuration/config_lexer.hpp"
 #include "sparenode/configuration/config_parser.hpp"
 #include "sparenode/configuration/config_validator.hpp"
+#include "sparenode/configuration/mime_types_loader.hpp"
 #include "sparenode/configuration/runtime/app_config.hpp"
 #include "sparenode/result.hpp"
 
@@ -30,7 +31,7 @@ struct ConfigFileError
 
 /// @brief Preserves the exact stage-specific failure produced by configuration loading.
 using ConfigLoadFailure = std::variant<ConfigFileError, ConfigLexerError, ConfigParserError,
-                                       std::vector<ConfigValidationError>>;
+                                       std::vector<ConfigValidationError>, MimeTypesLoadError>;
 
 /// @brief Associates a structured configuration failure with its selected source file.
 struct ConfigLoadError
