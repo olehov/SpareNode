@@ -14,6 +14,7 @@
 #include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "support/temporary_directory.hpp"
+#include "support/windows_junction.hpp"
 
 namespace
 {
@@ -133,19 +134,31 @@ TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
     const auto nested = target / "nested";
     std::filesystem::create_directories(nested);
     const auto link = directory.path() / "link";
-    std::error_code symlink_error;
-    std::filesystem::create_directory_symlink(nested, link, symlink_error);
-    if (symlink_error)
+    std::error_code link_error;
+#ifdef _WIN32
+    link_error = sparenode::test::create_directory_junction(nested, link);
+#else
+    std::filesystem::create_directory_symlink(nested, link, link_error);
+#endif
+    if (link_error)
     {
-        SKIP("Directory symlink creation is unavailable: " << symlink_error.message());
+        SKIP("Directory redirection creation is unavailable: " << link_error.message());
     }
 
+// Windows normalizes `..` before traversing a reparse point, while POSIX resolves it after
+// following the directory symlink. Place the fixture where each platform resolves the raw path.
+#ifdef _WIN32
+    const auto resolved_parent = directory.path();
+#else
+    const auto resolved_parent = target;
+#endif
     {
-        std::ofstream mime_file(target / "custom.types", std::ios::binary);
+        std::ofstream mime_file(resolved_parent / "custom.types", std::ios::binary);
         REQUIRE(mime_file.is_open());
         mime_file << "image/png png\n";
         REQUIRE(mime_file.good());
     }
+    REQUIRE(std::filesystem::exists(link / ".." / "custom.types"));
     const auto location =
         make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
     const std::vector<std::pair<std::string, std::string>> configured_paths{
@@ -167,7 +180,6 @@ TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
         }
     }
 }
-
 TEST_CASE("Configuration loader attributes MIME failures to the resolved MIME file",
           "[configuration][loader][mime-types]")
 {
