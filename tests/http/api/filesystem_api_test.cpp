@@ -1,11 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -48,6 +52,17 @@ namespace
     return {reinterpret_cast<const char *>(body.data()), body.size()};
 }
 
+/// @brief Returns one exact response field value for assertions.
+[[nodiscard]] std::string_view header_value(const sparenode::http::HttpResponse &response,
+                                            const std::string_view name)
+{
+    const auto headers = response.headers();
+    const auto header =
+        std::ranges::find_if(headers, [name](const sparenode::http::HttpResponseHeader &candidate)
+                             { return candidate.name == name; });
+    return header == headers.end() ? std::string_view{} : std::string_view(header->value);
+}
+
 /// @brief Receives one exact response size from a loopback test client.
 [[nodiscard]] std::string receive_exact(const sparenode::test::TestClientSocket &client,
                                         const std::size_t size)
@@ -67,7 +82,8 @@ namespace
 
 /// @brief Creates one server backed by the supplied temporary location.
 [[nodiscard]] sparenode::configuration::runtime::ServerConfig
-make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true)
+make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true,
+            sparenode::http::MimeTypeRegistry mime_types = {})
 {
     auto root = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root);
@@ -75,8 +91,38 @@ make_server(const sparenode::test::TemporaryDirectory &directory, const bool all
     locations.emplace_back(
         "/api/Documents", std::move(root).value(),
         sparenode::configuration::runtime::LocationPermissions{allow_read, false, false});
-    return {
-        {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations)};
+    return {{"127.0.0.1", 0},
+            false,
+            1,
+            sparenode::logging::LogSeverity::info,
+            std::move(locations),
+            {},
+            std::move(mime_types)};
+}
+
+/// @brief Creates one validated MIME registry for response integration tests.
+[[nodiscard]] sparenode::http::MimeTypeRegistry
+make_mime_types(std::vector<sparenode::http::MimeTypeMapping> mappings)
+{
+    auto registry = sparenode::http::MimeTypeRegistry::create(std::move(mappings));
+    REQUIRE(registry);
+    return std::move(registry).value();
+}
+
+/// @brief Creates a file symbolic link, skipping only unavailable local Windows privileges.
+void create_file_link(const std::filesystem::path &target, const std::filesystem::path &link)
+{
+    std::error_code error;
+    std::filesystem::create_symlink(target, link, error);
+#if defined(_WIN32) && !defined(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    constexpr int privilege_not_held = 1314; // Win32 ERROR_PRIVILEGE_NOT_HELD.
+    if (error == std::error_code(privilege_not_held, std::system_category()))
+    {
+        SKIP("Windows symbolic-link creation requires Developer Mode or the symlink privilege");
+    }
+#endif
+    INFO(error.message());
+    REQUIRE_FALSE(error);
 }
 
 /// @brief Dispatches one GET request through a validated filesystem router.
@@ -186,9 +232,10 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     CHECK(file.status_code() == sparenode::http::HttpStatusCode::ok);
     CHECK(file.is_streaming());
     CHECK(file.content_length() == 8);
-    REQUIRE(file.headers().size() == 1);
-    CHECK(file.headers().front().name == "Content-Type");
-    CHECK(file.headers().front().value == "application/octet-stream");
+    REQUIRE(file.headers().size() == 3);
+    CHECK(header_value(file, "Content-Type") == "application/octet-stream");
+    CHECK(header_value(file, "Content-Disposition") == "inline");
+    CHECK(header_value(file, "X-Content-Type-Options") == "nosniff");
     const std::string expected = sparenode::http::serialize_http_response_head(file) + "download";
     auto pair = sparenode::test::create_connected_tcp_pair();
     REQUIRE(sparenode::http::write_http_response(pair.server, file));
@@ -197,6 +244,130 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     const auto traversal = dispatch_get(router.value(), "/api/Documents/../outside");
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
+}
+
+TEST_CASE("Filesystem API selects conservative inline content types",
+          "[http][filesystem-api][inline][content-type]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-content-type");
+    const std::array files{
+        std::pair{"notes.TXT", "plain"},   std::pair{"data.json", "{}"},
+        std::pair{"image.JpG", "jpeg"},    std::pair{"page.html", "markup"},
+        std::pair{"source.cpp", "source"}, std::pair{"payload.custom", "binary"}};
+    for (const auto &[name, content] : files)
+    {
+        std::ofstream output(directory.path() / name, std::ios::binary);
+        output << content;
+        REQUIRE(output.good());
+    }
+    auto router = sparenode::http::make_filesystem_api_router(
+        make_server(directory, true,
+                    make_mime_types({{"txt", "text/plain"},
+                                     {"json", "application/json"},
+                                     {"jpg", "image/jpeg"},
+                                     {"html", "text/html"},
+                                     {"cpp", "text/plain"}})));
+    REQUIRE(router);
+
+    const auto text = dispatch_get(router.value(), "/api/Documents/notes.TXT");
+    CHECK(header_value(text, "Content-Type") == "text/plain");
+    CHECK(header_value(text, "Content-Disposition") == "inline");
+    CHECK(header_value(text, "X-Content-Type-Options") == "nosniff");
+
+    const auto json = dispatch_get(router.value(), "/api/Documents/data%2Ejson");
+    CHECK(header_value(json, "Content-Type") == "application/json");
+    CHECK(header_value(dispatch_get(router.value(), "/api/Documents/image.JpG"), "Content-Type") ==
+          "image/jpeg");
+    CHECK(header_value(dispatch_get(router.value(), "/api/Documents/page.html"), "Content-Type") ==
+          "text/plain; charset=utf-8");
+    CHECK(header_value(dispatch_get(router.value(), "/api/Documents/source.cpp"), "Content-Type") ==
+          "text/plain");
+    CHECK(header_value(dispatch_get(router.value(), "/api/Documents/payload.custom"),
+                       "Content-Type") == "application/octet-stream");
+}
+
+TEST_CASE("Filesystem API preserves inline file metadata for HEAD without consuming content",
+          "[http][filesystem-api][inline][head]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-head");
+    constexpr std::string_view payload = "preview";
+    {
+        std::ofstream output(directory.path() / "preview.md", std::ios::binary);
+        output << payload;
+        REQUIRE(output.good());
+    }
+    auto router = sparenode::http::make_filesystem_api_router(
+        make_server(directory, true, make_mime_types({{"md", "text/markdown"}})));
+    REQUIRE(router);
+    constexpr std::string_view target = "/api/Documents/preview.md";
+
+    const auto get = dispatch_get(router.value(), target);
+    const std::string request =
+        "HEAD " + std::string(target) + " HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    auto head_result = router->dispatch(parse_request(request));
+    REQUIRE(head_result);
+    auto head = std::move(head_result).value();
+    CHECK(head.content_length() == get.content_length());
+    CHECK(head.headers().size() == get.headers().size());
+    CHECK(header_value(head, "Content-Type") == "text/markdown");
+
+    const auto serialized_head = sparenode::http::serialize_http_response_head(head);
+    auto head_pair = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(sparenode::http::write_http_response(head_pair.server, head, {},
+                                                 sparenode::http::HttpMethod::head));
+    CHECK(receive_exact(head_pair.client, serialized_head.size()) == serialized_head);
+
+    const std::string complete_response = serialized_head + std::string(payload);
+    auto get_pair = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(sparenode::http::write_http_response(get_pair.server, head));
+    CHECK(receive_exact(get_pair.client, complete_response.size()) == complete_response);
+}
+
+TEST_CASE("Filesystem API keeps large inline files outside response memory",
+          "[http][filesystem-api][inline][large]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-large-inline");
+    constexpr std::uint64_t file_size =
+        static_cast<std::uint64_t>(sparenode::http::HttpResponse::maximum_memory_body_bytes) + 1;
+    const auto path = directory.path() / "large.bin";
+    {
+        std::ofstream output(path, std::ios::binary);
+        output.seekp(static_cast<std::streamoff>(file_size - 1));
+        output.put('\0');
+        REQUIRE(output.good());
+    }
+    auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
+    REQUIRE(router);
+
+    const auto response = dispatch_get(router.value(), "/api/Documents/large.bin");
+    CHECK(response.is_streaming());
+    CHECK(response.memory_body().empty());
+    CHECK(response.content_length() == file_size);
+    CHECK(header_value(response, "Content-Type") == "application/octet-stream");
+}
+
+TEST_CASE("Filesystem API confines inline symbolic-link targets to the configured root",
+          "[http][filesystem-api][inline][security][symlink]")
+{
+    const sparenode::test::TemporaryDirectory shared("sparenode-files-api-inline-shared");
+    const sparenode::test::TemporaryDirectory outside("sparenode-files-api-inline-outside");
+    const auto inside_file = shared.path() / "inside.txt";
+    const auto outside_file = outside.path() / "secret.txt";
+    REQUIRE(std::ofstream(inside_file, std::ios::binary) << "allowed");
+    REQUIRE(std::ofstream(outside_file, std::ios::binary) << "protected");
+    create_file_link(inside_file, shared.path() / "internal.txt");
+    create_file_link(outside_file, shared.path() / "external.txt");
+    auto router = sparenode::http::make_filesystem_api_router(make_server(shared));
+    REQUIRE(router);
+
+    const auto internal = dispatch_get(router.value(), "/api/Documents/internal.txt");
+    CHECK(internal.status_code() == sparenode::http::HttpStatusCode::ok);
+    CHECK(internal.is_streaming());
+    CHECK(internal.content_length() == 7);
+
+    const auto external = dispatch_get(router.value(), "/api/Documents/external.txt");
+    CHECK(external.status_code() == sparenode::http::HttpStatusCode::not_found);
+    CHECK(body_text(external) == "{\"error\":\"not_found\"}");
 }
 
 TEST_CASE("Filesystem API rejects runtime configuration without a location",
