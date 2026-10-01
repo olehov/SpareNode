@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "sparenode/filesystem/temporary_file.hpp"
+
 namespace sparenode::http
 {
 
@@ -36,8 +38,9 @@ struct HttpHeaderView
 
 /// @brief Borrows a complete parsed HTTP/1.1 request without copying its bytes.
 ///
-/// Every view remains valid only while the original input buffer remains alive,
-/// unmoved, and unmodified. Decoded chunked bodies retain shared immutable storage.
+/// Metadata views remain valid only while their original input buffer remains alive,
+/// unmoved, and unmodified. Direct parsing may retain decoded body memory; a session
+/// request instead shares a completed temporary-file artifact.
 class HttpRequestView
 {
   public:
@@ -53,9 +56,17 @@ class HttpRequestView
     /// @return Read-only view over the bounded header collection.
     [[nodiscard]] std::span<const HttpHeaderView> fields() const noexcept;
 
-    /// @brief Returns the decoded payload without transfer framing or trailers.
-    /// @return Borrowed read-only request body.
+    /// @brief Returns an in-memory decoded payload when direct parsing supplied one.
+    /// @return Borrowed body, or an empty span for file-backed session ingestion.
     [[nodiscard]] std::span<const std::byte> body() const noexcept;
+
+    /// @brief Returns the complete decoded payload size for memory or file-backed bodies.
+    /// @return Exact decoded byte count after framing removal.
+    [[nodiscard]] std::uint64_t body_size() const noexcept;
+
+    /// @brief Shares the completed temporary body artifact when session ingestion used disk.
+    /// @return Artifact owner, or null for memory-backed and zero-length bodies.
+    [[nodiscard]] std::shared_ptr<filesystem::TemporaryFile> temporary_body() const noexcept;
 
     /// @brief Finds the first header using an ASCII case-insensitive name comparison.
     /// @param[in] name Header field name to locate.
@@ -75,8 +86,9 @@ class HttpRequestView
     /// @param[in] target Validated normalized routing target.
     /// @param[in] headers Bounded validated header fields in source order.
     /// @param[in] body Exact borrowed body boundary.
+    /// @param[in] body_size Exact decoded size for memory-backed or file-backed payloads.
     HttpRequestView(HttpMethod method, std::string_view target, std::vector<HttpHeaderView> headers,
-                    std::span<const std::byte> body);
+                    std::span<const std::byte> body, std::uint64_t body_size);
 
     std::shared_ptr<const std::string> target_storage_; ///< Optional synthetic target owner.
     HttpMethod method_{};                               ///< Parsed supported request method.
@@ -84,6 +96,8 @@ class HttpRequestView
     std::vector<HttpHeaderView> headers_; ///< Bounded headers in source order.
     std::span<const std::byte> body_;     ///< Exact request body boundary.
     std::shared_ptr<const std::vector<std::byte>> body_storage_; ///< Optional decoded-body owner.
+    std::shared_ptr<filesystem::TemporaryFile> temporary_body_;  ///< Optional file-backed payload.
+    std::uint64_t body_size_{}; ///< Decoded memory or temporary-file payload bytes.
 };
 
 /// @brief Returns the canonical uppercase spelling of a supported HTTP method.

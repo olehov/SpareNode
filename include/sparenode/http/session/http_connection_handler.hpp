@@ -32,7 +32,7 @@ enum class HttpRequestReadPhase : std::uint8_t
 using HttpRequestDeadlineProvider = std::function<std::optional<network::NetworkDeadline>(
     HttpRequestReadPhase phase, network::NetworkDeadline session_started)>;
 
-/// @brief Defines bounded storage and injected I/O policy for one HTTP connection.
+/// @brief Defines bounded metadata, streaming-body, and I/O policy for one HTTP connection.
 struct HttpConnectionHandlerConfig
 {
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
@@ -45,9 +45,9 @@ struct HttpConnectionHandlerConfig
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.
 ///
-/// Input is accumulated incrementally in bounded storage until the parser returns
-/// one complete borrowed request. Any trailing pipelined bytes remain untouched
-/// until response completion. Output is then half-closed and extra socket input
+/// Metadata is accumulated incrementally in bounded memory while decoded body bytes
+/// stream into an automatically cleaned temporary file. Any trailing pipelined bytes
+/// remain untouched until response completion. Output is then half-closed and extra socket input
 /// is discarded within the configured byte and absolute time limits. Parser failures receive one
 /// bounded HTTP error response when the socket remains writable.
 /// @param[in] connection Open connection transferred exclusively to this call.

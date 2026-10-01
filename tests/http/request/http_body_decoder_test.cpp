@@ -5,6 +5,7 @@
 #include "sparenode/http/session/detail/buffered_request.hpp"
 #include "support/optional.hpp"
 #include <array>
+#include <fstream>
 #include <string>
 
 namespace
@@ -217,6 +218,16 @@ TEST_CASE("Buffered request feeds one-byte fragments without retaining chunk fra
     }
     REQUIRE(request.complete());
     const auto view = request.request();
-    CHECK(text(view.body()) == "ab");
+    CHECK(view.body().empty());
+    CHECK(view.body_size() == 2);
+    const auto artifact = view.temporary_body();
+    REQUIRE(artifact);
+    REQUIRE(artifact->completed());
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    std::string body(view.body_size(), '\0');
+    input.read(body.data(), static_cast<std::streamsize>(body.size()));
+    REQUIRE(input.good());
+    CHECK(body == "ab");
     CHECK(view.header("X").empty());
 }

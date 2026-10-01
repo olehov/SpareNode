@@ -2,9 +2,10 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <variant>
 
 #include "sparenode/http/request/detail/http_request_view_access.hpp"
-#include "sparenode/http/request/http_body_decoder.hpp"
+#include "sparenode/http/request/request_body_ingestor.hpp"
 
 namespace sparenode::http::detail
 {
@@ -16,8 +17,11 @@ enum class RequestExpectation : std::uint8_t
     unsupported       ///< At least one expectation cannot be met.
 };
 
-/// @brief Adapts streaming body ingestion to the MVP's bounded in-memory route contract.
-/// Metadata storage freezes after parsing; body bytes use one decoder for both framings.
+/// @brief Distinguishes metadata parsing from body ingestion failures.
+using BufferedRequestError = std::variant<HttpRequestParseError, RequestBodyIngestionError>;
+
+/// @brief Adapts streaming body ingestion to the session's file-backed route contract.
+/// Metadata storage freezes after parsing; decoded body bytes stream to temporary storage.
 class BufferedRequest final
 {
   public:
@@ -27,10 +31,16 @@ class BufferedRequest final
     {
     }
 
-    /// @brief Adds newly received wire bytes, retaining only metadata and decoded payload.
+    /// @brief Adds wire bytes, retaining metadata and streaming decoded payload to disk.
     /// @param[in] input Fresh receive bytes; trailing pipelined bytes are ignored after completion.
+    /// @param[in] stop_token Cancellation observed before body filesystem operations.
     /// @return Success or a structured terminal parse/body error.
-    [[nodiscard]] Result<void, HttpRequestParseError> feed(std::span<const std::byte> input);
+    [[nodiscard]] Result<void, BufferedRequestError> feed(std::span<const std::byte> input,
+                                                          const std::stop_token &stop_token = {});
+
+    /// @brief Validates peer EOF and completes temporary-file cleanup on failure.
+    /// @return Success only when the complete request boundary already arrived.
+    [[nodiscard]] Result<void, BufferedRequestError> finish();
 
     /// @brief Reports the transition to body ingestion for inactivity accounting.
     /// @return True once a valid complete request head is retained.
@@ -42,7 +52,7 @@ class BufferedRequest final
     /// @return True when the body decoder reaches its final boundary without failure.
     [[nodiscard]] bool complete() const noexcept
     {
-        return decoder_.has_value() && decoder_->complete();
+        return ingestor_.has_value() && ingestor_->complete();
     }
     /// @brief Reports whether the peer has sent no request bytes at all.
     /// @return True before receiving any request metadata.
@@ -54,11 +64,13 @@ class BufferedRequest final
     /// @return Complete request; callers must first check complete().
     [[nodiscard]] HttpRequestView request() const
     {
-        if (!head_.has_value() || !complete())
+        if (!head_.has_value() || !ingestor_.has_value() || !ingestor_->complete())
         {
             throw std::logic_error("HTTP request is incomplete");
         }
-        return HttpRequestViewAccess::create(head_.value(), body_);
+        const auto &ingestor = ingestor_.value();
+        return HttpRequestViewAccess::create_file_backed(head_.value(), ingestor.body_size(),
+                                                         ingestor.artifact());
     }
 
     /// @brief Consumes the header expectation decision once, before waiting for more body bytes.
@@ -66,16 +78,17 @@ class BufferedRequest final
     [[nodiscard]] RequestExpectation take_expectation();
 
   private:
-    /// @brief Drains decoder output into the bounded MVP payload buffer.
+    /// @brief Drains decoder output into the request's temporary-file sink.
     /// @param[in] input New body wire bytes, excluding previously consumed data.
+    /// @param[in] stop_token Cancellation observed before body filesystem operations.
     /// @return Success or terminal body syntax/limit failure.
-    [[nodiscard]] Result<void, HttpRequestParseError> feed_body(std::span<const std::byte> input);
+    [[nodiscard]] Result<void, BufferedRequestError> feed_body(std::span<const std::byte> input,
+                                                               const std::stop_token &stop_token);
 
-    bool expectation_checked_{};      ///< Prevents repeated interim responses.
-    HttpRequestParserLimits limits_;  ///< Session parser and decoder limits.
-    std::vector<std::byte> metadata_; ///< Frozen metadata backing all header views.
-    std::vector<std::byte> body_;     ///< Bounded decoded payload; replaceable by SN-087 ingestion.
-    std::optional<HttpRequestHead> head_;    ///< Validated borrowed request metadata.
-    std::optional<HttpBodyDecoder> decoder_; ///< Persistent body framing state.
+    bool expectation_checked_{};                  ///< Prevents repeated interim responses.
+    HttpRequestParserLimits limits_;              ///< Session parser and decoder limits.
+    std::vector<std::byte> metadata_;             ///< Frozen metadata backing all header views.
+    std::optional<HttpRequestHead> head_;         ///< Validated borrowed request metadata.
+    std::optional<RequestBodyIngestor> ingestor_; ///< Framing and temporary-file body sink.
 };
 } // namespace sparenode::http::detail

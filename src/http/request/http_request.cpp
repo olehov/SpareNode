@@ -11,8 +11,10 @@ namespace sparenode::http
 /// @brief Stores parser-validated borrowed request components without exposing mutation.
 HttpRequestView::HttpRequestView(const HttpMethod method, const std::string_view target,
                                  std::vector<HttpHeaderView> headers,
-                                 const std::span<const std::byte> body)
-    : method_(method), target_(target), headers_(std::move(headers)), body_(body)
+                                 const std::span<const std::byte> body,
+                                 const std::uint64_t body_size)
+    : method_(method), target_(target), headers_(std::move(headers)), body_(body),
+      body_size_(body_size)
 {
 }
 
@@ -38,6 +40,16 @@ std::span<const HttpHeaderView> HttpRequestView::fields() const noexcept
 std::span<const std::byte> HttpRequestView::body() const noexcept
 {
     return body_;
+}
+
+std::uint64_t HttpRequestView::body_size() const noexcept
+{
+    return body_size_;
+}
+
+std::shared_ptr<filesystem::TemporaryFile> HttpRequestView::temporary_body() const noexcept
+{
+    return temporary_body_;
 }
 
 /// @brief Finds the first case-insensitive header-name match.

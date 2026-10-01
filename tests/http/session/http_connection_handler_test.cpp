@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <fstream>
 #include <future>
 #include <optional>
 #include <span>
@@ -34,6 +35,28 @@ using SessionResult = sparenode::Result<void, sparenode::network::NetworkError>;
 [[nodiscard]] std::span<const std::byte> bytes_of(const std::string_view text) noexcept
 {
     return std::as_bytes(std::span(text.data(), text.size()));
+}
+
+/// @brief Reads the completed file-backed body exposed to a routed session request.
+/// @param[in] request Complete request whose body artifact remains owned by the view.
+/// @return Exact decoded payload bytes, or an empty string for an empty request body.
+[[nodiscard]] std::string request_body_text(const sparenode::http::HttpRequestView &request)
+{
+    CHECK(request.body().empty());
+    if (request.body_size() == 0)
+    {
+        CHECK_FALSE(request.temporary_body());
+        return {};
+    }
+    const auto artifact = request.temporary_body();
+    REQUIRE(artifact);
+    REQUIRE(artifact->completed());
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    std::string body(request.body_size(), '\0');
+    input.read(body.data(), static_cast<std::streamsize>(body.size()));
+    REQUIRE(input.good());
+    return body;
 }
 
 /// @brief Sends every request byte through a potentially partial native socket operation.
@@ -258,7 +281,7 @@ TEST_CASE("HTTP connection session distinguishes header and body read phases",
                               [&observed_body_size](const sparenode::http::HttpRequestView &request,
                                                     const sparenode::http::HttpRouteParameters &)
                               {
-                                  observed_body_size = request.body().size();
+                                  observed_body_size = request.body_size();
                                   return ok_response();
                               }));
     std::vector<sparenode::http::HttpRequestReadPhase> phases;
@@ -535,9 +558,7 @@ TEST_CASE("HTTP session routes decoded chunked payload after trailers", "[http][
                                   [&](const sparenode::http::HttpRequestView &request,
                                       const sparenode::http::HttpRouteParameters &)
                                   {
-                                      payload.assign(
-                                          reinterpret_cast<const char *>(request.body().data()),
-                                          request.body().size());
+                                      payload = request_body_text(request);
                                       return ok_response();
                                   }));
     send_all(pair.client, "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: Chunked\r\n\r\n"
@@ -910,7 +931,8 @@ TEST_CASE("Expect continue unblocks fixed and chunked request bodies", "[http][s
                                   [](const sparenode::http::HttpRequestView &request,
                                      const sparenode::http::HttpRouteParameters &)
                                   {
-                                      CHECK(request.body().size() == 3);
+                                      CHECK(request.body_size() == 3);
+                                      CHECK(request_body_text(request) == "abc");
                                       return ok_response();
                                   }));
     std::promise<SessionResult> promise;

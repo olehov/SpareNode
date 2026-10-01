@@ -1,10 +1,8 @@
 #include "sparenode/http/session/detail/buffered_request.hpp"
 
-#include <array>
 #include <string_view>
 
 #include "sparenode/http/detail/ascii.hpp"
-#include "sparenode/http/request/detail/body_decode_buffer.hpp"
 
 namespace sparenode::http::detail
 {
@@ -61,17 +59,18 @@ RequestExpectation BufferedRequest::take_expectation()
 }
 
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
-Result<void, HttpRequestParseError> BufferedRequest::feed(const std::span<const std::byte> input)
+Result<void, BufferedRequestError> BufferedRequest::feed(const std::span<const std::byte> input,
+                                                         const std::stop_token &stop_token)
 {
     if (head_.has_value())
     {
-        return feed_body(input);
+        return feed_body(input, stop_token);
     }
     metadata_.insert(metadata_.end(), input.begin(), input.end());
     auto parsed = parse_http_request_head(metadata_, limits_);
     if (!parsed)
     {
-        return unexpected(parsed.error());
+        return unexpected(BufferedRequestError(parsed.error()));
     }
     if (!parsed->has_value())
     {
@@ -79,31 +78,42 @@ Result<void, HttpRequestParseError> BufferedRequest::feed(const std::span<const 
     }
     auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
     const auto head_bytes = head.consumed_bytes;
-    decoder_.emplace(head, limits_);
+    ingestor_.emplace(head, limits_);
     head_ = std::move(head);
-    const auto result = feed_body(std::span(metadata_).subspan(head_bytes));
+    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), stop_token);
     metadata_.resize(head_bytes);
     return result;
 }
 
-/// @brief Copies only emitted payload; chunk metadata and trailers never enter body storage.
-Result<void, HttpRequestParseError> BufferedRequest::feed_body(std::span<const std::byte> input)
+/// @brief Persists only emitted payload; chunk metadata and trailers never enter body storage.
+Result<void, BufferedRequestError>
+BufferedRequest::feed_body(const std::span<const std::byte> input,
+                           const std::stop_token &stop_token)
 {
-    if (!decoder_.has_value())
+    if (!ingestor_.has_value())
     {
-        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, 0});
+        return unexpected(BufferedRequestError(
+            HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, 0}));
     }
-    std::array<std::byte, body_decode_buffer_bytes> output{};
-    while (!input.empty() && !decoder_->complete())
+    const auto progress = ingestor_->feed(input, stop_token);
+    if (!progress)
     {
-        const auto progress = decoder_->feed(input, output);
-        if (!progress)
-        {
-            return unexpected(progress.error());
-        }
-        body_.insert(body_.end(), output.begin(),
-                     output.begin() + static_cast<std::ptrdiff_t>(progress->produced));
-        input = input.subspan(progress->consumed);
+        return unexpected(BufferedRequestError(progress.error()));
+    }
+    return {};
+}
+
+Result<void, BufferedRequestError> BufferedRequest::finish()
+{
+    if (!ingestor_)
+    {
+        return unexpected(BufferedRequestError(
+            HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, metadata_.size()}));
+    }
+    const auto result = ingestor_->finish();
+    if (!result)
+    {
+        return unexpected(BufferedRequestError(result.error()));
     }
     return {};
 }
