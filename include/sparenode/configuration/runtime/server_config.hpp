@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
@@ -23,13 +24,16 @@ class ServerConfig final
     /// @param[in] minimum_log_severity Minimum emitted log severity.
     /// @param[in] locations Validated filesystem locations in configuration order.
     /// @param[in] http_timeouts Validated HTTP receive budgets.
+    /// @param[in] mime_types Validated immutable MIME mappings.
     ServerConfig(network::TcpEndpoint endpoint, bool multithreading_enabled,
                  std::size_t worker_threads, logging::LogSeverity minimum_log_severity,
                  std::vector<LocationConfig> locations,
-                 http::HttpRequestTimeouts http_timeouts = {})
+                 http::HttpRequestTimeouts http_timeouts = {},
+                 http::MimeTypeRegistry mime_types = {})
         : endpoint_(std::move(endpoint)), multithreading_enabled_(multithreading_enabled),
           worker_threads_(worker_threads), minimum_log_severity_(minimum_log_severity),
-          locations_(std::move(locations)), http_timeouts_(http_timeouts)
+          locations_(std::move(locations)), http_timeouts_(http_timeouts),
+          mime_types_(std::move(mime_types))
     {
     }
 
@@ -82,6 +86,13 @@ class ServerConfig final
         return http_timeouts_;
     }
 
+    /// @brief Returns the configured immutable MIME registry.
+    /// @return Registry loaded before server startup.
+    [[nodiscard]] const http::MimeTypeRegistry &mime_types() const noexcept
+    {
+        return mime_types_;
+    }
+
   private:
     network::TcpEndpoint endpoint_;             ///< Numeric listener address and TCP port.
     bool multithreading_enabled_;               ///< Enables the configured fixed worker pool.
@@ -89,6 +100,7 @@ class ServerConfig final
     logging::LogSeverity minimum_log_severity_; ///< Minimum emitted log severity.
     std::vector<LocationConfig> locations_;     ///< Validated locations in configuration order.
     http::HttpRequestTimeouts http_timeouts_;   ///< Immutable HTTP receive budgets.
+    http::MimeTypeRegistry mime_types_;         ///< Immutable response media-type mappings.
 };
 
 } // namespace sparenode::configuration::runtime

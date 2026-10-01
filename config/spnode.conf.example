@@ -6,6 +6,8 @@ server {
     multithreading true;
     worker_threads 4;
     log_level "info";
+    # Relative paths are resolved from the directory containing this file.
+    mime_types_file "mime.types";
     # Receive inactivity and total request budgets, in milliseconds.
     header_timeout_ms 10000;
     body_timeout_ms 10000;

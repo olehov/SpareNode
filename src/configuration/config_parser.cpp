@@ -348,6 +348,10 @@ class ParserState final
         {
             return directives::ServerDirectiveKind::log_level;
         }
+        if (name == "mime_types_file")
+        {
+            return directives::ServerDirectiveKind::mime_types_file;
+        }
         return std::nullopt;
     }
 
@@ -386,6 +390,7 @@ class ParserState final
         {
         case directives::ServerDirectiveKind::bind:
         case directives::ServerDirectiveKind::log_level:
+        case directives::ServerDirectiveKind::mime_types_file:
             return ConfigParserExpectation::string_literal;
         case directives::ServerDirectiveKind::port:
         case directives::ServerDirectiveKind::worker_threads:

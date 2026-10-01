@@ -25,6 +25,7 @@ enum class ConfigValidationErrorCode : std::uint8_t
     unexpected_worker_threads,    ///< A worker count is present while multithreading is disabled.
     worker_threads_out_of_range,  ///< The enabled worker count is outside 2 through 64.
     invalid_log_level,            ///< `log_level` is not a supported severity.
+    invalid_mime_types_file,      ///< `mime_types_file` is empty.
     timeout_out_of_range,         ///< A receive timeout is outside 1 through 86400000 milliseconds.
     invalid_location_path,        ///< A location argument is not a supported HTTP origin path.
     conflicting_location_path,    ///< Two location paths overlap or are duplicates.

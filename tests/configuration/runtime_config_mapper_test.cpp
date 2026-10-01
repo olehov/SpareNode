@@ -103,3 +103,19 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     CHECK(server.locations().front().permissions() ==
           sparenode::configuration::runtime::LocationPermissions{false, true, true});
 }
+
+TEST_CASE("Runtime configuration mapper transfers the validated MIME registry",
+          "[configuration][runtime][mime-types]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-runtime-mime-config");
+    const auto validated = validate_configuration(make_configuration(directory.path()));
+    auto registry = sparenode::http::MimeTypeRegistry::create({{"png", "image/png"}});
+    REQUIRE(registry.has_value());
+
+    const auto runtime_config =
+        sparenode::configuration::RuntimeConfigMapper::map(validated, std::move(registry).value());
+
+    REQUIRE(runtime_config.servers().size() == 1);
+    CHECK(runtime_config.servers().front().mime_types().content_type_for_path("file.png") ==
+          "image/png");
+}

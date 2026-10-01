@@ -120,6 +120,26 @@ TEST_CASE("Configuration validator accepts version one defaults and independent 
     CHECK(std::filesystem::equivalent(result->location_roots().front().path(), directory.path()));
 }
 
+TEST_CASE("Configuration validator requires a nonempty singleton MIME file path",
+          "[configuration][validator][mime-types]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-mime-validator");
+
+    const auto accepted = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+        make_configuration(directory.path(), "mime_types_file \"mime.types\";\n")));
+    REQUIRE(accepted.has_value());
+
+    const auto empty =
+        require_validation_errors(make_configuration(directory.path(), "mime_types_file \"\";\n"));
+    REQUIRE(empty.size() == 1);
+    CHECK(empty.front().code == ConfigValidationErrorCode::invalid_mime_types_file);
+
+    const auto duplicate = require_validation_errors(make_configuration(
+        directory.path(), "mime_types_file \"first.types\";\nmime_types_file \"second.types\";\n"));
+    REQUIRE(duplicate.size() == 1);
+    CHECK(duplicate.front().code == ConfigValidationErrorCode::duplicate_server_directive);
+}
+
 TEST_CASE("Configuration validator collects independent server failures",
           "[configuration][validator]")
 {

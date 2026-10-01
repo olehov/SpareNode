@@ -19,6 +19,7 @@ server {
     multithreading true;
     worker_threads 4;
     log_level "info";
+    mime_types_file "mime.types";
     header_timeout_ms 10000;
     body_timeout_ms 10000;
     request_timeout_ms 30000;
@@ -75,7 +76,7 @@ identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 
 Version 1 reserves `server`, `location`, `bind`, `port`, `multithreading`,
 `worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
-`request_timeout_ms`, `path`, `read`, `write`, `delete`, `true`, and
+`request_timeout_ms`, `mime_types_file`, `path`, `read`, `write`, `delete`, `true`, and
 `false` according to their grammatical positions. Keywords must be written in
 lowercase.
 
@@ -133,6 +134,7 @@ server-item              = bind-directive
                          | threading-directive
                          | worker-threads-directive
                          | log-level-directive
+                         | mime-types-file-directive
                          | header-timeout-directive
                          | body-timeout-directive
                          | request-timeout-directive
@@ -143,6 +145,7 @@ port-directive           = "port", integer, ";" ;
 threading-directive      = "multithreading", boolean, ";" ;
 worker-threads-directive = "worker_threads", integer, ";" ;
 log-level-directive      = "log_level", string, ";" ;
+mime-types-file-directive = "mime_types_file", string, ";" ;
 header-timeout-directive = "header_timeout_ms", integer, ";" ;
 body-timeout-directive   = "body_timeout_ms", integer, ";" ;
 request-timeout-directive = "request_timeout_ms", integer, ";" ;
@@ -178,6 +181,7 @@ prefix for that filesystem root.
 | `multithreading` | zero or one | `false` | Enables the configured worker pool when `true` |
 | `worker_threads` | conditional | none | Required with `multithreading true`; integer from 2 through 64 |
 | `log_level` | zero or one | `"info"` | One of `"debug"`, `"info"`, `"warning"`, or `"error"` |
+| `mime_types_file` | zero or one | none | Non-empty path to a bounded `mime.types` file |
 | `header_timeout_ms` | zero or one | `10000` | Header receive inactivity, 1 through 86400000 milliseconds |
 | `body_timeout_ms` | zero or one | `10000` | Body receive inactivity, 1 through 86400000 milliseconds |
 | `request_timeout_ms` | zero or one | `30000` | Total request receive time, 1 through 86400000 milliseconds |
@@ -185,6 +189,13 @@ prefix for that filesystem root.
 
 Hostnames are not accepted by `bind` in version 1. IPv6 addresses remain quoted
 strings, for example `bind "::";` or `bind "::1";`.
+
+An absolute `mime_types_file` path is used directly. A relative path is resolved
+from the directory containing `spnode.conf`. The file is loaded once before
+server resources start; unreadable or invalid content is fatal. When the directive
+is omitted, the runtime registry is empty and file responses use the safe unknown
+type fallback. See [MIME type configuration](mime-types.md) for syntax, bounds,
+diagnostics, and the browser safety policy.
 
 Receive timeouts use unsigned integer milliseconds without a unit suffix. Zero,
 negative values, quoted numbers, and values above 24 hours are rejected before

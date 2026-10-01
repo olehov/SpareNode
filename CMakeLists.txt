@@ -42,6 +42,7 @@ add_library(sparenode_core STATIC
     src/application/running_application.cpp
     src/configuration/config_lexer.cpp
     src/configuration/config_loader.cpp
+    src/configuration/mime_types_loader.cpp
     src/configuration/config_parser.cpp
     src/configuration/config_validator.cpp
     src/configuration/runtime_config_mapper.cpp
@@ -50,6 +51,7 @@ add_library(sparenode_core STATIC
     src/filesystem/directory_listing.cpp
     src/filesystem/safe_path.cpp
     src/http/api/filesystem_api.cpp
+    src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
     src/http/request/http_request.cpp
     src/http/request/http_request_parser.cpp
@@ -149,4 +151,9 @@ install(
         "${PROJECT_SOURCE_DIR}/README.md"
         "${PROJECT_BINARY_DIR}/VERSION"
     DESTINATION .
+)
+
+install(
+    FILES "${PROJECT_SOURCE_DIR}/config/mime.types"
+    DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/sparenode"
 )

@@ -86,6 +86,7 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     multithreading true;
     worker_threads 4;
     log_level "debug";
+    mime_types_file "mime.types";
     location "/api/Documents" {
         path "/srv/Documents";
         read true;
@@ -95,7 +96,7 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
 })";
 
     const auto configuration = require_configuration(input);
-    REQUIRE(configuration.server.directives.size() == 5);
+    REQUIRE(configuration.server.directives.size() == 6);
     CHECK(configuration.server.directives[0].kind ==
           sparenode::configuration::directives::ServerDirectiveKind::bind);
     CHECK(std::get<std::string>(configuration.server.directives[0].value.scalar) == "127.0.0.1");
@@ -103,6 +104,9 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     CHECK(std::get<bool>(configuration.server.directives[2].value.scalar));
     CHECK(std::get<std::uint64_t>(configuration.server.directives[3].value.scalar) == 4);
     CHECK(std::get<std::string>(configuration.server.directives[4].value.scalar) == "debug");
+    CHECK(configuration.server.directives[5].kind ==
+          sparenode::configuration::directives::ServerDirectiveKind::mime_types_file);
+    CHECK(std::get<std::string>(configuration.server.directives[5].value.scalar) == "mime.types");
 
     REQUIRE(configuration.server.locations.size() == 1);
     const auto &location = configuration.server.locations.front();
@@ -241,6 +245,16 @@ TEST_CASE("Configuration parser rejects unexpected names nesting and value types
         const auto error = require_parser_error("server { port; }");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::integer_literal);
+    }
+
+    SECTION("multiple MIME file values")
+    {
+        const auto error =
+            require_parser_error("server { mime_types_file \"mime.types\" \"mime1.types\"; }");
+        CHECK(sparenode::test::require_optional(error.expected) ==
+              ConfigParserExpectation::semicolon);
+        CHECK(sparenode::test::require_optional(error.actual_token_kind) ==
+              ConfigTokenKind::string_literal);
     }
 
     SECTION("tokens after server block")

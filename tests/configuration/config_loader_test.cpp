@@ -14,6 +14,7 @@
 #include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "support/temporary_directory.hpp"
+#include "support/windows_junction.hpp"
 
 namespace
 {
@@ -101,6 +102,105 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
     CHECK(server.locations().front().permissions() ==
           sparenode::configuration::runtime::LocationPermissions{false, true, true});
+}
+
+TEST_CASE("Configuration loader resolves and loads MIME mappings beside the main file",
+          "[configuration][loader][mime-types]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-loader");
+    {
+        std::ofstream mime_file(directory.path() / "custom.types", std::ios::binary);
+        REQUIRE(mime_file.is_open());
+        mime_file << "image/png png\ntext/plain txt\n";
+        REQUIRE(mime_file.good());
+    }
+    const auto location =
+        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
+    const auto config_path =
+        write_config(directory, make_config("mime_types_file \"custom.types\";\n", location));
+
+    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->servers().size() == 1);
+    CHECK(result->servers().front().mime_types().content_type_for_path("image.PNG") == "image/png");
+}
+
+TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
+          "[configuration][loader][mime-types][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-symlink");
+    const auto target = directory.path() / "target";
+    const auto nested = target / "nested";
+    std::filesystem::create_directories(nested);
+    const auto link = directory.path() / "link";
+    std::error_code link_error;
+#ifdef _WIN32
+    link_error = sparenode::test::create_directory_junction(nested, link);
+#else
+    std::filesystem::create_directory_symlink(nested, link, link_error);
+#endif
+    if (link_error)
+    {
+        SKIP("Directory redirection creation is unavailable: " << link_error.message());
+    }
+
+// Windows normalizes `..` before traversing a reparse point, while POSIX resolves it after
+// following the directory symlink. Place the fixture where each platform resolves the raw path.
+#ifdef _WIN32
+    const auto &resolved_parent = directory.path();
+#else
+    const auto &resolved_parent = target;
+#endif
+    {
+        std::ofstream mime_file(resolved_parent / "custom.types", std::ios::binary);
+        REQUIRE(mime_file.is_open());
+        mime_file << "image/png png\n";
+        REQUIRE(mime_file.good());
+    }
+    REQUIRE(std::filesystem::exists(link / ".." / "custom.types"));
+    const auto location =
+        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
+    const std::vector<std::pair<std::string, std::string>> configured_paths{
+        {"relative", "link/../custom.types"},
+        {"absolute", (link / ".." / "custom.types").generic_string()},
+    };
+
+    for (const auto &[name, configured_path] : configured_paths)
+    {
+        DYNAMIC_SECTION(name)
+        {
+            const auto config_path = write_config(
+                directory, make_config("mime_types_file \"" + configured_path + "\";\n", location));
+            const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+
+            REQUIRE(result.has_value());
+            CHECK(result->servers().front().mime_types().content_type_for_path("image.png") ==
+                  "image/png");
+        }
+    }
+}
+TEST_CASE("Configuration loader attributes MIME failures to the resolved MIME file",
+          "[configuration][loader][mime-types]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-error");
+    const auto missing_path = directory.path() / "missing.types";
+    const auto location =
+        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
+    const auto config_path =
+        write_config(directory, make_config("mime_types_file \"missing.types\";\n", location));
+
+    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().source_path == missing_path);
+    REQUIRE(std::holds_alternative<sparenode::configuration::MimeTypesLoadError>(
+        result.error().failure));
+    CHECK(std::get<sparenode::configuration::MimeTypesLoadError>(result.error().failure).code ==
+          sparenode::configuration::MimeTypesLoadErrorCode::open_failed);
+    CHECK(sparenode::configuration::format_config_load_error(result.error())
+              .find(missing_path.generic_string() +
+                    ":1:1: error: unable to open MIME types file") != std::string::npos);
 }
 
 TEST_CASE("Configuration loader preserves file lexer parser and validation failures",
