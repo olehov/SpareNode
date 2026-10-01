@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <iomanip>
+#include <memory>
 #include <new>
 #include <span>
 #include <sstream>
@@ -12,10 +13,12 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/filesystem/detail/path_request_decoder.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "sparenode/http/http_status_code.hpp"
+#include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/http/response/http_response.hpp"
 
@@ -250,7 +253,7 @@ public_error(const FileReadError &error) noexcept
 
 /// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-make_file_response(filesystem::FileReadStream stream)
+make_file_response(filesystem::FileReadStream stream, const std::string_view content_type)
 {
     const auto content_length = stream.size();
     HttpBodyReader reader = [stream = std::move(stream)](const std::span<std::byte> destination,
@@ -269,7 +272,9 @@ make_file_response(filesystem::FileReadStream stream)
         return unexpected(HttpBodyReadError{domain, static_cast<int>(error.code)});
     };
     auto response = HttpResponse::create_streaming(HttpStatusCode::ok, "OK",
-                                                   {{"Content-Type", "application/octet-stream"}},
+                                                   {{"Content-Type", std::string(content_type)},
+                                                    {"Content-Disposition", "inline"},
+                                                    {"X-Content-Type-Options", "nosniff"}},
                                                    content_length, std::move(reader));
     if (!response)
     {
@@ -292,19 +297,24 @@ make_public_error_response(const std::pair<HttpStatusCode, std::string_view> pub
 
 /// @brief Opens one file request and creates its streaming response.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-handle_file(const LocationConfig &location, const std::string_view requested_path)
+handle_file(const LocationConfig &location, const MimeTypeRegistry &mime_types,
+            const std::string_view requested_path)
 {
     auto file = filesystem::FileReadStream::open(location.root(), requested_path);
     if (!file)
     {
         return make_public_error_response(public_error(file.error()));
     }
-    return make_file_response(std::move(file).value());
+    const auto decoded_path = filesystem::detail::decode_path_request(requested_path);
+    const auto content_type = decoded_path ? mime_types.content_type_for_path(decoded_path.value())
+                                           : mime_types.content_type_for_path({});
+    return make_file_response(std::move(file).value(), content_type);
 }
 
-/// @brief Handles one exact or wildcard directory-listing or file-download route.
+/// @brief Handles one exact or wildcard directory-listing or inline-file route.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-handle_resource(const LocationConfig &location, const std::string_view requested_path)
+handle_resource(const LocationConfig &location, const MimeTypeRegistry &mime_types,
+                const std::string_view requested_path)
 {
     try
     {
@@ -317,7 +327,7 @@ handle_resource(const LocationConfig &location, const std::string_view requested
         {
             if (listing.error().code == DirectoryListingErrorCode::not_directory)
             {
-                return handle_file(location, requested_path);
+                return handle_file(location, mime_types, requested_path);
             }
             return make_public_error_response(public_error(listing.error()));
         }
@@ -344,13 +354,14 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
             return unexpected(FilesystemApiError{FilesystemApiErrorCode::missing_location, {}});
         }
 
+        const auto mime_types = std::make_shared<const MimeTypeRegistry>(server.mime_types());
         HttpRouter router;
         for (const auto &location : server.locations())
         {
             auto exact = router.register_route(
                 HttpMethod::get, location.api_path(),
-                [location](const HttpRequestView &, const HttpRouteParameters &)
-                { return handle_resource(location, {}); });
+                [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
+                { return handle_resource(location, *mime_types, {}); });
             if (!exact)
             {
                 return unexpected(FilesystemApiError{
@@ -360,8 +371,9 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
                 location.api_path() == "/" ? std::string("/*") : location.api_path() + "/*";
             auto nested = router.register_route(
                 HttpMethod::get, nested_path,
-                [location](const HttpRequestView &, const HttpRouteParameters &parameters)
-                { return handle_resource(location, parameters.wildcard_suffix()); });
+                [location, mime_types](const HttpRequestView &,
+                                       const HttpRouteParameters &parameters)
+                { return handle_resource(location, *mime_types, parameters.wildcard_suffix()); });
             if (!nested)
             {
                 return unexpected(FilesystemApiError{

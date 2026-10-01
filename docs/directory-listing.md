@@ -4,7 +4,7 @@ SpareNode exposes each configured filesystem location through two read-only HTTP
 For a location configured as `/api/Documents`:
 
 - `GET /api/Documents` lists the location root.
-- `GET /api/Documents/*` lists a directory or downloads a regular file identified by the
+- `GET /api/Documents/*` lists a directory or serves a regular file identified by the
   wildcard suffix.
 
 The suffix is an untrusted, URL-encoded UTF-8 relative path. It passes through
@@ -42,10 +42,20 @@ included.
 
 ## File response
 
-A regular file returns `200 OK`, `Content-Type: application/octet-stream`, and the exact
-`Content-Length` captured from its opened native handle. The response owns that handle and reads
-the file incrementally through the HTTP writer's fixed 16 KiB buffer. File contents are therefore
-not copied into an application-sized memory allocation before transmission.
+A regular file returns `200 OK`, `Content-Disposition: inline`,
+`X-Content-Type-Options: nosniff`, and the exact `Content-Length` captured from its opened native
+handle. SpareNode selects `Content-Type` from the immutable MIME registry loaded during startup.
+The lookup uses the decoded filename extension and is ASCII case-insensitive. Unknown types use
+`application/octet-stream`.
+
+HTML, SVG, and JavaScript-family files use `text/plain; charset=utf-8` regardless of their
+configured mapping. Rendering active content is a client concern, and serving it as executable
+same-origin content would allow a shared file to act as part of the SpareNode application. The
+`nosniff` response field prevents clients from overriding this policy through content inspection.
+
+The response owns the opened file handle and reads it incrementally through the HTTP writer's fixed
+16 KiB buffer. File contents are therefore not copied into an application-sized memory allocation
+before transmission.
 
 `HEAD` uses the same route and reports the file headers without reading its payload. A cancelled
 request is observed before the next native read. Closing or destroying the response closes the
