@@ -389,6 +389,18 @@ struct HttpSessionRunContext
     network::NetworkDeadline started;          ///< Session start for injected policies.
 };
 
+/// @brief Combines the current phase deadline with the optional shorter provider deadline.
+[[nodiscard]] network::NetworkIoOptions bounded_read_options(const HttpSessionRunContext &context,
+                                                             const HttpRequestReadPhase phase)
+{
+    auto options = read_options(context.config, phase, context.started, context.stop_token);
+    const auto bounded_deadline = context.deadlines.next(phase == HttpRequestReadPhase::body);
+    options.deadline = options.deadline.has_value()
+                           ? (std::min)(options.deadline.value(), bounded_deadline)
+                           : bounded_deadline;
+    return options;
+}
+
 /// @brief Converts a buffered-request failure into a network interruption or HTTP response.
 [[nodiscard]] Result<void, network::NetworkError>
 respond_to_request_failure(network::TcpConnection &connection,
@@ -438,11 +450,7 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
         }
         const auto phase =
             request.reading_body() ? HttpRequestReadPhase::body : HttpRequestReadPhase::headers;
-        auto options = read_options(context.config, phase, context.started, context.stop_token);
-        const auto bounded_deadline = context.deadlines.next(phase == HttpRequestReadPhase::body);
-        options.deadline = options.deadline.has_value()
-                               ? (std::min)(options.deadline.value(), bounded_deadline)
-                               : bounded_deadline;
+        const auto options = bounded_read_options(context, phase);
         auto received = connection.receive_with_options(input, options);
         if (!received)
         {
@@ -463,8 +471,9 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
                                        context.config);
         }
         context.deadlines.record_progress(std::chrono::steady_clock::now());
+        const auto body_options = bounded_read_options(context, HttpRequestReadPhase::body);
         const auto parsed =
-            request.feed(std::span(input).first(received.value()), file_options(options));
+            request.feed(std::span(input).first(received.value()), file_options(body_options));
         if (!parsed)
         {
             return respond_to_request_failure(connection, parsed.error(), context);

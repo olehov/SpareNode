@@ -82,28 +82,28 @@ class TemporaryFile
 
     /// @brief Returns the owned path while the artifact remains unreleased.
     /// @return Filesystem path removed by destruction until release succeeds.
-    [[nodiscard]] const std::filesystem::path &path() const noexcept
+    [[nodiscard]] virtual const std::filesystem::path &path() const noexcept
     {
         return path_;
     }
 
     /// @brief Returns the exact number of successfully written bytes.
     /// @return Cumulative byte count accepted by write().
-    [[nodiscard]] std::uint64_t size() const noexcept
+    [[nodiscard]] virtual std::uint64_t size() const noexcept
     {
         return size_;
     }
 
     /// @brief Reports whether flushing and native close completed successfully.
     /// @return True only after complete() succeeds.
-    [[nodiscard]] bool completed() const noexcept
+    [[nodiscard]] virtual bool completed() const noexcept
     {
         return completed_;
     }
 
     /// @brief Relinquishes automatic path removal after successful completion.
     /// @return Former owned path or an invalid-state error.
-    [[nodiscard]] Result<std::filesystem::path, TemporaryFileError> release();
+    [[nodiscard]] virtual Result<std::filesystem::path, TemporaryFileError> release();
 
   private:
     /// @brief Adopts one exclusive native file and its cleanup path.

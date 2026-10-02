@@ -25,7 +25,7 @@ enum class RequestBodyIngestionErrorCode : std::uint8_t
     temporary_file_failure, ///< Temporary creation, write, flush, or close failed.
     cancelled,              ///< The caller requested cancellation.
     deadline_exceeded,      ///< The active request receive deadline expired.
-    resource_failure        ///< Artifact ownership allocation failed.
+    resource_failure        ///< Artifact ownership or bounded file-worker capacity failed.
 };
 
 /// @brief Preserves protocol and filesystem detail for one ingestion failure.
@@ -40,8 +40,8 @@ struct RequestBodyIngestionError
 ///
 /// HTTP framing remains delegated to `HttpBodyDecoder`. The same file sink receives
 /// payload from both framing modes, and owns partial-file cleanup on every failure.
-/// A stalled native file operation retains its own file owner and payload copy until
-/// it returns; the request worker can stop waiting at cancellation or deadline.
+/// A stalled native file operation retains its file owner and fixed payload buffer
+/// until it returns; the request worker can stop waiting at cancellation or deadline.
 class RequestBodyIngestor final
 {
   public:
@@ -51,6 +51,9 @@ class RequestBodyIngestor final
     /// @param[in] file_factory Optional alternate factory used by controlled environments.
     RequestBodyIngestor(const HttpRequestHead &head, const HttpRequestParserLimits &limits,
                         TemporaryBodyFileFactory file_factory = {});
+
+    /// @brief Stops an idle I/O worker or leaves a stalled one owning its artifact.
+    ~RequestBodyIngestor();
 
     /// @brief Decodes fresh wire bytes and appends produced payload to temporary storage.
     /// @param[in] input Bytes beginning at the previous unconsumed body boundary.
@@ -95,6 +98,11 @@ class RequestBodyIngestor final
     /// @brief Lazily creates the temporary sink for the first nonempty payload span.
     /// @return Success, or a structured creation/allocation failure.
     [[nodiscard]] Result<void, RequestBodyIngestionError> ensure_artifact();
+    /// @brief Starts one reusable bounded I/O worker when the caller has an active policy.
+    /// @param[in] options Cancellation and deadline while waiting for worker capacity.
+    /// @return Success or a structured capacity or creation failure.
+    [[nodiscard]] Result<void, RequestBodyIngestionError>
+    ensure_file_worker(const filesystem::TemporaryFileIoOptions &options);
     /// @brief Flushes and closes a nonempty sink after framing completes.
     /// @param[in] options Cancellation and deadline applied to finalization.
     /// @return Success, or a structured flush/close failure.
@@ -119,8 +127,10 @@ class RequestBodyIngestor final
     HttpBodyDecoder decoder_;               ///< Existing framing state shared by both body modes.
     TemporaryBodyFileFactory file_factory_; ///< Empty selects native private-file creation.
     std::shared_ptr<filesystem::TemporaryFile> artifact_; ///< Lazy nonempty file owner.
-    std::uint64_t body_size_{};                           ///< Successfully persisted decoded bytes.
-    bool finalized_{}; ///< Empty or file-backed body completed successfully.
+    struct FileWorker;
+    std::unique_ptr<FileWorker> file_worker_; ///< Reuses one I/O thread and payload buffer.
+    std::uint64_t body_size_{};               ///< Successfully persisted decoded bytes.
+    bool finalized_{};                        ///< Empty or file-backed body completed successfully.
     std::optional<RequestBodyIngestionError> failure_; ///< Preserves the terminal failure.
 };
 
