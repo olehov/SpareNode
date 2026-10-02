@@ -471,9 +471,9 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
                                        context.config);
         }
         context.deadlines.record_progress(std::chrono::steady_clock::now());
-        const auto body_options = bounded_read_options(context, HttpRequestReadPhase::body);
-        const auto parsed =
-            request.feed(std::span(input).first(received.value()), file_options(body_options));
+        const auto parsed = request.feed_with_body_options(
+            std::span(input).first(received.value()), [&context]
+            { return file_options(bounded_read_options(context, HttpRequestReadPhase::body)); });
         if (!parsed)
         {
             return respond_to_request_failure(connection, parsed.error(), context);

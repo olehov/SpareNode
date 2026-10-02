@@ -25,7 +25,7 @@ enum class RequestBodyIngestionErrorCode : std::uint8_t
     temporary_file_failure, ///< Temporary creation, write, flush, or close failed.
     cancelled,              ///< The caller requested cancellation.
     deadline_exceeded,      ///< The active request receive deadline expired.
-    resource_failure        ///< Artifact ownership or bounded file-worker capacity failed.
+    resource_failure        ///< Artifact ownership or bounded file-operation capacity failed.
 };
 
 /// @brief Preserves protocol and filesystem detail for one ingestion failure.
@@ -98,9 +98,9 @@ class RequestBodyIngestor final
     /// @brief Lazily creates the temporary sink for the first nonempty payload span.
     /// @return Success, or a structured creation/allocation failure.
     [[nodiscard]] Result<void, RequestBodyIngestionError> ensure_artifact();
-    /// @brief Starts one reusable bounded I/O worker when the caller has an active policy.
-    /// @param[in] options Cancellation and deadline while waiting for worker capacity.
-    /// @return Success or a structured capacity or creation failure.
+    /// @brief Starts one reusable I/O worker when the caller has an active policy.
+    /// @param[in] options Policy whose presence selects isolated native I/O.
+    /// @return Success or a structured worker creation failure.
     [[nodiscard]] Result<void, RequestBodyIngestionError>
     ensure_file_worker(const filesystem::TemporaryFileIoOptions &options);
     /// @brief Flushes and closes a nonempty sink after framing completes.

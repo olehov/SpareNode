@@ -63,9 +63,17 @@ Result<void, BufferedRequestError>
 BufferedRequest::feed(const std::span<const std::byte> input,
                       const filesystem::TemporaryFileIoOptions &options)
 {
+    return feed_with_body_options(input, [&options] { return options; });
+}
+
+/// @brief Defers the file deadline provider until validated metadata reaches body ingestion.
+Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
+    const std::span<const std::byte> input,
+    const std::function<filesystem::TemporaryFileIoOptions()> &options_provider)
+{
     if (head_.has_value())
     {
-        return feed_body(input, options);
+        return feed_body(input, options_provider());
     }
     metadata_.insert(metadata_.end(), input.begin(), input.end());
     auto parsed = parse_http_request_head(metadata_, limits_);
@@ -81,7 +89,7 @@ BufferedRequest::feed(const std::span<const std::byte> input,
     const auto head_bytes = head.consumed_bytes;
     ingestor_.emplace(head, limits_, file_factory_);
     head_ = std::move(head);
-    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options);
+    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options_provider());
     metadata_.resize(head_bytes);
     return result;
 }

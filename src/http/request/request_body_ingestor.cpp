@@ -25,13 +25,13 @@ using FileOperationResult = Result<void, filesystem::TemporaryFileError>;
         filesystem::TemporaryFileErrorCode::resource_allocation_failed, native_code});
 }
 
-/// @brief Tracks reusable workers and the subset left behind by timed-out requests.
+/// @brief Bounds active native file operations, including those orphaned by timeouts.
 class FileWorkerSlots
 {
   public:
     struct Ticket
     {
-        bool orphaned{}; ///< A request stopped waiting while this worker was active.
+        bool orphaned{}; ///< A request stopped waiting during this native operation.
         bool released{}; ///< Prevents accounting the same worker twice.
     };
 
@@ -101,12 +101,12 @@ class FileWorkerSlots
     }
 
   private:
-    /// 32 isolates storage stalls without treating healthy queued uploads as failures.
+    /// 32 isolates storage stalls without reserving slots for idle file workers.
     static constexpr std::size_t maximum_workers = 32;
     std::mutex mutex_;                      ///< Protects worker and orphan counts.
     std::condition_variable_any available_; ///< Wakes queued requests after release.
-    std::size_t active_{};                  ///< Workers currently owning a slot.
-    std::size_t orphaned_{};                ///< Active workers detached by a request.
+    std::size_t active_{};                  ///< Native operations currently owning a slot.
+    std::size_t orphaned_{};                ///< Active operations detached by a request.
 };
 
 /// @brief Keeps slot synchronization alive until process exit, including detached workers.
@@ -155,7 +155,8 @@ struct RequestBodyIngestor::FileWorker
 
         std::mutex mutex;                    ///< Protects queued work and result publication.
         std::condition_variable_any changed; ///< Wakes the file and request workers.
-        std::shared_ptr<filesystem::TemporaryFile> file;                  ///< Owns delayed cleanup.
+        std::shared_ptr<filesystem::TemporaryFile> file; ///< Owns delayed cleanup.
+        std::shared_ptr<FileWorkerSlots::Ticket> ticket; ///< Slot for the current operation.
         std::array<std::byte, detail::body_decode_buffer_bytes> buffer{}; ///< Reused payload.
         filesystem::TemporaryFileIoOptions options{}; ///< Policy for the queued operation.
         std::optional<FileOperationResult> result;    ///< Result of the latest operation.
@@ -167,11 +168,9 @@ struct RequestBodyIngestor::FileWorker
         bool stopping{};                              ///< Worker exits after the current operation.
     };
 
-    /// @brief Associates one worker state with its process-wide capacity slot.
+    /// @brief Owns one persistent I/O thread's shared state.
     /// @param[in] state Shared operation queue and file ownership.
-    /// @param[in] ticket Slot retained until worker shutdown.
-    FileWorker(std::shared_ptr<State> state, std::shared_ptr<FileWorkerSlots::Ticket> ticket)
-        : state(std::move(state)), ticket(std::move(ticket))
+    explicit FileWorker(std::shared_ptr<State> state) : state(std::move(state))
     {
     }
 
@@ -186,9 +185,7 @@ struct RequestBodyIngestor::FileWorker
 
     /// @brief Processes successive writes and finalization without replacing the thread.
     /// @param[in] state Shared operation queue and file ownership.
-    /// @param[in] ticket Slot returned after the worker releases its file.
-    static void work(const std::shared_ptr<State> &state,
-                     const std::shared_ptr<FileWorkerSlots::Ticket> &ticket) noexcept
+    static void work(const std::shared_ptr<State> &state) noexcept
     {
         while (true)
         {
@@ -220,11 +217,17 @@ struct RequestBodyIngestor::FileWorker
             state->result.emplace(result);
             state->completed = sequence;
             state->pending = false;
+            const auto ticket = std::move(state->ticket);
+            const auto stopping = state->stopping;
             lock.unlock();
+            if (stopping)
+            {
+                state->file.reset();
+            }
+            file_worker_slots().release(ticket);
             state->changed.notify_all();
         }
         state->file.reset();
-        file_worker_slots().release(ticket);
     }
 
     /// @brief Queues one operation and waits only until completion or policy interruption.
@@ -236,9 +239,24 @@ struct RequestBodyIngestor::FileWorker
                                           const std::span<const std::byte> payload,
                                           const filesystem::TemporaryFileIoOptions &options)
     {
+        std::shared_ptr<FileWorkerSlots::Ticket> ticket;
+        try
+        {
+            auto acquired = file_worker_slots().acquire(options);
+            if (!acquired)
+            {
+                return unexpected(acquired.error());
+            }
+            ticket = std::move(acquired).value();
+        }
+        catch (const std::bad_alloc &)
+        {
+            return file_worker_unavailable();
+        }
         std::unique_lock lock(state->mutex);
         if (state->stopping || state->pending || payload.size() > state->buffer.size())
         {
+            file_worker_slots().release(ticket);
             return unexpected(filesystem::TemporaryFileError{
                 filesystem::TemporaryFileErrorCode::invalid_state, 0});
         }
@@ -246,6 +264,7 @@ struct RequestBodyIngestor::FileWorker
         state->bytes = payload.size();
         state->operation = operation;
         state->options = options;
+        state->ticket = ticket;
         state->result.reset();
         const auto sequence = ++state->sequence;
         state->pending = true;
@@ -284,12 +303,17 @@ struct RequestBodyIngestor::FileWorker
     /// @brief Releases the request worker while retaining the file in the I/O state.
     void abandon() noexcept
     {
+        std::shared_ptr<FileWorkerSlots::Ticket> ticket;
         {
             std::lock_guard lock(state->mutex);
             state->stopping = true;
+            ticket = state->ticket;
         }
         state->changed.notify_all();
-        file_worker_slots().orphan(ticket);
+        if (ticket)
+        {
+            file_worker_slots().orphan(ticket);
+        }
         try
         {
             thread.detach();
@@ -311,9 +335,8 @@ struct RequestBodyIngestor::FileWorker
         thread.join();
     }
 
-    std::shared_ptr<State> state;                    ///< Owned until joined or detached completion.
-    std::shared_ptr<FileWorkerSlots::Ticket> ticket; ///< Process-wide bounded capacity.
-    std::thread thread;                              ///< One thread per active request body.
+    std::shared_ptr<State> state; ///< Owned until joined or detached completion.
+    std::thread thread;           ///< One thread per active request body.
 };
 
 /// @brief Initializes framing and retains an optional temporary-file factory.
@@ -381,7 +404,7 @@ RequestBodyIngestionError RequestBodyIngestor::fail(const RequestBodyIngestionEr
     return error;
 }
 
-/// @brief Acquires one capacity slot and starts the request's reusable I/O worker.
+/// @brief Starts one reusable I/O worker without reserving a slot between writes.
 Result<void, RequestBodyIngestionError>
 RequestBodyIngestor::ensure_file_worker(const filesystem::TemporaryFileIoOptions &options)
 {
@@ -389,36 +412,21 @@ RequestBodyIngestor::ensure_file_worker(const filesystem::TemporaryFileIoOptions
     {
         return {};
     }
-    std::shared_ptr<FileWorkerSlots::Ticket> ticket;
     try
     {
-        auto acquired = file_worker_slots().acquire(options);
-        if (!acquired)
-        {
-            return unexpected(fail(file_failure(acquired.error())));
-        }
-        ticket = std::move(acquired).value();
         auto state = std::make_shared<FileWorker::State>(artifact_);
-        auto worker = std::make_unique<FileWorker>(state, ticket);
-        worker->thread = std::thread([state, ticket] { FileWorker::work(state, ticket); });
+        auto worker = std::make_unique<FileWorker>(state);
+        worker->thread = std::thread([state] { FileWorker::work(state); });
         file_worker_ = std::move(worker);
         return {};
     }
     catch (const std::bad_alloc &)
     {
-        if (ticket)
-        {
-            file_worker_slots().release(ticket);
-        }
         return unexpected(fail(file_failure(filesystem::TemporaryFileError{
             filesystem::TemporaryFileErrorCode::resource_allocation_failed, 0})));
     }
     catch (const std::system_error &error)
     {
-        if (ticket)
-        {
-            file_worker_slots().release(ticket);
-        }
         return unexpected(fail(file_failure(filesystem::TemporaryFileError{
             filesystem::TemporaryFileErrorCode::resource_allocation_failed,
             error.code().value()})));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -41,6 +42,14 @@ class BufferedRequest final
     /// @return Success or a structured terminal parse/body error.
     [[nodiscard]] Result<void, BufferedRequestError>
     feed(std::span<const std::byte> input, const filesystem::TemporaryFileIoOptions &options = {});
+
+    /// @brief Resolves the body policy only after a complete request head is available.
+    /// @param[in] input Fresh receive bytes, possibly containing the head and first body bytes.
+    /// @param[in] options_provider Supplies the latest policy at the body boundary.
+    /// @return Success or a structured parse/body error.
+    [[nodiscard]] Result<void, BufferedRequestError> feed_with_body_options(
+        std::span<const std::byte> input,
+        const std::function<filesystem::TemporaryFileIoOptions()> &options_provider);
 
     /// @brief Validates peer EOF and completes temporary-file cleanup on failure.
     /// @param[in] options Cancellation and deadline observed during finalization.
