@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <span>
+#include <stop_token>
 #include <string>
 
 #include "sparenode/filesystem/temporary_file.hpp"
@@ -82,4 +84,27 @@ TEST_CASE("Temporary file release transfers path cleanup responsibility",
     std::error_code error;
     CHECK(std::filesystem::remove(path, error));
     CHECK_FALSE(error);
+}
+
+TEST_CASE("Temporary file rejects expired writes and cancelled completion without publishing",
+          "[filesystem][temporary-file][timeout][cancel]")
+{
+    auto created = sparenode::filesystem::TemporaryFile::create();
+    REQUIRE(created.has_value());
+    auto file = std::move(created).value();
+    const auto expired =
+        file.write(bytes("not written"),
+                   {.deadline = std::chrono::steady_clock::now() - std::chrono::seconds{1}});
+    REQUIRE_FALSE(expired.has_value());
+    CHECK(expired.error().code == sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded);
+    CHECK(file.size() == 0);
+
+    REQUIRE(file.write(bytes("partial")).has_value());
+    std::stop_source stop;
+    stop.request_stop();
+    const auto completed = file.complete({.stop_token = stop.get_token()});
+    REQUIRE_FALSE(completed.has_value());
+    CHECK(completed.error().code == sparenode::filesystem::TemporaryFileErrorCode::cancelled);
+    CHECK_FALSE(file.completed());
+    CHECK_FALSE(file.release().has_value());
 }
