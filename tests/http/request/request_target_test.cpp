@@ -4,6 +4,7 @@
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/session/detail/buffered_request.hpp"
 #include "support/optional.hpp"
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -134,6 +135,14 @@ TEST_CASE("Normalized query target survives incremental chunked ingestion",
     const auto parsed = request.request();
     CHECK(parsed.target() == "/?x=1");
     CHECK(parsed.header("Host") == "local");
-    REQUIRE(parsed.body().size() == 1);
-    CHECK(parsed.body().front() == std::byte{'x'});
+    CHECK(parsed.body().empty());
+    REQUIRE(parsed.body_size() == 1);
+    const auto artifact = parsed.temporary_body();
+    REQUIRE(artifact);
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    char body{};
+    input.get(body);
+    REQUIRE(input.good());
+    CHECK(body == 'x');
 }

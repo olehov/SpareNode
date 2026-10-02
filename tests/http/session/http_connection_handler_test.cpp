@@ -2,8 +2,10 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <fstream>
 #include <future>
 #include <optional>
 #include <span>
@@ -28,12 +30,79 @@ namespace
 
 using SessionResult = sparenode::Result<void, sparenode::network::NetworkError>;
 
+/// @brief Records deadline propagation and artifact cleanup for an injected file sink.
+struct FilePolicyState
+{
+    std::atomic_bool deadline_received{}; ///< Set when write receives an absolute deadline.
+    std::promise<sparenode::network::NetworkDeadline> observed_deadline; ///< File policy snapshot.
+    std::promise<void> destroyed; ///< Signals failed-ingestion artifact cleanup.
+};
+
+/// @brief Fails an injected body write as an expired filesystem deadline.
+class DeadlineFailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
+{
+  public:
+    explicit DeadlineFailingTemporaryFile(std::shared_ptr<FilePolicyState> state)
+        : state_(std::move(state))
+    {
+    }
+
+    ~DeadlineFailingTemporaryFile() override
+    {
+        state_->destroyed.set_value();
+    }
+
+    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
+    write(std::span<const std::byte>,
+          const sparenode::filesystem::TemporaryFileIoOptions &options) override
+    {
+        state_->deadline_received.store(options.deadline.has_value(), std::memory_order_release);
+        if (options.deadline)
+        {
+            state_->observed_deadline.set_value(options.deadline.value());
+        }
+        return sparenode::unexpected(sparenode::filesystem::TemporaryFileError{
+            sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded, 0});
+    }
+
+    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
+    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    {
+        return {};
+    }
+
+  private:
+    std::shared_ptr<FilePolicyState> state_;
+};
+
 /// @brief Borrows string storage as bytes for loopback transmission.
 /// @param[in] text Request fixture to expose.
 /// @return Immutable byte view over the same storage.
 [[nodiscard]] std::span<const std::byte> bytes_of(const std::string_view text) noexcept
 {
     return std::as_bytes(std::span(text.data(), text.size()));
+}
+
+/// @brief Reads the completed file-backed body exposed to a routed session request.
+/// @param[in] request Complete request whose body artifact remains owned by the view.
+/// @return Exact decoded payload bytes, or an empty string for an empty request body.
+[[nodiscard]] std::string request_body_text(const sparenode::http::HttpRequestView &request)
+{
+    CHECK(request.body().empty());
+    if (request.body_size() == 0)
+    {
+        CHECK_FALSE(request.temporary_body());
+        return {};
+    }
+    const auto artifact = request.temporary_body();
+    REQUIRE(artifact);
+    REQUIRE(artifact->completed());
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    std::string body(request.body_size(), '\0');
+    input.read(body.data(), static_cast<std::streamsize>(body.size()));
+    REQUIRE(input.good());
+    return body;
 }
 
 /// @brief Sends every request byte through a potentially partial native socket operation.
@@ -258,7 +327,7 @@ TEST_CASE("HTTP connection session distinguishes header and body read phases",
                               [&observed_body_size](const sparenode::http::HttpRequestView &request,
                                                     const sparenode::http::HttpRouteParameters &)
                               {
-                                  observed_body_size = request.body().size();
+                                  observed_body_size = request.body_size();
                                   return ok_response();
                               }));
     std::vector<sparenode::http::HttpRequestReadPhase> phases;
@@ -393,6 +462,52 @@ TEST_CASE("HTTP connection session observes dispatcher cancellation",
     CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::cancellation);
     CHECK(pair.client.peer_closes_within(std::chrono::seconds{1}));
+}
+
+TEST_CASE("HTTP session propagates its receive deadline through temporary body writes",
+          "[http][session][integration][body][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    auto state = std::make_shared<FilePolicyState>();
+    auto observed_deadline = state->observed_deadline.get_future();
+    auto destroyed = state->destroyed.get_future();
+    std::optional<sparenode::network::NetworkDeadline> expected_body_deadline;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .temporary_body_file_factory =
+            [state]() -> sparenode::Result<std::shared_ptr<sparenode::filesystem::TemporaryFile>,
+                                           sparenode::filesystem::TemporaryFileError>
+        {
+            return std::static_pointer_cast<sparenode::filesystem::TemporaryFile>(
+                std::make_shared<DeadlineFailingTemporaryFile>(state));
+        },
+        .timeouts = {.headers = std::chrono::seconds{30},
+                     .body = std::chrono::seconds{30},
+                     .total = std::chrono::seconds{30}},
+        .deadline_provider =
+            [&](const sparenode::http::HttpRequestReadPhase phase,
+                const sparenode::network::NetworkDeadline started)
+        {
+            if (phase == sparenode::http::HttpRequestReadPhase::body)
+            {
+                expected_body_deadline = started + std::chrono::seconds{15};
+                return expected_body_deadline;
+            }
+            return std::optional{started + std::chrono::seconds{25}};
+        }};
+    send_all(pair.client, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\nx");
+
+    const auto result =
+        sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
+    CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(state->deadline_received.load(std::memory_order_acquire));
+    REQUIRE(expected_body_deadline.has_value());
+    REQUIRE(observed_deadline.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
+    CHECK(std::optional{observed_deadline.get()} == expected_body_deadline);
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
 }
 
 TEST_CASE("HTTP sessions expire idle partial headers and partial bodies",
@@ -535,9 +650,7 @@ TEST_CASE("HTTP session routes decoded chunked payload after trailers", "[http][
                                   [&](const sparenode::http::HttpRequestView &request,
                                       const sparenode::http::HttpRouteParameters &)
                                   {
-                                      payload.assign(
-                                          reinterpret_cast<const char *>(request.body().data()),
-                                          request.body().size());
+                                      payload = request_body_text(request);
                                       return ok_response();
                                   }));
     send_all(pair.client, "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: Chunked\r\n\r\n"
@@ -910,7 +1023,8 @@ TEST_CASE("Expect continue unblocks fixed and chunked request bodies", "[http][s
                                   [](const sparenode::http::HttpRequestView &request,
                                      const sparenode::http::HttpRouteParameters &)
                                   {
-                                      CHECK(request.body().size() == 3);
+                                      CHECK(request.body_size() == 3);
+                                      CHECK(request_body_text(request) == "abc");
                                       return ok_response();
                                   }));
     std::promise<SessionResult> promise;

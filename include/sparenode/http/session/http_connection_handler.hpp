@@ -10,6 +10,7 @@
 
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
+#include "sparenode/http/request/request_body_ingestor.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_io_options.hpp"
@@ -32,10 +33,12 @@ enum class HttpRequestReadPhase : std::uint8_t
 using HttpRequestDeadlineProvider = std::function<std::optional<network::NetworkDeadline>(
     HttpRequestReadPhase phase, network::NetworkDeadline session_started)>;
 
-/// @brief Defines bounded storage and injected I/O policy for one HTTP connection.
+/// @brief Defines bounded metadata, streaming-body, and I/O policy for one HTTP connection.
 struct HttpConnectionHandlerConfig
 {
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
+    TemporaryBodyFileFactory
+        temporary_body_file_factory{}; ///< Optional controlled storage factory.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
     HttpRequestTimeouts timeouts{}; ///< Header/body inactivity and total receive budgets.
     HttpRequestDeadlineProvider deadline_provider;       ///< Optional earlier per-read deadline.
@@ -45,9 +48,9 @@ struct HttpConnectionHandlerConfig
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.
 ///
-/// Input is accumulated incrementally in bounded storage until the parser returns
-/// one complete borrowed request. Any trailing pipelined bytes remain untouched
-/// until response completion. Output is then half-closed and extra socket input
+/// Metadata is accumulated incrementally in bounded memory while decoded body bytes
+/// stream into an automatically cleaned temporary file. Any trailing pipelined bytes
+/// remain untouched until response completion. Output is then half-closed and extra socket input
 /// is discarded within the configured byte and absolute time limits. Parser failures receive one
 /// bounded HTTP error response when the socket remains writable.
 /// @param[in] connection Open connection transferred exclusively to this call.
