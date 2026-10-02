@@ -34,7 +34,8 @@ using SessionResult = sparenode::Result<void, sparenode::network::NetworkError>;
 struct FilePolicyState
 {
     std::atomic_bool deadline_received{}; ///< Set when write receives an absolute deadline.
-    std::atomic_bool destroyed{};         ///< Set when failed ingestion releases the sink.
+    std::promise<sparenode::network::NetworkDeadline> observed_deadline; ///< File policy snapshot.
+    std::promise<void> destroyed; ///< Signals failed-ingestion artifact cleanup.
 };
 
 /// @brief Fails an injected body write as an expired filesystem deadline.
@@ -48,7 +49,7 @@ class DeadlineFailingTemporaryFile final : public sparenode::filesystem::Tempora
 
     ~DeadlineFailingTemporaryFile() override
     {
-        state_->destroyed.store(true, std::memory_order_release);
+        state_->destroyed.set_value();
     }
 
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
@@ -56,6 +57,10 @@ class DeadlineFailingTemporaryFile final : public sparenode::filesystem::Tempora
           const sparenode::filesystem::TemporaryFileIoOptions &options) override
     {
         state_->deadline_received.store(options.deadline.has_value(), std::memory_order_release);
+        if (options.deadline)
+        {
+            state_->observed_deadline.set_value(options.deadline.value());
+        }
         return sparenode::unexpected(sparenode::filesystem::TemporaryFileError{
             sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded, 0});
     }
@@ -465,6 +470,9 @@ TEST_CASE("HTTP session propagates its receive deadline through temporary body w
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     auto state = std::make_shared<FilePolicyState>();
+    auto observed_deadline = state->observed_deadline.get_future();
+    auto destroyed = state->destroyed.get_future();
+    std::optional<sparenode::network::NetworkDeadline> expected_body_deadline;
     const sparenode::http::HttpConnectionHandlerConfig config{
         .temporary_body_file_factory =
             [state]() -> sparenode::Result<std::shared_ptr<sparenode::filesystem::TemporaryFile>,
@@ -473,7 +481,20 @@ TEST_CASE("HTTP session propagates its receive deadline through temporary body w
             return std::static_pointer_cast<sparenode::filesystem::TemporaryFile>(
                 std::make_shared<DeadlineFailingTemporaryFile>(state));
         },
-        .deadline_provider = {}};
+        .timeouts = {.headers = std::chrono::seconds{30},
+                     .body = std::chrono::seconds{30},
+                     .total = std::chrono::seconds{30}},
+        .deadline_provider =
+            [&](const sparenode::http::HttpRequestReadPhase phase,
+                const sparenode::network::NetworkDeadline started)
+        {
+            if (phase == sparenode::http::HttpRequestReadPhase::body)
+            {
+                expected_body_deadline = started + std::chrono::seconds{15};
+                return expected_body_deadline;
+            }
+            return std::optional{started + std::chrono::seconds{25}};
+        }};
     send_all(pair.client, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\nx");
 
     const auto result =
@@ -483,7 +504,10 @@ TEST_CASE("HTTP session propagates its receive deadline through temporary body w
     CHECK(result.error().operation == sparenode::network::NetworkOperation::receive);
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::timeout);
     CHECK(state->deadline_received.load(std::memory_order_acquire));
-    CHECK(state->destroyed.load(std::memory_order_acquire));
+    REQUIRE(expected_body_deadline.has_value());
+    REQUIRE(observed_deadline.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
+    CHECK(std::optional{observed_deadline.get()} == expected_body_deadline);
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
 }
 
 TEST_CASE("HTTP sessions expire idle partial headers and partial bodies",

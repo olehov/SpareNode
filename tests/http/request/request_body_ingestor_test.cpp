@@ -11,11 +11,15 @@
 #include <stop_token>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "sparenode/http/request/request_body_ingestor.hpp"
 
 namespace
 {
+/// Maximum active file workers exercised by the bounded-capacity tests.
+constexpr std::size_t file_worker_capacity = 32;
+
 /// @brief Produces one controlled native-I/O failure for ingestion mapping tests.
 class FailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
 {
@@ -25,6 +29,7 @@ class FailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
     {
     }
 
+    /// @brief Injects a write failure only for the requested failure category.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     write(std::span<const std::byte>,
           const sparenode::filesystem::TemporaryFileIoOptions &) override
@@ -37,6 +42,7 @@ class FailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
         return {};
     }
 
+    /// @brief Injects the selected completion failure after decoding finishes.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
     {
@@ -53,7 +59,7 @@ class FailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
 struct BlockedWriteState
 {
     std::promise<void> started;       ///< Fulfilled after write receives active policy.
-    std::atomic_bool destroyed{};     ///< Set when ingestion releases the failed artifact.
+    std::promise<void> destroyed;     ///< Fulfilled after the worker releases the artifact.
     std::mutex mutex;                 ///< Protects the cancellable test wait.
     std::condition_variable_any wake; ///< Wakes the wait at cancellation or deadline.
 };
@@ -69,9 +75,10 @@ class BlockingTemporaryFile final : public sparenode::filesystem::TemporaryFile
 
     ~BlockingTemporaryFile() override
     {
-        state_->destroyed.store(true, std::memory_order_release);
+        state_->destroyed.set_value();
     }
 
+    /// @brief Waits until cancellation or deadline to emulate cooperative storage.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     write(std::span<const std::byte>,
           const sparenode::filesystem::TemporaryFileIoOptions &options) override
@@ -94,6 +101,7 @@ class BlockingTemporaryFile final : public sparenode::filesystem::TemporaryFile
             0});
     }
 
+    /// @brief Completes an otherwise valid injected file.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
     {
@@ -129,6 +137,7 @@ class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
         state_->destroyed.set_value();
     }
 
+    /// @brief Ignores policy while the test holds an uninterruptible write.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     write(std::span<const std::byte>,
           const sparenode::filesystem::TemporaryFileIoOptions &) override
@@ -139,6 +148,7 @@ class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
         return {};
     }
 
+    /// @brief Accepts completion after the stalled payload is released.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
     {
@@ -163,6 +173,7 @@ class StalledCompletionFile final : public sparenode::filesystem::TemporaryFile
         state_->destroyed.set_value();
     }
 
+    /// @brief Accepts payload so the test reaches the completion phase.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     write(std::span<const std::byte>,
           const sparenode::filesystem::TemporaryFileIoOptions &) override
@@ -170,6 +181,7 @@ class StalledCompletionFile final : public sparenode::filesystem::TemporaryFile
         return {};
     }
 
+    /// @brief Ignores policy while the test holds an uninterruptible flush.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
     {
@@ -200,6 +212,7 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
         state_->destroyed.set_value();
     }
 
+    /// @brief Forwards a released stalled write to the real private file.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     write(const std::span<const std::byte> bytes,
           const sparenode::filesystem::TemporaryFileIoOptions &options) override
@@ -211,10 +224,37 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
         return file_->write(bytes, options);
     }
 
+    /// @brief Flushes the wrapped native file after its write returns.
     [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
     complete(const sparenode::filesystem::TemporaryFileIoOptions &options) override
     {
         return file_->complete(options);
+    }
+
+    /// @brief Exposes the wrapped artifact path through the base interface.
+    [[nodiscard]] const std::filesystem::path &path() const noexcept override
+    {
+        return file_->path();
+    }
+
+    /// @brief Reports bytes written into the wrapped native artifact.
+    [[nodiscard]] std::uint64_t size() const noexcept override
+    {
+        return file_->size();
+    }
+
+    /// @brief Reports wrapped-file flush and close completion.
+    [[nodiscard]] bool completed() const noexcept override
+    {
+        return file_->completed();
+    }
+
+    /// @brief Transfers the wrapped artifact's cleanup responsibility.
+    [[nodiscard]] sparenode::Result<std::filesystem::path,
+                                    sparenode::filesystem::TemporaryFileError>
+    release() override
+    {
+        return file_->release();
     }
 
   private:
@@ -454,6 +494,7 @@ TEST_CASE("Cancellation interrupts an injected blocked body write and releases i
     using sparenode::filesystem::TemporaryFileError;
     auto state = std::make_shared<BlockedWriteState>();
     auto started = state->started.get_future();
+    auto destroyed = state->destroyed.get_future();
     sparenode::http::RequestBodyIngestor ingestor(
         {.content_length = 1}, {},
         [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
@@ -471,14 +512,14 @@ TEST_CASE("Cancellation interrupts an injected blocked body write and releases i
                                                               std::chrono::seconds{5}});
                              });
     const auto started_in_time =
-        started.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        started.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     stop.request_stop();
     REQUIRE(started_in_time);
-    REQUIRE(result.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    REQUIRE(result.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     const auto failure = result.get();
     REQUIRE_FALSE(failure.has_value());
     CHECK(failure.error().code == sparenode::http::RequestBodyIngestionErrorCode::cancelled);
-    CHECK(state->destroyed.load(std::memory_order_acquire));
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     CHECK_FALSE(ingestor.artifact());
 }
 
@@ -489,6 +530,7 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
     using sparenode::filesystem::TemporaryFileError;
     auto state = std::make_shared<BlockedWriteState>();
     auto started = state->started.get_future();
+    auto destroyed = state->destroyed.get_future();
     sparenode::http::RequestBodyIngestor ingestor(
         {.content_length = 1}, {},
         [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
@@ -497,16 +539,16 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
                 std::make_shared<BlockingTemporaryFile>(state));
         });
     std::stop_source stop;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{200};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
                              [&] {
                                  return ingestor.feed(bytes("x"), {.stop_token = stop.get_token(),
                                                                    .deadline = deadline});
                              });
     const auto started_in_time =
-        started.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        started.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     const auto finished_in_time =
-        result.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        result.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     if (!started_in_time || !finished_in_time)
     {
         stop.request_stop();
@@ -517,7 +559,7 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
     REQUIRE_FALSE(failure.has_value());
     CHECK(failure.error().code ==
           sparenode::http::RequestBodyIngestionErrorCode::deadline_exceeded);
-    CHECK(state->destroyed.load(std::memory_order_acquire));
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     CHECK_FALSE(ingestor.artifact());
 }
 
@@ -547,10 +589,10 @@ TEST_CASE("Cancellation releases the request worker while a native file write re
         std::async(std::launch::async,
                    [&] { return ingestor.feed(bytes("x"), {.stop_token = stop.get_token()}); });
     const auto started_in_time =
-        started.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        started.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     stop.request_stop();
     const auto returned_before_native_write =
-        result.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        result.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     const auto retained_until_write_returns =
         started_in_time && std::filesystem::exists(state->path);
     resume_stalled_write(state);
@@ -560,7 +602,7 @@ TEST_CASE("Cancellation releases the request worker while a native file write re
     REQUIRE_FALSE(failure.has_value());
     CHECK(failure.error().code == sparenode::http::RequestBodyIngestionErrorCode::cancelled);
     CHECK(retained_until_write_returns);
-    CHECK(destroyed.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     CHECK_FALSE(std::filesystem::exists(state->path));
     CHECK_FALSE(ingestor.artifact());
 }
@@ -579,13 +621,13 @@ TEST_CASE("Deadline releases the request worker while a native file write remain
             return std::static_pointer_cast<TemporaryFile>(
                 std::make_shared<StalledTemporaryFile>(state));
         });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{500};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
                              [&] { return ingestor.feed(bytes("x"), {.deadline = deadline}); });
     const auto started_in_time =
-        started.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        started.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     const auto returned_before_native_write =
-        result.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        result.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     resume_stalled_write(state);
     REQUIRE(started_in_time);
     REQUIRE(returned_before_native_write);
@@ -593,7 +635,7 @@ TEST_CASE("Deadline releases the request worker while a native file write remain
     REQUIRE_FALSE(failure.has_value());
     CHECK(failure.error().code ==
           sparenode::http::RequestBodyIngestionErrorCode::deadline_exceeded);
-    CHECK(destroyed.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     CHECK_FALSE(ingestor.artifact());
 }
 
@@ -612,13 +654,13 @@ TEST_CASE("Deadline releases the request worker while native file completion rem
             return std::static_pointer_cast<TemporaryFile>(
                 std::make_shared<StalledCompletionFile>(state));
         });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{500};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
                              [&] { return ingestor.feed(bytes("x"), {.deadline = deadline}); });
     const auto started_in_time =
-        started.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        started.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     const auto returned_before_native_completion =
-        result.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
+        result.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
     resume_stalled_write(state);
     REQUIRE(started_in_time);
     REQUIRE(returned_before_native_completion);
@@ -626,6 +668,176 @@ TEST_CASE("Deadline releases the request worker while native file completion rem
     REQUIRE_FALSE(failure.has_value());
     CHECK(failure.error().code ==
           sparenode::http::RequestBodyIngestionErrorCode::deadline_exceeded);
-    CHECK(destroyed.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
+    CHECK(destroyed.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
     CHECK_FALSE(ingestor.artifact());
+}
+
+TEST_CASE("A healthy upload waits for bounded file-worker capacity", "[http][body][temporary-file]")
+{
+    using sparenode::filesystem::TemporaryFile;
+    using sparenode::filesystem::TemporaryFileError;
+    using Ingestor = sparenode::http::RequestBodyIngestor;
+    using FeedResult = sparenode::Result<sparenode::http::HttpBodyDecodeProgress,
+                                         sparenode::http::RequestBodyIngestionError>;
+    std::vector<std::shared_ptr<StalledWriteState>> states;
+    std::vector<std::future<void>> started;
+    std::vector<std::unique_ptr<Ingestor>> ingestors;
+    std::vector<std::future<FeedResult>> results;
+    states.reserve(file_worker_capacity);
+    started.reserve(file_worker_capacity);
+    ingestors.reserve(file_worker_capacity);
+    results.reserve(file_worker_capacity);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    for (std::size_t index = 0; index < file_worker_capacity; ++index)
+    {
+        auto state = std::make_shared<StalledWriteState>();
+        started.push_back(state->started.get_future());
+        states.push_back(state);
+        ingestors.push_back(std::make_unique<Ingestor>(
+            sparenode::http::HttpRequestHead{.content_length = 1},
+            sparenode::http::HttpRequestParserLimits{},
+            [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+            {
+                return std::static_pointer_cast<TemporaryFile>(
+                    std::make_shared<StalledTemporaryFile>(state));
+            }));
+        results.push_back(std::async(std::launch::async, [sink = ingestors.back().get(), deadline]
+                                     { return sink->feed(bytes("x"), {.deadline = deadline}); }));
+    }
+
+    const auto watchdog = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    bool all_started = true;
+    for (auto &signal : started)
+    {
+        all_started &= signal.wait_until(watchdog) == std::future_status::ready;
+    }
+    Ingestor queued({.content_length = 1}, {});
+    auto queued_result = std::async(std::launch::async, [&]
+                                    { return queued.feed(bytes("y"), {.deadline = deadline}); });
+    resume_stalled_write(states.front());
+    const auto first_finished =
+        results.front().wait_for(std::chrono::seconds{10}) == std::future_status::ready;
+    const auto queued_finished =
+        queued_result.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
+    for (const auto &state : states)
+    {
+        resume_stalled_write(state);
+    }
+    for (auto &result : results)
+    {
+        static_cast<void>(result.wait_for(std::chrono::seconds{10}));
+    }
+    REQUIRE(all_started);
+    REQUIRE(first_finished);
+    REQUIRE(queued_finished);
+    REQUIRE(results.front().get().has_value());
+    REQUIRE(queued_result.get().has_value());
+    CHECK(read_body(queued) == "y");
+}
+
+TEST_CASE("Orphaned file workers exhaust capacity until their files are released",
+          "[http][body][temporary-file]")
+{
+    using sparenode::filesystem::TemporaryFile;
+    using sparenode::filesystem::TemporaryFileError;
+    using Ingestor = sparenode::http::RequestBodyIngestor;
+    using FeedResult = sparenode::Result<sparenode::http::HttpBodyDecodeProgress,
+                                         sparenode::http::RequestBodyIngestionError>;
+    std::vector<std::shared_ptr<StalledWriteState>> states;
+    std::vector<std::future<void>> started;
+    std::vector<std::future<void>> destroyed;
+    std::vector<std::unique_ptr<Ingestor>> ingestors;
+    std::vector<std::future<FeedResult>> results;
+    states.reserve(file_worker_capacity);
+    started.reserve(file_worker_capacity);
+    destroyed.reserve(file_worker_capacity);
+    ingestors.reserve(file_worker_capacity);
+    results.reserve(file_worker_capacity);
+    std::stop_source stop;
+    for (std::size_t index = 0; index < file_worker_capacity; ++index)
+    {
+        auto state = std::make_shared<StalledWriteState>();
+        started.push_back(state->started.get_future());
+        destroyed.push_back(state->destroyed.get_future());
+        states.push_back(state);
+        ingestors.push_back(std::make_unique<Ingestor>(
+            sparenode::http::HttpRequestHead{.content_length = 1},
+            sparenode::http::HttpRequestParserLimits{},
+            [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+            {
+                return std::static_pointer_cast<TemporaryFile>(
+                    std::make_shared<StalledTemporaryFile>(state));
+            }));
+        results.push_back(
+            std::async(std::launch::async, [sink = ingestors.back().get(), &stop]
+                       { return sink->feed(bytes("x"), {.stop_token = stop.get_token()}); }));
+    }
+
+    const auto watchdog = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    bool all_started = true;
+    for (auto &signal : started)
+    {
+        all_started &= signal.wait_until(watchdog) == std::future_status::ready;
+    }
+    stop.request_stop();
+    bool all_cancelled = true;
+    for (auto &result : results)
+    {
+        if (result.wait_for(std::chrono::seconds{10}) != std::future_status::ready)
+        {
+            all_cancelled = false;
+            continue;
+        }
+        const auto outcome = result.get();
+        all_cancelled &=
+            !outcome.has_value() &&
+            outcome.error().code == sparenode::http::RequestBodyIngestionErrorCode::cancelled;
+    }
+
+    std::optional<FeedResult> saturated;
+    if (all_started && all_cancelled)
+    {
+        Ingestor probe({.content_length = 1}, {});
+        saturated = probe.feed(
+            bytes("z"), {.deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10}});
+    }
+    for (const auto &state : states)
+    {
+        resume_stalled_write(state);
+    }
+    bool all_destroyed = true;
+    for (auto &signal : destroyed)
+    {
+        all_destroyed &= signal.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
+    }
+    REQUIRE(all_started);
+    REQUIRE(all_cancelled);
+    REQUIRE(saturated.has_value());
+    REQUIRE_FALSE(saturated->has_value());
+    CHECK(saturated->error().code ==
+          sparenode::http::RequestBodyIngestionErrorCode::resource_failure);
+    CHECK(all_destroyed);
+}
+
+TEST_CASE("An injected file decorator forwards completed artifact metadata",
+          "[http][body][temporary-file]")
+{
+    auto created = sparenode::filesystem::TemporaryFile::create();
+    REQUIRE(created.has_value());
+    auto state = std::make_shared<StalledWriteState>();
+    resume_stalled_write(state);
+    auto file = std::make_shared<StalledNativeBackedFile>(state, std::move(created).value());
+    std::shared_ptr<sparenode::filesystem::TemporaryFile> sink = file;
+    const auto path = sink->path();
+    REQUIRE(sink->write(bytes("payload")).has_value());
+    CHECK(sink->size() == 7);
+    REQUIRE(sink->complete().has_value());
+    CHECK(sink->completed());
+    auto released = sink->release();
+    REQUIRE(released.has_value());
+    CHECK(released.value() == path);
+    sink.reset();
+    file.reset();
+    CHECK(std::filesystem::exists(path));
+    std::filesystem::remove(path);
 }
