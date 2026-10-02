@@ -17,9 +17,10 @@ Native receives request at most `receive_chunk_bytes` at a time, bounded also by
 the combined request-line, CRLF, and header configuration. The body limit no longer
 changes the receive-buffer allocation. Zero receive chunks and overflowing metadata
 limits are rejected before I/O. Decoded payload, chunk framing, and trailer limits
-apply independently. Creation, write, flush, and close failures remain structured;
-partial files are closed and removed when ingestion fails, is cancelled, or loses
-its last owner.
+apply independently. Creation, write, flush, and close failures remain structured.
+Partial files are closed and removed when ingestion fails, is cancelled, or loses
+its last owner. If a native write or flush is still blocked, its isolated I/O
+worker retains the file and removes it when that call eventually returns.
 
 ## Connection policy
 
@@ -119,6 +120,15 @@ the owned connection, and releases the dispatcher worker. The configured failure
 observer logs the structured error without request contents. No HTTP error response
 is attempted after a receive timeout. Cancellation remains a distinct failure and
 wins if already observable at the same wait boundary as timeout.
+
+The same stop token and absolute receive deadline reach temporary-body writes and
+finalization. Native writes are capped at 16 KiB. A separate I/O worker owns each
+active file operation, its payload copy, and the file until the operation returns.
+The HTTP worker stops waiting at cancellation or deadline even if the native call
+does not return. At most 32 file operations may remain active process-wide;
+additional requests fail with a structured resource error instead of starting
+unbounded threads. A stalled operation retains its temporary file until the
+filesystem call returns, so cleanup can be delayed beyond the request deadline.
 
 These are request-receive deadlines. They start when the worker begins the session,
 not at TCP accept, and do not interrupt route execution or response writes. Native
