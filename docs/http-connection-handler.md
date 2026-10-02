@@ -125,10 +125,11 @@ The same stop token and refreshed absolute receive deadline reach temporary-body
 writes and finalization. Native writes are capped at 16 KiB. Each active request
 reuses one I/O worker and one 16 KiB payload buffer through its body and flush.
 The HTTP worker stops waiting at cancellation or deadline even if the native call
-does not return. At most 32 file workers may remain active process-wide. Healthy
+does not return. At most 32 native file operations may run process-wide; idle
+workers waiting for more network bytes do not occupy those slots. Healthy
 requests wait for a free slot under their cancellation and deadline policy;
 requests fail with a structured resource error if all slots belong to stalled,
-detached workers. A stalled operation retains its temporary file until the
+detached operations. A stalled operation retains its temporary file until the
 filesystem call returns, so cleanup can be delayed beyond the request deadline.
 
 These are request-receive deadlines. They start when the worker begins the session,
