@@ -231,3 +231,31 @@ TEST_CASE("Buffered request feeds one-byte fragments without retaining chunk fra
     CHECK(body == "ab");
     CHECK(view.header("X").empty());
 }
+
+TEST_CASE("Buffered request resolves body policy only after complete headers",
+          "[http][body][session]")
+{
+    sparenode::http::detail::BufferedRequest request({});
+    std::size_t body_policy_calls = 0;
+    const auto body_options = [&]
+    {
+        ++body_policy_calls;
+        return sparenode::filesystem::TemporaryFileIoOptions{};
+    };
+    REQUIRE(request
+                .feed_with_body_options(
+                    bytes("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n"), body_options)
+                .has_value());
+    CHECK(body_policy_calls == 0);
+    CHECK_FALSE(request.reading_body());
+    REQUIRE(request.feed_with_body_options(bytes("\r\nx"), body_options).has_value());
+    CHECK(body_policy_calls == 1);
+    REQUIRE(request.complete());
+    const auto artifact = request.request().temporary_body();
+    REQUIRE(artifact);
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    char payload{};
+    input.get(payload);
+    CHECK(payload == 'x');
+}

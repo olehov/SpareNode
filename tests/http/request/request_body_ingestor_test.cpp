@@ -735,6 +735,32 @@ TEST_CASE("A healthy upload waits for bounded file-worker capacity", "[http][bod
     CHECK(read_body(queued) == "y");
 }
 
+TEST_CASE("Idle body ingestors do not occupy file-operation slots", "[http][body][temporary-file]")
+{
+    using Ingestor = sparenode::http::RequestBodyIngestor;
+    std::vector<std::unique_ptr<Ingestor>> idle;
+    idle.reserve(file_worker_capacity);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    for (std::size_t index = 0; index < file_worker_capacity; ++index)
+    {
+        auto ingestor =
+            std::make_unique<Ingestor>(sparenode::http::HttpRequestHead{.content_length = 2},
+                                       sparenode::http::HttpRequestParserLimits{});
+        const auto progress = ingestor->feed(bytes("x"), {.deadline = deadline});
+        REQUIRE(progress.has_value());
+        CHECK(!ingestor->complete());
+        idle.push_back(std::move(ingestor));
+    }
+    Ingestor another({.content_length = 1}, {});
+    REQUIRE(another.feed(bytes("y"), {.deadline = deadline}).has_value());
+    CHECK(read_body(another) == "y");
+    for (auto &ingestor : idle)
+    {
+        REQUIRE(ingestor->feed(bytes("z"), {.deadline = deadline}).has_value());
+        CHECK(read_body(*ingestor) == "xz");
+    }
+}
+
 TEST_CASE("Orphaned file workers exhaust capacity until their files are released",
           "[http][body][temporary-file]")
 {
