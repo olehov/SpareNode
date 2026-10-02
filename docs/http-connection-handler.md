@@ -121,13 +121,14 @@ observer logs the structured error without request contents. No HTTP error respo
 is attempted after a receive timeout. Cancellation remains a distinct failure and
 wins if already observable at the same wait boundary as timeout.
 
-The same stop token and absolute receive deadline reach temporary-body writes and
-finalization. Native writes are capped at 16 KiB. A separate I/O worker owns each
-active file operation, its payload copy, and the file until the operation returns.
+The same stop token and refreshed absolute receive deadline reach temporary-body
+writes and finalization. Native writes are capped at 16 KiB. Each active request
+reuses one I/O worker and one 16 KiB payload buffer through its body and flush.
 The HTTP worker stops waiting at cancellation or deadline even if the native call
-does not return. At most 32 file operations may remain active process-wide;
-additional requests fail with a structured resource error instead of starting
-unbounded threads. A stalled operation retains its temporary file until the
+does not return. At most 32 file workers may remain active process-wide. Healthy
+requests wait for a free slot under their cancellation and deadline policy;
+requests fail with a structured resource error if all slots belong to stalled,
+detached workers. A stalled operation retains its temporary file until the
 filesystem call returns, so cleanup can be delayed beyond the request deadline.
 
 These are request-receive deadlines. They start when the worker begins the session,
