@@ -24,6 +24,7 @@ enum class RequestBodyIngestionErrorCode : std::uint8_t
     body_too_large,         ///< Decoded payload exceeded the configured transfer policy.
     temporary_file_failure, ///< Temporary creation, write, flush, or close failed.
     cancelled,              ///< The caller requested cancellation.
+    deadline_exceeded,      ///< The active request receive deadline expired.
     resource_failure        ///< Artifact ownership allocation failed.
 };
 
@@ -39,6 +40,8 @@ struct RequestBodyIngestionError
 ///
 /// HTTP framing remains delegated to `HttpBodyDecoder`. The same file sink receives
 /// payload from both framing modes, and owns partial-file cleanup on every failure.
+/// A stalled native file operation retains its own file owner and payload copy until
+/// it returns; the request worker can stop waiting at cancellation or deadline.
 class RequestBodyIngestor final
 {
   public:
@@ -51,14 +54,16 @@ class RequestBodyIngestor final
 
     /// @brief Decodes fresh wire bytes and appends produced payload to temporary storage.
     /// @param[in] input Bytes beginning at the previous unconsumed body boundary.
-    /// @param[in] stop_token Cancellation observed before decoding and filesystem writes.
+    /// @param[in] options Cancellation and deadline propagated through filesystem writes.
     /// @return Decoder progress or a terminal structured ingestion failure.
     [[nodiscard]] Result<HttpBodyDecodeProgress, RequestBodyIngestionError>
-    feed(std::span<const std::byte> input, const std::stop_token &stop_token = {});
+    feed(std::span<const std::byte> input, const filesystem::TemporaryFileIoOptions &options = {});
 
     /// @brief Validates peer EOF and finalizes any completed nonempty artifact.
+    /// @param[in] options Cancellation and deadline propagated through finalization.
     /// @return Success only for an already complete body.
-    [[nodiscard]] Result<void, RequestBodyIngestionError> finish();
+    [[nodiscard]] Result<void, RequestBodyIngestionError>
+    finish(const filesystem::TemporaryFileIoOptions &options = {});
 
     /// @brief Reports whether framing and temporary-file completion both succeeded.
     /// @return True only after the complete decoded body is safely finalized.
@@ -91,14 +96,21 @@ class RequestBodyIngestor final
     /// @return Success, or a structured creation/allocation failure.
     [[nodiscard]] Result<void, RequestBodyIngestionError> ensure_artifact();
     /// @brief Flushes and closes a nonempty sink after framing completes.
+    /// @param[in] options Cancellation and deadline applied to finalization.
     /// @return Success, or a structured flush/close failure.
-    [[nodiscard]] Result<void, RequestBodyIngestionError> finalize();
+    [[nodiscard]] Result<void, RequestBodyIngestionError>
+    finalize(const filesystem::TemporaryFileIoOptions &options);
     /// @brief Appends one decoded span after observing cancellation.
     /// @param[in] output Decoded payload bytes to persist.
-    /// @param[in] stop_token Cancellation checked before filesystem access.
+    /// @param[in] options Cancellation and deadline applied to filesystem access.
     /// @return Success, cancellation, or a structured file failure.
     [[nodiscard]] Result<void, RequestBodyIngestionError>
-    persist(std::span<const std::byte> output, const std::stop_token &stop_token);
+    persist(std::span<const std::byte> output, const filesystem::TemporaryFileIoOptions &options);
+    /// @brief Maps one temporary-file failure into the ingestion contract.
+    /// @param[in] error Structured filesystem failure.
+    /// @return Cancellation, deadline, or general temporary-file failure.
+    [[nodiscard]] static RequestBodyIngestionError
+    file_failure(const filesystem::TemporaryFileError &error) noexcept;
     /// @brief Removes partial storage and preserves one terminal failure.
     /// @param[in] error Failure that terminated ingestion.
     /// @return The same failure for immediate propagation.

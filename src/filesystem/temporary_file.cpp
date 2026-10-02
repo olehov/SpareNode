@@ -4,7 +4,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <limits>
 #include <new>
 #include <random>
 #include <string>
@@ -32,6 +31,8 @@ constexpr unsigned bits_per_hexadecimal_digit = 4;
 constexpr unsigned uint64_bit_count = 64;
 constexpr unsigned random_half_bit_count = 32;
 constexpr std::size_t suffix_hexadecimal_digits = 32;
+/// Bound one native write so cancellation can be rechecked during long body ingestion.
+constexpr std::size_t maximum_native_write_bytes = std::size_t{16} * 1024;
 constexpr std::uint64_t sequence_mixing_constant = 0x9E3779B97F4A7C15ULL;
 constexpr std::uint64_t low_hexadecimal_digit_mask = 0x0FULL;
 
@@ -64,19 +65,38 @@ constexpr std::uint64_t low_hexadecimal_digit_mask = 0x0FULL;
 }
 #endif
 
+/// @brief Reports cooperative cancellation or deadline expiry before the next native operation.
+[[nodiscard]] std::optional<TemporaryFileError>
+interruption(const TemporaryFileIoOptions &options) noexcept
+{
+    if (options.stop_token.stop_requested())
+    {
+        return TemporaryFileError{TemporaryFileErrorCode::cancelled, 0};
+    }
+    if (options.deadline.has_value() &&
+        std::chrono::steady_clock::now() >= options.deadline.value())
+    {
+        return TemporaryFileError{TemporaryFileErrorCode::deadline_exceeded, 0};
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
+/// @brief Adopts one exclusively created native file and its cleanup path.
 TemporaryFile::TemporaryFile(std::filesystem::path path, const std::intptr_t native_handle) noexcept
     : path_(std::move(path)), native_handle_(native_handle)
 {
 }
 
+/// @brief Transfers exclusive native ownership without duplicating cleanup responsibility.
 TemporaryFile::TemporaryFile(TemporaryFile &&other) noexcept
     : path_(std::move(other.path_)), native_handle_(std::exchange(other.native_handle_, -1)),
       size_(std::exchange(other.size_, 0)), completed_(std::exchange(other.completed_, false))
 {
 }
 
+/// @brief Cleans the current file before accepting another owner's native state.
 TemporaryFile &TemporaryFile::operator=(TemporaryFile &&other) noexcept
 {
     if (this != &other)
@@ -90,11 +110,13 @@ TemporaryFile &TemporaryFile::operator=(TemporaryFile &&other) noexcept
     return *this;
 }
 
+/// @brief Closes and removes every artifact whose ownership was not released.
 TemporaryFile::~TemporaryFile()
 {
     cleanup();
 }
 
+/// @brief Creates one private file using collision-safe native exclusive creation.
 Result<TemporaryFile, TemporaryFileError> TemporaryFile::create()
 {
     try
@@ -150,7 +172,9 @@ Result<TemporaryFile, TemporaryFileError> TemporaryFile::create()
     }
 }
 
-Result<void, TemporaryFileError> TemporaryFile::write(const std::span<const std::byte> bytes)
+/// @brief Writes every byte while observing policy between bounded native operations.
+Result<void, TemporaryFileError> TemporaryFile::write(const std::span<const std::byte> bytes,
+                                                      const TemporaryFileIoOptions &options)
 {
     if (native_handle_ == -1 || completed_)
     {
@@ -159,9 +183,12 @@ Result<void, TemporaryFileError> TemporaryFile::write(const std::span<const std:
     std::size_t offset = 0;
     while (offset < bytes.size())
     {
+        if (const auto interrupted = interruption(options); interrupted.has_value())
+        {
+            return unexpected(interrupted.value());
+        }
 #ifdef _WIN32
-        const auto remaining = (std::min)(
-            bytes.size() - offset, static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
+        const auto remaining = (std::min)(bytes.size() - offset, maximum_native_write_bytes);
         DWORD written = 0;
         if (WriteFile(native_handle(native_handle_), bytes.data() + offset,
                       static_cast<DWORD>(remaining), &written, nullptr) == FALSE ||
@@ -172,8 +199,9 @@ Result<void, TemporaryFileError> TemporaryFile::write(const std::span<const std:
         }
         offset += written;
 #else
+        const auto remaining = (std::min)(bytes.size() - offset, maximum_native_write_bytes);
         const auto written =
-            ::write(static_cast<int>(native_handle_), bytes.data() + offset, bytes.size() - offset);
+            ::write(static_cast<int>(native_handle_), bytes.data() + offset, remaining);
         if (written < 0)
         {
             if (errno == EINTR)
@@ -188,22 +216,35 @@ Result<void, TemporaryFileError> TemporaryFile::write(const std::span<const std:
         }
         offset += static_cast<std::size_t>(written);
 #endif
+        if (const auto interrupted = interruption(options); interrupted.has_value())
+        {
+            return unexpected(interrupted.value());
+        }
     }
     size_ += bytes.size();
     return {};
 }
 
-Result<void, TemporaryFileError> TemporaryFile::complete()
+/// @brief Flushes and closes the file while observing policy around each native operation.
+Result<void, TemporaryFileError> TemporaryFile::complete(const TemporaryFileIoOptions &options)
 {
     if (native_handle_ == -1 || completed_)
     {
         return unexpected(TemporaryFileError{TemporaryFileErrorCode::invalid_state, 0});
+    }
+    if (const auto interrupted = interruption(options); interrupted.has_value())
+    {
+        return unexpected(interrupted.value());
     }
 #ifdef _WIN32
     if (FlushFileBuffers(native_handle(native_handle_)) == FALSE)
     {
         return unexpected(TemporaryFileError{TemporaryFileErrorCode::flush_failed,
                                              static_cast<int>(GetLastError())});
+    }
+    if (const auto interrupted = interruption(options); interrupted.has_value())
+    {
+        return unexpected(interrupted.value());
     }
     const auto handle = native_handle(native_handle_);
     native_handle_ = -1;
@@ -217,6 +258,10 @@ Result<void, TemporaryFileError> TemporaryFile::complete()
     {
         return unexpected(TemporaryFileError{TemporaryFileErrorCode::flush_failed, errno});
     }
+    if (const auto interrupted = interruption(options); interrupted.has_value())
+    {
+        return unexpected(interrupted.value());
+    }
     const auto handle = static_cast<int>(native_handle_);
     native_handle_ = -1;
     if (::close(handle) != 0)
@@ -224,10 +269,15 @@ Result<void, TemporaryFileError> TemporaryFile::complete()
         return unexpected(TemporaryFileError{TemporaryFileErrorCode::close_failed, errno});
     }
 #endif
+    if (const auto interrupted = interruption(options); interrupted.has_value())
+    {
+        return unexpected(interrupted.value());
+    }
     completed_ = true;
     return {};
 }
 
+/// @brief Transfers cleanup responsibility only after durable completion.
 Result<std::filesystem::path, TemporaryFileError> TemporaryFile::release()
 {
     if (!completed_ || path_.empty())
@@ -237,6 +287,7 @@ Result<std::filesystem::path, TemporaryFileError> TemporaryFile::release()
     return std::exchange(path_, {});
 }
 
+/// @brief Performs best-effort close and path removal without throwing from destruction.
 void TemporaryFile::cleanup() noexcept
 {
     if (native_handle_ != -1)
@@ -270,6 +321,10 @@ const char *to_string(const TemporaryFileErrorCode code) noexcept
         return "temporary file flush failed";
     case TemporaryFileErrorCode::close_failed:
         return "temporary file close failed";
+    case TemporaryFileErrorCode::cancelled:
+        return "temporary file operation was cancelled";
+    case TemporaryFileErrorCode::deadline_exceeded:
+        return "temporary file operation deadline expired";
     case TemporaryFileErrorCode::invalid_state:
         return "temporary file state is invalid";
     case TemporaryFileErrorCode::resource_allocation_failed:

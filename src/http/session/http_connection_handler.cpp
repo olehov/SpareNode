@@ -107,6 +107,14 @@ constexpr int response_writer_error_detail_base = 100;
     return ingestion != nullptr && ingestion->code == RequestBodyIngestionErrorCode::cancelled;
 }
 
+/// @brief Reports whether body persistence crossed the active receive deadline.
+[[nodiscard]] bool timed_out(const detail::BufferedRequestError &error) noexcept
+{
+    const auto *ingestion = std::get_if<RequestBodyIngestionError>(&error);
+    return ingestion != nullptr &&
+           ingestion->code == RequestBodyIngestionErrorCode::deadline_exceeded;
+}
+
 /// @brief Maps metadata and body-ingestion failures to a bounded HTTP status.
 [[nodiscard]] HttpStatusCode
 request_error_status(const detail::BufferedRequestError &error) noexcept
@@ -129,6 +137,7 @@ request_error_status(const detail::BufferedRequestError &error) noexcept
     case RequestBodyIngestionErrorCode::temporary_file_failure:
     case RequestBodyIngestionErrorCode::resource_failure:
     case RequestBodyIngestionErrorCode::cancelled:
+    case RequestBodyIngestionErrorCode::deadline_exceeded:
         return HttpStatusCode::internal_server_error;
     }
     return HttpStatusCode::internal_server_error;
@@ -325,6 +334,13 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
                                                  : std::nullopt};
 }
 
+/// @brief Copies the active receive policy into one temporary-file operation.
+[[nodiscard]] filesystem::TemporaryFileIoOptions
+file_options(const network::NetworkIoOptions &options) noexcept
+{
+    return {.stop_token = options.stop_token, .deadline = options.deadline};
+}
+
 /// @brief Dispatches one complete request and writes its response.
 /// @param[in,out] connection Exclusive connection used for transmission.
 /// @param[in] router Immutable route table used for dispatch.
@@ -373,11 +389,32 @@ struct HttpSessionRunContext
     network::NetworkDeadline started;          ///< Session start for injected policies.
 };
 
+/// @brief Converts a buffered-request failure into a network interruption or HTTP response.
+[[nodiscard]] Result<void, network::NetworkError>
+respond_to_request_failure(network::TcpConnection &connection,
+                           const detail::BufferedRequestError &error,
+                           const HttpSessionRunContext &context)
+{
+    if (cancelled(error))
+    {
+        return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                network::NetworkErrorDomain::cancellation, 0});
+    }
+    if (timed_out(error))
+    {
+        return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                network::NetworkErrorDomain::timeout, 0});
+    }
+    return send_error_response(connection, request_error_status(error), context.stop_token,
+                               context.config);
+}
+
 /// @brief Runs one validated session while the public boundary contains exceptions.
 [[nodiscard]] Result<void, network::NetworkError>
 run_http_session(network::TcpConnection &connection, const HttpSessionRunContext &context)
 {
-    detail::BufferedRequest request(context.config.parser_limits);
+    detail::BufferedRequest request(context.config.parser_limits,
+                                    context.config.temporary_body_file_factory);
     std::vector<std::byte> input((std::min)(maximum_metadata_bytes(context.config.parser_limits),
                                             context.config.receive_chunk_bytes));
     while (true)
@@ -417,24 +454,20 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
             {
                 return {};
             }
-            const auto finished = request.finish();
-            const auto status =
-                finished ? HttpStatusCode::bad_request : request_error_status(finished.error());
-            return send_error_response(connection, status, context.stop_token, context.config);
+            const auto finished = request.finish(file_options(options));
+            if (!finished)
+            {
+                return respond_to_request_failure(connection, finished.error(), context);
+            }
+            return send_error_response(connection, HttpStatusCode::bad_request, context.stop_token,
+                                       context.config);
         }
         context.deadlines.record_progress(std::chrono::steady_clock::now());
         const auto parsed =
-            request.feed(std::span(input).first(received.value()), context.stop_token);
+            request.feed(std::span(input).first(received.value()), file_options(options));
         if (!parsed)
         {
-            if (cancelled(parsed.error()))
-            {
-                return unexpected(network::NetworkError{network::NetworkOperation::receive,
-                                                        network::NetworkErrorDomain::cancellation,
-                                                        0});
-            }
-            return send_error_response(connection, request_error_status(parsed.error()),
-                                       context.stop_token, context.config);
+            return respond_to_request_failure(connection, parsed.error(), context);
         }
     }
 }

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
+#include <stop_token>
 
 #include "sparenode/result.hpp"
 
@@ -18,8 +21,17 @@ enum class TemporaryFileErrorCode : std::uint8_t
     write_failed,                    ///< The native file write did not commit all supplied bytes.
     flush_failed,                    ///< Durable completion of file contents failed.
     close_failed,                    ///< Closing the completed native file failed.
+    cancelled,                       ///< The caller cancelled the active file operation.
+    deadline_exceeded,               ///< The active file-operation deadline expired.
     invalid_state,                   ///< The operation is incompatible with the file lifecycle.
     resource_allocation_failed       ///< Path or name construction exhausted memory.
+};
+
+/// @brief Carries cooperative cancellation and an absolute file-operation deadline.
+struct TemporaryFileIoOptions
+{
+    std::stop_token stop_token{}; ///< Token observed around bounded native operations.
+    std::optional<std::chrono::steady_clock::time_point> deadline{}; ///< Optional expiry.
 };
 
 /// @brief Preserves a portable category and optional platform error value.
@@ -57,12 +69,16 @@ class TemporaryFile
 
     /// @brief Appends every supplied byte while the file remains writable.
     /// @param[in] bytes Decoded request body bytes to append.
+    /// @param[in] options Cancellation and deadline observed around bounded native writes.
     /// @return Success or a structured native write failure.
-    [[nodiscard]] virtual Result<void, TemporaryFileError> write(std::span<const std::byte> bytes);
+    [[nodiscard]] virtual Result<void, TemporaryFileError>
+    write(std::span<const std::byte> bytes, const TemporaryFileIoOptions &options = {});
 
     /// @brief Flushes and closes the file before publishing it as a completed artifact.
+    /// @param[in] options Cancellation and deadline observed around flush and close.
     /// @return Success or a structured flush/close failure.
-    [[nodiscard]] virtual Result<void, TemporaryFileError> complete();
+    [[nodiscard]] virtual Result<void, TemporaryFileError>
+    complete(const TemporaryFileIoOptions &options = {});
 
     /// @brief Returns the owned path while the artifact remains unreleased.
     /// @return Filesystem path removed by destruction until release succeeds.

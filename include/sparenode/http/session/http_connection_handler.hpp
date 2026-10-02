@@ -10,6 +10,7 @@
 
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
+#include "sparenode/http/request/request_body_ingestor.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_io_options.hpp"
@@ -36,6 +37,8 @@ using HttpRequestDeadlineProvider = std::function<std::optional<network::Network
 struct HttpConnectionHandlerConfig
 {
     HttpRequestParserLimits parser_limits{}; ///< Protocol and request-size boundaries.
+    TemporaryBodyFileFactory
+        temporary_body_file_factory{}; ///< Optional controlled storage factory.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
     HttpRequestTimeouts timeouts{}; ///< Header/body inactivity and total receive budgets.
     HttpRequestDeadlineProvider deadline_provider;       ///< Optional earlier per-read deadline.

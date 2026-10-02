@@ -59,12 +59,13 @@ RequestExpectation BufferedRequest::take_expectation()
 }
 
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
-Result<void, BufferedRequestError> BufferedRequest::feed(const std::span<const std::byte> input,
-                                                         const std::stop_token &stop_token)
+Result<void, BufferedRequestError>
+BufferedRequest::feed(const std::span<const std::byte> input,
+                      const filesystem::TemporaryFileIoOptions &options)
 {
     if (head_.has_value())
     {
-        return feed_body(input, stop_token);
+        return feed_body(input, options);
     }
     metadata_.insert(metadata_.end(), input.begin(), input.end());
     auto parsed = parse_http_request_head(metadata_, limits_);
@@ -78,9 +79,9 @@ Result<void, BufferedRequestError> BufferedRequest::feed(const std::span<const s
     }
     auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
     const auto head_bytes = head.consumed_bytes;
-    ingestor_.emplace(head, limits_);
+    ingestor_.emplace(head, limits_, file_factory_);
     head_ = std::move(head);
-    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), stop_token);
+    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options);
     metadata_.resize(head_bytes);
     return result;
 }
@@ -88,14 +89,14 @@ Result<void, BufferedRequestError> BufferedRequest::feed(const std::span<const s
 /// @brief Persists only emitted payload; chunk metadata and trailers never enter body storage.
 Result<void, BufferedRequestError>
 BufferedRequest::feed_body(const std::span<const std::byte> input,
-                           const std::stop_token &stop_token)
+                           const filesystem::TemporaryFileIoOptions &options)
 {
     if (!ingestor_.has_value())
     {
         return unexpected(BufferedRequestError(
             HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, 0}));
     }
-    const auto progress = ingestor_->feed(input, stop_token);
+    const auto progress = ingestor_->feed(input, options);
     if (!progress)
     {
         return unexpected(BufferedRequestError(progress.error()));
@@ -103,14 +104,16 @@ BufferedRequest::feed_body(const std::span<const std::byte> input,
     return {};
 }
 
-Result<void, BufferedRequestError> BufferedRequest::finish()
+/// @brief Validates EOF and finalizes the artifact under the active I/O policy.
+Result<void, BufferedRequestError>
+BufferedRequest::finish(const filesystem::TemporaryFileIoOptions &options)
 {
     if (!ingestor_)
     {
         return unexpected(BufferedRequestError(
             HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, metadata_.size()}));
     }
-    const auto result = ingestor_->finish();
+    const auto result = ingestor_->finish(options);
     if (!result)
     {
         return unexpected(BufferedRequestError(result.error()));
