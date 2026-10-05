@@ -28,11 +28,13 @@ add_executable(sparenode_tests
     filesystem/filesystem_security_test.cpp
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
+    filesystem/temporary_file_test.cpp
     http/api/filesystem_api_test.cpp
     http/session/http_connection_handler_test.cpp
     http/session/request_deadlines_test.cpp
     http/request/http_request_parser_test.cpp
     http/request/http_body_decoder_test.cpp
+    http/request/request_body_ingestor_test.cpp
     http/request/request_target_test.cpp
     http/routing/http_router_test.cpp
     http/response/http_response_test.cpp

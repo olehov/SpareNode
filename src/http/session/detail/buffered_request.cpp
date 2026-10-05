@@ -1,10 +1,8 @@
 #include "sparenode/http/session/detail/buffered_request.hpp"
 
-#include <array>
 #include <string_view>
 
 #include "sparenode/http/detail/ascii.hpp"
-#include "sparenode/http/request/detail/body_decode_buffer.hpp"
 
 namespace sparenode::http::detail
 {
@@ -61,17 +59,27 @@ RequestExpectation BufferedRequest::take_expectation()
 }
 
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
-Result<void, HttpRequestParseError> BufferedRequest::feed(const std::span<const std::byte> input)
+Result<void, BufferedRequestError>
+BufferedRequest::feed(const std::span<const std::byte> input,
+                      const filesystem::TemporaryFileIoOptions &options)
+{
+    return feed_with_body_options(input, [&options] { return options; });
+}
+
+/// @brief Defers the file deadline provider until validated metadata reaches body ingestion.
+Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
+    const std::span<const std::byte> input,
+    const std::function<filesystem::TemporaryFileIoOptions()> &options_provider)
 {
     if (head_.has_value())
     {
-        return feed_body(input);
+        return feed_body(input, options_provider());
     }
     metadata_.insert(metadata_.end(), input.begin(), input.end());
     auto parsed = parse_http_request_head(metadata_, limits_);
     if (!parsed)
     {
-        return unexpected(parsed.error());
+        return unexpected(BufferedRequestError(parsed.error()));
     }
     if (!parsed->has_value())
     {
@@ -79,31 +87,44 @@ Result<void, HttpRequestParseError> BufferedRequest::feed(const std::span<const 
     }
     auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
     const auto head_bytes = head.consumed_bytes;
-    decoder_.emplace(head, limits_);
+    ingestor_.emplace(head, limits_, file_factory_);
     head_ = std::move(head);
-    const auto result = feed_body(std::span(metadata_).subspan(head_bytes));
+    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options_provider());
     metadata_.resize(head_bytes);
     return result;
 }
 
-/// @brief Copies only emitted payload; chunk metadata and trailers never enter body storage.
-Result<void, HttpRequestParseError> BufferedRequest::feed_body(std::span<const std::byte> input)
+/// @brief Persists only emitted payload; chunk metadata and trailers never enter body storage.
+Result<void, BufferedRequestError>
+BufferedRequest::feed_body(const std::span<const std::byte> input,
+                           const filesystem::TemporaryFileIoOptions &options)
 {
-    if (!decoder_.has_value())
+    if (!ingestor_.has_value())
     {
-        return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, 0});
+        return unexpected(BufferedRequestError(
+            HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, 0}));
     }
-    std::array<std::byte, body_decode_buffer_bytes> output{};
-    while (!input.empty() && !decoder_->complete())
+    const auto progress = ingestor_->feed(input, options);
+    if (!progress)
     {
-        const auto progress = decoder_->feed(input, output);
-        if (!progress)
-        {
-            return unexpected(progress.error());
-        }
-        body_.insert(body_.end(), output.begin(),
-                     output.begin() + static_cast<std::ptrdiff_t>(progress->produced));
-        input = input.subspan(progress->consumed);
+        return unexpected(BufferedRequestError(progress.error()));
+    }
+    return {};
+}
+
+/// @brief Validates EOF and finalizes the artifact under the active I/O policy.
+Result<void, BufferedRequestError>
+BufferedRequest::finish(const filesystem::TemporaryFileIoOptions &options)
+{
+    if (!ingestor_)
+    {
+        return unexpected(BufferedRequestError(
+            HttpRequestParseError{HttpRequestParseErrorCode::incomplete_body, metadata_.size()}));
+    }
+    const auto result = ingestor_->finish(options);
+    if (!result)
+    {
+        return unexpected(BufferedRequestError(result.error()));
     }
     return {};
 }

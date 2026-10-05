@@ -50,12 +50,14 @@ add_library(sparenode_core STATIC
     src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/directory_listing.cpp
     src/filesystem/safe_path.cpp
+    src/filesystem/temporary_file.cpp
     src/http/api/filesystem_api.cpp
     src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
     src/http/request/http_request.cpp
     src/http/request/http_request_parser.cpp
     src/http/request/http_body_decoder.cpp
+    src/http/request/request_body_ingestor.cpp
     src/http/request/detail/host_authority.cpp
     src/http/request/detail/request_target.cpp
     src/http/response/detail/response_date.cpp

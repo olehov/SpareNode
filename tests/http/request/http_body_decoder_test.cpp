@@ -5,6 +5,7 @@
 #include "sparenode/http/session/detail/buffered_request.hpp"
 #include "support/optional.hpp"
 #include <array>
+#include <fstream>
 #include <string>
 
 namespace
@@ -217,6 +218,44 @@ TEST_CASE("Buffered request feeds one-byte fragments without retaining chunk fra
     }
     REQUIRE(request.complete());
     const auto view = request.request();
-    CHECK(text(view.body()) == "ab");
+    CHECK(view.body().empty());
+    CHECK(view.body_size() == 2);
+    const auto artifact = view.temporary_body();
+    REQUIRE(artifact);
+    REQUIRE(artifact->completed());
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    std::string body(view.body_size(), '\0');
+    input.read(body.data(), static_cast<std::streamsize>(body.size()));
+    REQUIRE(input.good());
+    CHECK(body == "ab");
     CHECK(view.header("X").empty());
+}
+
+TEST_CASE("Buffered request resolves body policy only after complete headers",
+          "[http][body][session]")
+{
+    sparenode::http::detail::BufferedRequest request({});
+    std::size_t body_policy_calls = 0;
+    const auto body_options = [&]
+    {
+        ++body_policy_calls;
+        return sparenode::filesystem::TemporaryFileIoOptions{};
+    };
+    REQUIRE(request
+                .feed_with_body_options(
+                    bytes("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n"), body_options)
+                .has_value());
+    CHECK(body_policy_calls == 0);
+    CHECK_FALSE(request.reading_body());
+    REQUIRE(request.feed_with_body_options(bytes("\r\nx"), body_options).has_value());
+    CHECK(body_policy_calls == 1);
+    REQUIRE(request.complete());
+    const auto artifact = request.request().temporary_body();
+    REQUIRE(artifact);
+    std::ifstream input(artifact->path(), std::ios::binary);
+    REQUIRE(input.is_open());
+    char payload{};
+    input.get(payload);
+    CHECK(payload == 'x');
 }

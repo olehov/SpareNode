@@ -32,7 +32,7 @@ payloads. Sessions use the streaming interface below rather than reparsing bodie
 the body arrives. `HttpBodyDecoder` then accepts fresh wire fragments and a mutable
 output span. Its result reports consumed wire bytes, produced payload bytes, and
 completion. The caller retains unconsumed input and can immediately send produced
-bytes to a bounded buffer or future temporary-file sink. An empty/full output span
+bytes to a bounded buffer or temporary-file sink. An empty/full output span
 applies backpressure without losing input. Neither mode owns payload storage or
 performs socket I/O; fixed-length and chunked payloads use this same interface.
 
@@ -63,9 +63,14 @@ trailers are ignored, so they cannot affect endpoint authorization or processing
 Limits are C++ parser settings; payload defaults remain 1 MiB. Payload or framing
 limit errors map to 413, while chunk/trailer syntax errors map to 400.
 
-SN-087 can consume the decoder's output spans directly for either framing mode.
-The current `BufferedRequest` adapter retains only bounded metadata and decoded
-body storage for the existing route API; it does not implement file ingestion.
+Session `RequestBodyIngestor` consumes the decoder output directly for either framing
+mode using a fixed 16 KiB decode buffer. It lazily creates a private, collision-safe
+temporary file for nonempty payloads, writes each decoded span, and flushes and closes
+the file before routing. `HttpRequestView::body_size()` reports the decoded length and
+`temporary_body()` shares the completed artifact; its destructor removes the path
+unless a later upload finalizer explicitly releases ownership. Protocol errors,
+limit violations, cancellation, allocation failures, and native file failures remain
+distinct terminal errors, and partial artifacts are removed through RAII.
 
 The required `Host` field uses a deliberately strict, allocation-free ASCII
 authority subset. It accepts DNS-style names of at most 253 bytes with labels

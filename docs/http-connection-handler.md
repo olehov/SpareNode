@@ -1,26 +1,33 @@
 # HTTP connection handler
 
 `handle_http_connection()` is the HTTP/TCP composition boundary used by dispatcher
-workers. It incrementally reads one HTTP/1.1 request into caller-independent,
-bounded storage, validates metadata with `parse_http_request_head()`, dispatches a
-complete borrowed request through `HttpRouter`, and streams the resulting
+workers. It incrementally reads one HTTP/1.1 request into caller-independent
+storage, validates metadata with `parse_http_request_head()`, dispatches a
+complete request through `HttpRouter`, and streams the resulting
 `HttpResponse` through `write_http_response()`.
 
 `BufferedRequest` freezes validated metadata storage and feeds fresh body bytes to
-one persistent `HttpBodyDecoder` for fixed-length and chunked framing. Only decoded
-payload is retained for routing. Chunk syntax is never reparsed on the next receive.
+one persistent `HttpBodyDecoder` for fixed-length and chunked framing. Both modes
+write decoded payload through the same `RequestBodyIngestor` into a uniquely created
+temporary file; chunk syntax is never stored or reparsed. Empty bodies create no file.
+The route receives the exact decoded size and shared ownership of the completed
+artifact, whose final owner removes it unless upload finalization calls `release()`.
+
 Native receives request at most `receive_chunk_bytes` at a time, bounded also by
-the combined request-line, CRLF, header, and payload configuration. Zero receive
-chunks and overflowing combined limits are rejected before I/O. Framing and trailer
-limits apply independently of decoded payload limits. SN-087 can replace the
-bounded body buffer with temporary-file ingestion through the same decoder API.
+the combined request-line, CRLF, and header configuration. The body limit no longer
+changes the receive-buffer allocation. Zero receive chunks and overflowing metadata
+limits are rejected before I/O. Decoded payload, chunk framing, and trailer limits
+apply independently. Creation, write, flush, and close failures remain structured.
+Partial files are closed and removed when ingestion fails, is cancelled, or loses
+its last owner. If a native write or flush is still blocked, its isolated I/O
+worker retains the file and removes it when that call eventually returns.
 
 ## Connection policy
 
 Version 0.1 handles exactly one request and one response per TCP connection. If
 the initial receive contains pipelined bytes, the parser reports the first exact
-request boundary and the session keeps metadata and decoded storage alive while routing and
-writing that response. Bytes after the boundary are never interpreted as part of
+request boundary and the session keeps metadata and the temporary artifact alive while routing
+and writing that response. Bytes after the boundary are never interpreted as part of
 the first request. Already received trailing bytes are discarded; unread socket
 bytes are drained after sending the final response. Persistent connections can be
 added later without changing parser boundaries.
@@ -113,6 +120,17 @@ the owned connection, and releases the dispatcher worker. The configured failure
 observer logs the structured error without request contents. No HTTP error response
 is attempted after a receive timeout. Cancellation remains a distinct failure and
 wins if already observable at the same wait boundary as timeout.
+
+The same stop token and refreshed absolute receive deadline reach temporary-body
+writes and finalization. Native writes are capped at 16 KiB. Each active request
+reuses one I/O worker and one 16 KiB payload buffer through its body and flush.
+The HTTP worker stops waiting at cancellation or deadline even if the native call
+does not return. At most 32 native file operations may run process-wide; idle
+workers waiting for more network bytes do not occupy those slots. Healthy
+requests wait for a free slot under their cancellation and deadline policy;
+requests fail with a structured resource error if all slots belong to stalled,
+detached operations. A stalled operation retains its temporary file until the
+filesystem call returns, so cleanup can be delayed beyond the request deadline.
 
 These are request-receive deadlines. They start when the worker begins the session,
 not at TCP accept, and do not interrupt route execution or response writes. Native

@@ -7,10 +7,9 @@
 #include <new>
 #include <span>
 #include <utility>
+#include <variant>
 #include <vector>
 
-#include "sparenode/http/request/detail/http_request_view_access.hpp"
-#include "sparenode/http/request/http_body_decoder.hpp"
 #include "sparenode/http/response/http_response_writer.hpp"
 #include "sparenode/http/session/detail/buffered_request.hpp"
 #include "sparenode/http/session/detail/request_deadlines.hpp"
@@ -39,10 +38,10 @@ constexpr int response_writer_error_detail_base = 100;
     return static_cast<int>(code);
 }
 
-/// @brief Computes the largest request the configured parser can complete.
+/// @brief Computes the largest metadata prefix retained by the session.
 /// @param[in] limits Independent parser boundaries.
-/// @return Combined byte bound, or zero when the addition would overflow.
-[[nodiscard]] std::size_t maximum_request_bytes(const HttpRequestParserLimits &limits) noexcept
+/// @return Request-line plus header bound, or zero when the addition would overflow.
+[[nodiscard]] std::size_t maximum_metadata_bytes(const HttpRequestParserLimits &limits) noexcept
 {
     constexpr std::size_t request_line_ending_bytes = 2;
     constexpr std::size_t maximum = (std::numeric_limits<std::size_t>::max)();
@@ -55,12 +54,7 @@ constexpr int response_writer_error_detail_base = 100;
     {
         return 0;
     }
-    const std::size_t metadata_bytes = line_and_ending + limits.max_header_bytes;
-    if (limits.max_body_bytes > maximum - metadata_bytes)
-    {
-        return 0;
-    }
-    return metadata_bytes + limits.max_body_bytes;
+    return line_and_ending + limits.max_header_bytes;
 }
 
 /// @brief Selects the standard response status for one parser failure.
@@ -104,6 +98,49 @@ constexpr int response_writer_error_detail_base = 100;
         return HttpStatusCode::bad_request;
     }
     return HttpStatusCode::bad_request;
+}
+
+/// @brief Reports whether request ingestion stopped because the caller cancelled it.
+[[nodiscard]] bool cancelled(const detail::BufferedRequestError &error) noexcept
+{
+    const auto *ingestion = std::get_if<RequestBodyIngestionError>(&error);
+    return ingestion != nullptr && ingestion->code == RequestBodyIngestionErrorCode::cancelled;
+}
+
+/// @brief Reports whether body persistence crossed the active receive deadline.
+[[nodiscard]] bool timed_out(const detail::BufferedRequestError &error) noexcept
+{
+    const auto *ingestion = std::get_if<RequestBodyIngestionError>(&error);
+    return ingestion != nullptr &&
+           ingestion->code == RequestBodyIngestionErrorCode::deadline_exceeded;
+}
+
+/// @brief Maps metadata and body-ingestion failures to a bounded HTTP status.
+[[nodiscard]] HttpStatusCode
+request_error_status(const detail::BufferedRequestError &error) noexcept
+{
+    if (const auto *parse = std::get_if<HttpRequestParseError>(&error))
+    {
+        return parse_error_status(parse->code);
+    }
+    const auto *ingestion = std::get_if<RequestBodyIngestionError>(&error);
+    if (ingestion == nullptr)
+    {
+        return HttpStatusCode::internal_server_error;
+    }
+    switch (ingestion->code)
+    {
+    case RequestBodyIngestionErrorCode::body_too_large:
+        return HttpStatusCode::content_too_large;
+    case RequestBodyIngestionErrorCode::framing_failure:
+        return parse_error_status(ingestion->framing_error.code);
+    case RequestBodyIngestionErrorCode::temporary_file_failure:
+    case RequestBodyIngestionErrorCode::resource_failure:
+    case RequestBodyIngestionErrorCode::cancelled:
+    case RequestBodyIngestionErrorCode::deadline_exceeded:
+        return HttpStatusCode::internal_server_error;
+    }
+    return HttpStatusCode::internal_server_error;
 }
 
 /// @brief Returns the canonical reason phrase for a session-generated status.
@@ -297,6 +334,13 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
                                                  : std::nullopt};
 }
 
+/// @brief Copies the active receive policy into one temporary-file operation.
+[[nodiscard]] filesystem::TemporaryFileIoOptions
+file_options(const network::NetworkIoOptions &options) noexcept
+{
+    return {.stop_token = options.stop_token, .deadline = options.deadline};
+}
+
 /// @brief Dispatches one complete request and writes its response.
 /// @param[in,out] connection Exclusive connection used for transmission.
 /// @param[in] router Immutable route table used for dispatch.
@@ -325,6 +369,118 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &route
     return drain_after_response(connection, stop_token, config);
 }
 
+/// @brief Groups validated state shared by one request receive loop.
+struct HttpSessionRunContext
+{
+    /// @brief Retains references needed by the receive loop.
+    HttpSessionRunContext(const HttpRouter &router_value, const std::stop_token &stop_token_value,
+                          const HttpConnectionHandlerConfig &config_value,
+                          detail::RequestDeadlines &deadlines_value,
+                          const network::NetworkDeadline started_value) noexcept
+        : router(router_value), stop_token(stop_token_value), config(config_value),
+          deadlines(deadlines_value), started(started_value)
+    {
+    }
+
+    const HttpRouter &router;                  ///< Immutable dispatch table.
+    const std::stop_token &stop_token;         ///< Dispatcher cancellation source.
+    const HttpConnectionHandlerConfig &config; ///< Validated session policy.
+    detail::RequestDeadlines &deadlines;       ///< Mutable receive deadline state.
+    network::NetworkDeadline started;          ///< Session start for injected policies.
+};
+
+/// @brief Combines the current phase deadline with the optional shorter provider deadline.
+[[nodiscard]] network::NetworkIoOptions bounded_read_options(const HttpSessionRunContext &context,
+                                                             const HttpRequestReadPhase phase)
+{
+    auto options = read_options(context.config, phase, context.started, context.stop_token);
+    const auto bounded_deadline = context.deadlines.next(phase == HttpRequestReadPhase::body);
+    options.deadline = options.deadline.has_value()
+                           ? (std::min)(options.deadline.value(), bounded_deadline)
+                           : bounded_deadline;
+    return options;
+}
+
+/// @brief Converts a buffered-request failure into a network interruption or HTTP response.
+[[nodiscard]] Result<void, network::NetworkError>
+respond_to_request_failure(network::TcpConnection &connection,
+                           const detail::BufferedRequestError &error,
+                           const HttpSessionRunContext &context)
+{
+    if (cancelled(error))
+    {
+        return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                network::NetworkErrorDomain::cancellation, 0});
+    }
+    if (timed_out(error))
+    {
+        return unexpected(network::NetworkError{network::NetworkOperation::receive,
+                                                network::NetworkErrorDomain::timeout, 0});
+    }
+    return send_error_response(connection, request_error_status(error), context.stop_token,
+                               context.config);
+}
+
+/// @brief Runs one validated session while the public boundary contains exceptions.
+[[nodiscard]] Result<void, network::NetworkError>
+run_http_session(network::TcpConnection &connection, const HttpSessionRunContext &context)
+{
+    detail::BufferedRequest request(context.config.parser_limits,
+                                    context.config.temporary_body_file_factory);
+    std::vector<std::byte> input((std::min)(maximum_metadata_bytes(context.config.parser_limits),
+                                            context.config.receive_chunk_bytes));
+    while (true)
+    {
+        const auto expectation = respond_to_expectation(
+            connection, request.take_expectation(),
+            {.stop_token = context.stop_token, .deadline = context.deadlines.next(true)},
+            context.config);
+        if (!expectation)
+        {
+            return unexpected(expectation.error());
+        }
+        if (!expectation.value())
+        {
+            return {};
+        }
+        if (request.complete())
+        {
+            return dispatch_and_respond(connection, context.router, request.request(),
+                                        context.stop_token, context.config);
+        }
+        const auto phase =
+            request.reading_body() ? HttpRequestReadPhase::body : HttpRequestReadPhase::headers;
+        const auto options = bounded_read_options(context, phase);
+        auto received = connection.receive_with_options(input, options);
+        if (!received)
+        {
+            return unexpected(received.error());
+        }
+        if (received.value() == 0)
+        {
+            if (request.empty())
+            {
+                return {};
+            }
+            const auto finished = request.finish(file_options(options));
+            if (!finished)
+            {
+                return respond_to_request_failure(connection, finished.error(), context);
+            }
+            return send_error_response(connection, HttpStatusCode::bad_request, context.stop_token,
+                                       context.config);
+        }
+        context.deadlines.record_progress(std::chrono::steady_clock::now());
+        const auto parsed = request.feed_with_body_options(
+            std::span(input).first(received.value()), [&context]
+            { return file_options(bounded_read_options(context, HttpRequestReadPhase::body)); });
+        if (!parsed)
+        {
+            return respond_to_request_failure(connection, parsed.error(), context);
+        }
+    }
+}
+
 } // namespace
 
 /// @brief Receives one bounded request, then routes it and sends its response.
@@ -335,10 +491,10 @@ Result<void, network::NetworkError>
 handle_http_connection(network::TcpConnection connection, const HttpRouter &router,
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
-    const std::size_t request_limit = maximum_request_bytes(config.parser_limits);
+    const std::size_t metadata_limit = maximum_metadata_bytes(config.parser_limits);
     const auto session_started = std::chrono::steady_clock::now();
     auto deadline_state = detail::RequestDeadlines::create(config.timeouts, session_started);
-    if (request_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
+    if (metadata_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
         config.max_drain_bytes == 0 || config.drain_timeout <= std::chrono::milliseconds::zero() ||
         config.drain_timeout > HttpRequestTimeouts::maximum_config_timeout)
     {
@@ -350,52 +506,8 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
 
     try
     {
-        detail::BufferedRequest request(config.parser_limits);
-        std::vector<std::byte> input((std::min)(request_limit, config.receive_chunk_bytes));
-        while (true)
-        {
-            const auto expectation = respond_to_expectation(
-                connection, request.take_expectation(),
-                {.stop_token = stop_token, .deadline = deadlines.next(true)}, config);
-            if (!expectation)
-            {
-                return unexpected(expectation.error());
-            }
-            if (!expectation.value())
-            {
-                return {};
-            }
-            if (request.complete())
-            {
-                return dispatch_and_respond(connection, router, request.request(), stop_token,
-                                            config);
-            }
-            const auto phase =
-                request.reading_body() ? HttpRequestReadPhase::body : HttpRequestReadPhase::headers;
-            auto options = read_options(config, phase, session_started, stop_token);
-            const auto bounded_deadline = deadlines.next(phase == HttpRequestReadPhase::body);
-            options.deadline = options.deadline.has_value()
-                                   ? (std::min)(options.deadline.value(), bounded_deadline)
-                                   : bounded_deadline;
-            auto received = connection.receive_with_options(input, options);
-            if (!received)
-            {
-                return unexpected(received.error());
-            }
-            if (received.value() == 0)
-            {
-                return request.empty()
-                           ? Result<void, network::NetworkError>{}
-                           : send_error_response(connection, HttpStatusCode::bad_request,
-                                                 stop_token, config);
-            }
-            deadlines.record_progress(std::chrono::steady_clock::now());
-            if (const auto parsed = request.feed(std::span(input).first(received.value())); !parsed)
-            {
-                return send_error_response(connection, parse_error_status(parsed.error().code),
-                                           stop_token, config);
-            }
-        }
+        return run_http_session(connection,
+                                {router, stop_token, config, deadlines, session_started});
     }
     catch (const std::bad_alloc &)
     {
