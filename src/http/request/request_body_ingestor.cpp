@@ -358,6 +358,7 @@ RequestBodyIngestor::~RequestBodyIngestor()
         }
         else
         {
+            artifact_.reset();
             file_worker_->abandon();
         }
     }
