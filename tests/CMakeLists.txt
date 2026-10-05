@@ -29,6 +29,7 @@ add_executable(sparenode_tests
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
     filesystem/temporary_file_test.cpp
+    filesystem/upload_finalizer_test.cpp
     http/api/filesystem_api_test.cpp
     http/session/http_connection_handler_test.cpp
     http/session/request_deadlines_test.cpp
