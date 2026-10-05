@@ -7,6 +7,7 @@
 #include <optional>
 #include <system_error>
 
+#include "sparenode/filesystem/upload_finalizer.hpp"
 #include "sparenode/result.hpp"
 
 namespace sparenode::filesystem::detail
@@ -46,6 +47,16 @@ class ConfinedDirectory final
     /// @brief Releases the retained platform directory handle.
     ~ConfinedDirectory();
 
+#ifdef _WIN32
+    /// @brief Borrows the stable Windows parent handle for handle-relative operations.
+    /// @return Native handle retained by this directory context.
+    [[nodiscard]] void *native_handle() const noexcept;
+#else
+    /// @brief Borrows the stable POSIX parent descriptor for handle-relative operations.
+    /// @return Native descriptor retained by this directory context.
+    [[nodiscard]] int native_handle() const noexcept;
+#endif
+
   private:
     struct Implementation;
 
@@ -76,5 +87,16 @@ open_confined_directory(const std::filesystem::path &shared_root,
 [[nodiscard]] std::optional<ConfinedEntryMetadata>
 read_confined_directory_entry(const ConfinedDirectory &directory,
                               const std::filesystem::path &native_name);
+
+/// @brief Publishes a completed source through a retained, confined parent handle.
+/// @param[in] directory Stable destination parent.
+/// @param[in] source Completed request-owned temporary file.
+/// @param[in] native_name Single destination filename.
+/// @param[in] options Cancellation and deadline policy for staging.
+/// @return Success or a structured staging/publication failure.
+[[nodiscard]] Result<void, UploadFinalizationError>
+publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile &source,
+                        const std::filesystem::path &native_name,
+                        const TemporaryFileIoOptions &options);
 
 } // namespace sparenode::filesystem::detail

@@ -1,4 +1,5 @@
 #include "sparenode/filesystem/temporary_file.hpp"
+#include "detail/temporary_name.hpp"
 
 #include <algorithm>
 #include <array>
@@ -83,6 +84,12 @@ interruption(const TemporaryFileIoOptions &options) noexcept
 
 } // namespace
 
+/// @brief Shares temporary-name generation with same-directory upload staging.
+std::string detail::temporary_name_suffix()
+{
+    return candidate_suffix();
+}
+
 /// @brief Adopts one exclusively created native file and its cleanup path.
 TemporaryFile::TemporaryFile(std::filesystem::path path, const std::intptr_t native_handle) noexcept
     : path_(std::move(path)), native_handle_(native_handle)
@@ -131,7 +138,7 @@ Result<TemporaryFile, TemporaryFileError> TemporaryFile::create()
         int last_error = 0;
         for (std::size_t attempt = 0; attempt < maximum_creation_attempts; ++attempt)
         {
-            auto path = directory / (".sparenode-body-" + candidate_suffix() + ".tmp");
+            auto path = directory / (".sparenode-body-" + detail::temporary_name_suffix() + ".tmp");
 #ifdef _WIN32
             const auto handle =
                 CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,

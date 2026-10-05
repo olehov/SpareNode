@@ -51,6 +51,7 @@ add_library(sparenode_core STATIC
     src/filesystem/directory_listing.cpp
     src/filesystem/safe_path.cpp
     src/filesystem/temporary_file.cpp
+    src/filesystem/upload_finalizer.cpp
     src/http/api/filesystem_api.cpp
     src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
@@ -89,11 +90,13 @@ if(WIN32)
         src/filesystem/detail/windows_file_read_stream.cpp
         src/filesystem/detail/windows_directory_entry_reader.cpp
         src/filesystem/detail/windows_path_inspector.cpp
+        src/filesystem/detail/windows_upload_finalizer.cpp
     )
 else()
     target_sources(sparenode_core PRIVATE
         src/filesystem/detail/linux_file_read_stream.cpp
         src/filesystem/detail/linux_directory_entry_reader.cpp
+        src/filesystem/detail/linux_upload_finalizer.cpp
     )
 endif()
 

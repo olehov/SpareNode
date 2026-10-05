@@ -139,6 +139,11 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+void *ConfinedDirectory::native_handle() const noexcept
+{
+    return implementation_->directory.get();
+}
+
 /// @brief Opens a Windows directory whose final handle path remains inside the shared root.
 Result<ConfinedDirectory, std::error_code>
 open_confined_directory(const std::filesystem::path &shared_root,
