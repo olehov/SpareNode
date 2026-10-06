@@ -12,6 +12,8 @@
 #include <utility>
 
 #include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/directory_listing.hpp"
+#include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
 #include "support/temporary_directory.hpp"
@@ -85,35 +87,124 @@ struct UploadFixture
 class CancelAfterStageSource final : public sparenode::filesystem::TemporaryFile
 {
   public:
-    CancelAfterStageSource(sparenode::filesystem::TemporaryFile source, std::stop_source &stop)
-        : source_(std::move(source)), stop_(stop)
+    /// @brief Keeps the source alive while inspecting the destination stage.
+    CancelAfterStageSource(sparenode::filesystem::TemporaryFile source, std::stop_source &stop,
+                           std::filesystem::path stage_directory)
+        : source_(std::move(source)), stop_(stop), stage_directory_(std::move(stage_directory))
     {
     }
 
+    /// @brief Returns the path owned by the completed source artifact.
     [[nodiscard]] const std::filesystem::path &path() const noexcept override
     {
         return source_.path();
     }
 
+    /// @brief Cancels only after finding a real sibling staging entry.
     [[nodiscard]] std::uint64_t size() const noexcept override
     {
         if (++size_queries_ == 2)
         {
-            stop_.request_stop();
+            try
+            {
+                stage_seen_ = has_stage(stage_directory_);
+            }
+            catch (...)
+            {
+                stage_seen_ = false;
+            }
+            if (stage_seen_)
+            {
+                stop_.request_stop();
+            }
         }
         return source_.size();
     }
 
+    /// @brief Forwards completion state from the source artifact.
     [[nodiscard]] bool completed() const noexcept override
     {
         return source_.completed();
     }
 
+    /// @brief Reports whether the cancellation observed an existing stage.
+    [[nodiscard]] bool stage_seen() const noexcept
+    {
+        return stage_seen_;
+    }
+
   private:
     sparenode::filesystem::TemporaryFile source_; ///< Owns cleanup of the actual artifact.
     std::stop_source &stop_;                      ///< Requests cancellation after staging.
+    std::filesystem::path stage_directory_;       ///< Directory inspected before cancellation.
     mutable std::size_t size_queries_{};          ///< Distinguishes validation from copying.
+    mutable bool stage_seen_{};                   ///< Proves the stage existed when stopped.
 };
+
+#ifndef _WIN32
+/// @brief Replaces the stage name while retaining its original open inode.
+class ReplaceStageSource final : public sparenode::filesystem::TemporaryFile
+{
+  public:
+    /// @brief Keeps the source alive while replacing its stage basename.
+    ReplaceStageSource(sparenode::filesystem::TemporaryFile source,
+                       std::filesystem::path stage_directory)
+        : source_(std::move(source)), stage_directory_(std::move(stage_directory))
+    {
+    }
+
+    /// @brief Returns the path owned by the completed source artifact.
+    [[nodiscard]] const std::filesystem::path &path() const noexcept override
+    {
+        return source_.path();
+    }
+
+    /// @brief Substitutes a different file after the original stage exists.
+    [[nodiscard]] std::uint64_t size() const noexcept override
+    {
+        if (++size_queries_ == 2)
+        {
+            try
+            {
+                const auto entries = std::filesystem::directory_iterator(stage_directory_);
+                const auto stage = std::find_if(
+                    begin(entries), end(entries), [](const auto &entry)
+                    { return entry.path().filename().string().starts_with(".sparenode-upload-"); });
+                if (stage != end(entries))
+                {
+                    std::filesystem::rename(stage->path(), stage_directory_ / ".held-upload-stage");
+                    std::ofstream replacement(stage->path(), std::ios::binary);
+                    replacement << "substituted";
+                    replaced_ = replacement.good();
+                }
+            }
+            catch (...)
+            {
+                replaced_ = false;
+            }
+        }
+        return source_.size();
+    }
+
+    /// @brief Forwards completion state from the source artifact.
+    [[nodiscard]] bool completed() const noexcept override
+    {
+        return source_.completed();
+    }
+
+    /// @brief Reports whether the stage basename was replaced.
+    [[nodiscard]] bool replaced() const noexcept
+    {
+        return replaced_;
+    }
+
+  private:
+    sparenode::filesystem::TemporaryFile source_; ///< Owns the completed source artifact.
+    std::filesystem::path stage_directory_;       ///< Parent of the replaceable stage name.
+    mutable std::size_t size_queries_{};          ///< Replaces only after stage creation.
+    mutable bool replaced_{};                     ///< Reports a completed name substitution.
+};
+#endif
 
 } // namespace
 
@@ -199,15 +290,55 @@ TEST_CASE("Cancellation after staging removes the sibling and preserves the fina
 {
     UploadFixture fixture;
     std::stop_source stop;
-    CancelAfterStageSource source(complete_source("interrupted"), stop);
+    CancelAfterStageSource source(complete_source("interrupted"), stop, fixture.share);
     const auto result = sparenode::filesystem::finalize_upload(
         fixture.root, "interrupted.txt", source, {.stop_token = stop.get_token()});
     REQUIRE((result.has_value()) == false);
     CHECK(result.error().code == sparenode::filesystem::UploadFinalizationErrorCode::cancelled);
     CHECK(stop.stop_requested());
+    CHECK(source.stage_seen());
     CHECK(std::filesystem::exists(fixture.share / "interrupted.txt") == false);
     CHECK(has_stage(fixture.share) == false);
 }
+
+TEST_CASE("Unpublished stage names are excluded from listing and direct reads",
+          "[filesystem][upload][security]")
+{
+    UploadFixture fixture;
+    const auto stage_name = ".sparenode-upload-controlled.tmp";
+    {
+        std::ofstream stage(fixture.share / stage_name, std::ios::binary);
+        REQUIRE(stage.is_open());
+        stage << "unpublished";
+    }
+    const auto listing = sparenode::filesystem::list_directory(fixture.root, {});
+    REQUIRE(listing.has_value());
+    CHECK(std::none_of(listing->begin(), listing->end(),
+                       [stage_name](const auto &entry) { return entry.name == stage_name; }));
+    const auto direct = sparenode::filesystem::FileReadStream::open(fixture.root, stage_name);
+    REQUIRE((direct.has_value()) == false);
+    CHECK(direct.error().code == sparenode::filesystem::FileReadErrorCode::invalid_path);
+#ifdef _WIN32
+    const auto differently_cased = sparenode::filesystem::FileReadStream::open(
+        fixture.root, ".SPARENODE-UPLOAD-controlled.tmp");
+    CHECK((differently_cased.has_value()) == false);
+#endif
+}
+
+#ifndef _WIN32
+TEST_CASE("Linux publication links the flushed inode when its stage name is replaced",
+          "[filesystem][upload][security]")
+{
+    UploadFixture fixture;
+    ReplaceStageSource source(complete_source("genuine"), fixture.share);
+    const auto result =
+        sparenode::filesystem::finalize_upload(fixture.root, "published.txt", source);
+    REQUIRE(source.replaced());
+    REQUIRE(result.has_value());
+    CHECK(read_file(result.value()) == "genuine");
+    CHECK(has_stage(fixture.share) == false);
+}
+#endif
 
 TEST_CASE("Finalization rejects escapes and unavailable parents", "[filesystem][upload][security]")
 {
