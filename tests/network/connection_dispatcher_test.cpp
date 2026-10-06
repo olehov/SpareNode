@@ -5,10 +5,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <semaphore>
+#include <span>
 #include <stop_token>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -303,6 +307,82 @@ TEST_CASE("Header admission shares the bounded dispatcher capacity",
     CHECK(first.client.peer_closes_within(test_timeout));
     CHECK(second.client.peer_closes_within(test_timeout));
     CHECK(blocked.client.peer_closes_within(test_timeout));
+}
+
+TEST_CASE("Header admission preserves a partial prefix when its deadline expires",
+          "[network][dispatcher][admission][timeout]")
+{
+    constexpr std::string_view prefix = "GET /partial";
+    std::promise<std::string> observed_prefix;
+    auto observed = observed_prefix.get_future();
+    auto handler = [&observed_prefix](
+                       network::TcpConnection connection,
+                       const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
+    {
+        std::array<std::byte, 64> buffer{};
+        auto received = connection.receive(buffer);
+        if (!received)
+        {
+            return sparenode::unexpected(received.error());
+        }
+        observed_prefix.set_value(
+            {reinterpret_cast<const char *>(buffer.data()), received.value()});
+        return {};
+    };
+    const network::ConnectionAdmissionOptions admission{.max_prefix_bytes = 64,
+                                                        .completion_marker = "\r\n\r\n",
+                                                        .inactivity_timeout =
+                                                            std::chrono::milliseconds{25},
+                                                        .total_timeout = std::chrono::seconds{1}};
+    auto dispatcher = create_dispatcher({{1, 1}, std::move(handler), {}, admission});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(dispatcher.submit(std::move(pair.server), {}).has_value());
+    REQUIRE(pair.client.send(std::as_bytes(std::span(prefix.data(), prefix.size()))) ==
+            static_cast<std::ptrdiff_t>(prefix.size()));
+
+    REQUIRE(observed.wait_for(test_timeout) == std::future_status::ready);
+    CHECK(observed.get() == prefix);
+    dispatcher.request_stop();
+}
+
+TEST_CASE("Prefetched admission bytes cannot bypass an expired receive deadline",
+          "[network][dispatcher][admission][timeout]")
+{
+    std::promise<network::NetworkError> observed_error;
+    auto observed = observed_error.get_future();
+    auto handler =
+        [&observed_error](network::TcpConnection connection,
+                          const std::stop_token &) -> sparenode::Result<void, network::NetworkError>
+    {
+        std::array<std::byte, 64> buffer{};
+        const auto received = connection.receive_with_options(
+            buffer, {.stop_token = {}, .deadline = connection.accepted_at()});
+        if (!received)
+        {
+            observed_error.set_value(received.error());
+            return {};
+        }
+        observed_error.set_value(network::NetworkError{network::NetworkOperation::receive,
+                                                       network::NetworkErrorDomain::state, 1});
+        return {};
+    };
+    const network::ConnectionAdmissionOptions admission{.max_prefix_bytes = 64,
+                                                        .completion_marker = "\r\n\r\n",
+                                                        .inactivity_timeout =
+                                                            std::chrono::seconds{1},
+                                                        .total_timeout = std::chrono::seconds{1}};
+    auto dispatcher = create_dispatcher({{1, 1}, std::move(handler), {}, admission});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    constexpr std::string_view complete_prefix = "GET / HTTP/1.1\r\n\r\n";
+    REQUIRE(dispatcher.submit(std::move(pair.server), {}).has_value());
+    REQUIRE(pair.client.send(
+                std::as_bytes(std::span(complete_prefix.data(), complete_prefix.size()))) ==
+            static_cast<std::ptrdiff_t>(complete_prefix.size()));
+
+    REQUIRE(observed.wait_for(test_timeout) == std::future_status::ready);
+    CHECK(observed.get() == network::NetworkError{network::NetworkOperation::receive,
+                                                  network::NetworkErrorDomain::timeout, 0});
+    dispatcher.request_stop();
 }
 
 TEST_CASE("Dispatcher shutdown wakes blocked producers and drops queued ownership",

@@ -140,6 +140,33 @@ void send_all(const sparenode::test::TestClientSocket &client, const std::string
     }
 }
 
+/// @brief Receives one complete response without extending a fixed test deadline per fragment.
+/// @param[in] client Connected native test client.
+/// @param[in] deadline Absolute completion bound shared by every receive operation.
+/// @return Complete response bytes observed before orderly shutdown.
+[[nodiscard]] std::string
+receive_until_closed_before(const sparenode::test::TestClientSocket &client,
+                            const std::chrono::steady_clock::time_point deadline)
+{
+    std::string response;
+    std::array<std::byte, 512> buffer{};
+    while (true)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        REQUIRE(now < deadline);
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
+        const auto received = client.receive_within(buffer, remaining);
+        const std::ptrdiff_t received_bytes = sparenode::test::require_optional(received);
+        REQUIRE(received_bytes >= 0);
+        if (received_bytes == 0)
+        {
+            return response;
+        }
+        response.append(reinterpret_cast<const char *>(buffer.data()),
+                        static_cast<std::size_t>(received_bytes));
+    }
+}
+
 /// @brief Removes only the dynamic Date field when comparing otherwise identical wire metadata.
 /// @param[in] response Complete final response containing one generated Date field.
 /// @return Response with that field removed; verifies its fixed width and uniqueness.
@@ -654,18 +681,20 @@ TEST_CASE("Incomplete headers do not occupy every request worker",
 {
     constexpr std::size_t worker_count = 4;
     auto router = std::make_shared<sparenode::http::HttpRouter>();
-    std::string payload;
-    REQUIRE(router->register_route(sparenode::http::HttpMethod::post, "/",
-                                   [&payload](const sparenode::http::HttpRequestView &request,
-                                              const sparenode::http::HttpRouteParameters &)
-                                   {
-                                       payload = request_body_text(request);
-                                       return ok_response();
-                                   }));
+    std::promise<std::string> payload_promise;
+    auto payload = payload_promise.get_future();
+    REQUIRE(
+        router->register_route(sparenode::http::HttpMethod::post, "/",
+                               [&payload_promise](const sparenode::http::HttpRequestView &request,
+                                                  const sparenode::http::HttpRouteParameters &)
+                               {
+                                   payload_promise.set_value(request_body_text(request));
+                                   return ok_response();
+                               }));
     const sparenode::http::HttpConnectionHandlerConfig config{
-        .timeouts = {.headers = std::chrono::seconds{5},
+        .timeouts = {.headers = std::chrono::seconds{30},
                      .body = std::chrono::seconds{5},
-                     .total = std::chrono::seconds{10}},
+                     .total = std::chrono::seconds{30}},
         .deadline_provider = {}};
     auto handler = sparenode::http::make_http_connection_handler(router, config);
     auto started = sparenode::network::ConnectionServer::start(
@@ -690,9 +719,12 @@ TEST_CASE("Incomplete headers do not occupy every request worker",
     }
 
     auto healthy = sparenode::test::connect_test_client(endpoint);
+    const auto healthy_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     send_all(healthy, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata");
-    CHECK(receive_until_closed(healthy).starts_with("HTTP/1.1 200 OK\r\n"));
-    CHECK(payload == "data");
+    CHECK(
+        receive_until_closed_before(healthy, healthy_deadline).starts_with("HTTP/1.1 200 OK\r\n"));
+    REQUIRE(payload.wait_until(healthy_deadline) == std::future_status::ready);
+    CHECK(payload.get() == "data");
     for (const auto &client : stalled)
     {
         CHECK_FALSE(client.peer_closes_within(std::chrono::milliseconds{20}));
