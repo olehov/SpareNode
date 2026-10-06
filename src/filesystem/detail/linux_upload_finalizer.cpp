@@ -9,17 +9,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
-#include <linux/fs.h>
 #include <optional>
 #include <string>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
 
 #include "posix_file_descriptor.hpp"
 #include "temporary_name.hpp"
+#include "upload_stage_name.hpp"
 
 namespace sparenode::filesystem::detail
 {
@@ -35,14 +34,11 @@ struct StageCleanup
 {
     int parent{};     ///< Stable destination-directory descriptor.
     std::string name; ///< Exclusive sibling name to remove.
-    bool published{}; ///< A successful rename consumed the sibling name.
 
+    /// @brief Removes the random sibling name after success or failure.
     ~StageCleanup()
     {
-        if (!published)
-        {
-            static_cast<void>(::unlinkat(parent, name.c_str(), 0));
-        }
+        static_cast<void>(::unlinkat(parent, name.c_str(), 0));
     }
 };
 
@@ -73,7 +69,7 @@ create_stage(const int parent)
 {
     for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
     {
-        auto name = ".sparenode-upload-" + temporary_name_suffix() + ".tmp";
+        auto name = std::string(upload_stage_prefix) + temporary_name_suffix() + ".tmp";
         const auto descriptor = ::openat(
             parent, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor >= 0)
@@ -149,27 +145,25 @@ copy_source(const FileDescriptor &source, const FileDescriptor &stage,
     return {};
 }
 
-/// @brief Atomically claims the destination without replacing an existing entry.
+/// @brief Links the flushed stage inode itself, not its replaceable sibling name.
 [[nodiscard]] Result<void, UploadFinalizationError>
-publish_stage(StageCleanup &cleanup, const std::filesystem::path &native_name)
+publish_stage(const FileDescriptor &stage, const StageCleanup &cleanup,
+              const std::filesystem::path &native_name)
 {
     const auto &destination = native_name.native();
-    const auto renamed = ::syscall(SYS_renameat2, cleanup.parent, cleanup.name.c_str(),
-                                   cleanup.parent, destination.c_str(), RENAME_NOREPLACE);
-    if (renamed == 0)
+    if (::linkat(stage.get(), "", cleanup.parent, destination.c_str(), AT_EMPTY_PATH) == 0)
     {
-        cleanup.published = true;
         return {};
     }
     if (errno == EEXIST)
     {
         return unexpected(failure(UploadFinalizationErrorCode::destination_exists));
     }
-    if (errno != ENOSYS && errno != EINVAL && errno != EOPNOTSUPP)
-    {
-        return unexpected(failure(UploadFinalizationErrorCode::publish_failed));
-    }
-    if (::linkat(cleanup.parent, cleanup.name.c_str(), cleanup.parent, destination.c_str(), 0) != 0)
+    // Some filesystems reject AT_EMPTY_PATH. /proc follows the open descriptor,
+    // preserving inode identity even if another writer replaces the stage name.
+    const auto stage_descriptor_path = "/proc/self/fd/" + std::to_string(stage.get());
+    if (::linkat(AT_FDCWD, stage_descriptor_path.c_str(), cleanup.parent, destination.c_str(),
+                 AT_SYMLINK_FOLLOW) != 0)
     {
         return unexpected(failure(errno == EEXIST ? UploadFinalizationErrorCode::destination_exists
                                                   : UploadFinalizationErrorCode::publish_failed));
@@ -225,7 +219,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile 
         return unexpected(stopped.value());
     }
 
-    return publish_stage(cleanup, native_name);
+    return publish_stage(stage_file, cleanup, native_name);
 }
 
 } // namespace sparenode::filesystem::detail

@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <utility>
 
 #include "detail/path_containment.hpp"
+#include "detail/upload_stage_name.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
 #ifdef _WIN32
 #include "detail/windows_path_inspector.hpp"
@@ -391,6 +393,11 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
 #endif
 
     const auto normalized_relative_path = relative_path.lexically_normal();
+    if (std::ranges::any_of(normalized_relative_path, detail::is_upload_stage_component))
+    {
+        return unexpected(
+            SafePathError{SafePathErrorCode::invalid_component, std::string(requested_path)});
+    }
     auto resolved_path = normalized_relative_path.empty() || normalized_relative_path == "."
                              ? shared_root.path()
                              : (shared_root.path() / normalized_relative_path).lexically_normal();

@@ -88,6 +88,7 @@ finalize_upload(const configuration::SharedRoot &shared_root, const std::string_
     }
 }
 
+/// @brief Maps one finalization category to its stable English diagnostic.
 const char *to_string(const UploadFinalizationErrorCode code) noexcept
 {
     switch (code)

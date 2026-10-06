@@ -22,6 +22,7 @@
 #include <winternl.h>
 
 #include "temporary_name.hpp"
+#include "upload_stage_name.hpp"
 #include "windows_handle.hpp"
 
 namespace sparenode::filesystem::detail
@@ -39,6 +40,7 @@ struct StageCleanup
     HANDLE handle{};  ///< Open staging file with DELETE access.
     bool published{}; ///< Rename moved the stage into its final name.
 
+    /// @brief Marks an unpublished sibling for removal before closing its handle.
     ~StageCleanup()
     {
         if (!published)
@@ -77,8 +79,9 @@ interruption(const TemporaryFileIoOptions &options) noexcept
 {
     for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
     {
-        const auto name =
-            std::filesystem::path(".sparenode-upload-" + temporary_name_suffix() + ".tmp").native();
+        const auto name = std::filesystem::path(std::string(upload_stage_prefix) +
+                                                temporary_name_suffix() + ".tmp")
+                              .native();
         const auto name_bytes = name.size() * sizeof(wchar_t);
         if (name_bytes > (std::numeric_limits<USHORT>::max)())
         {

@@ -139,6 +139,7 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+/// @brief Returns the retained parent handle for relative operations.
 void *ConfinedDirectory::native_handle() const noexcept
 {
     return implementation_->directory.get();

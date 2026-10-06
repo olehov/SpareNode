@@ -70,6 +70,7 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+/// @brief Returns the retained parent descriptor for relative operations.
 int ConfinedDirectory::native_handle() const noexcept
 {
     return implementation_->directory.get();
