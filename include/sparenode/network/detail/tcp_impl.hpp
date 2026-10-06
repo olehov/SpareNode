@@ -1,6 +1,9 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 #include "sparenode/network/detail/connection_io.hpp"
 #include "sparenode/network/detail/native_socket.hpp"
@@ -20,6 +23,7 @@ struct TcpConnection::Impl
     /// @param[in] endpoint Remote endpoint associated with the socket.
     Impl(const detail::NativeSocket socket, TcpEndpoint endpoint)
         : socket(socket), peer_endpoint(std::move(endpoint)),
+          accepted_at(std::chrono::steady_clock::now()), last_receive_progress(accepted_at),
           io({.wait = {.socket = socket, .poller = poller, .wake_channel = wake_channel},
               .operations = operations})
     {
@@ -44,6 +48,14 @@ struct TcpConnection::Impl
     detail::NativeSocket socket{detail::invalid_socket};
     /// @brief Remote endpoint captured when the connection was accepted.
     TcpEndpoint peer_endpoint;
+    /// @brief Monotonic time at which the listener accepted this socket.
+    NetworkDeadline accepted_at;
+    /// @brief Latest prefix growth observed before request-worker dispatch.
+    NetworkDeadline last_receive_progress;
+    /// @brief Bytes consumed by admission and replayed through the public receive API.
+    std::vector<std::byte> prefetched;
+    /// @brief Next unread byte in the admission prebuffer.
+    std::size_t prefetched_offset{};
     /// @brief Native readiness implementation referenced by io.
     detail::NativeSocketPoller poller;
     /// @brief Lazily initialized cancellation channel referenced by io.

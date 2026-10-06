@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -47,6 +48,14 @@ class TcpConnection final
     /// @brief Returns the remote endpoint.
     /// @return The peer endpoint, or no value for a moved-from connection.
     [[nodiscard]] std::optional<TcpEndpoint> peer_endpoint() const;
+
+    /// @brief Returns when this socket was accepted by the server.
+    /// @return Monotonic start used by request-wide deadlines.
+    [[nodiscard]] NetworkDeadline accepted_at() const noexcept;
+
+    /// @brief Returns the latest receive progress observed before worker dispatch.
+    /// @return Monotonic progress point used by inactivity deadlines.
+    [[nodiscard]] NetworkDeadline last_receive_progress() const noexcept;
 
     /// @brief Waits for and receives at most one caller-provided buffer of bytes.
     ///
@@ -115,6 +124,7 @@ class TcpConnection final
 
     // Only a listener can create a connection from a freshly accepted socket.
     friend class TcpListener;
+    friend class ConnectionDispatcher;
 };
 
 } // namespace sparenode::network

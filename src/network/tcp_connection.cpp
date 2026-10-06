@@ -1,6 +1,8 @@
 #include "sparenode/network/detail/tcp_impl.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -43,6 +45,16 @@ std::optional<TcpEndpoint> TcpConnection::peer_endpoint() const
     return impl_->peer_endpoint;
 }
 
+NetworkDeadline TcpConnection::accepted_at() const noexcept
+{
+    return impl_ != nullptr ? impl_->accepted_at : NetworkDeadline{};
+}
+
+NetworkDeadline TcpConnection::last_receive_progress() const noexcept
+{
+    return impl_ != nullptr ? impl_->last_receive_progress : NetworkDeadline{};
+}
+
 // Receives bytes without allocating a cancellation wake channel.
 Result<std::size_t, NetworkError> TcpConnection::receive(const std::span<std::byte> buffer)
 {
@@ -70,6 +82,24 @@ TcpConnection::receive_with_options(const std::span<std::byte> buffer,
     {
         return unexpected(
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::validation, 1});
+    }
+    if (options.stop_token.stop_requested())
+    {
+        return unexpected(
+            NetworkError{NetworkOperation::receive, NetworkErrorDomain::cancellation, 0});
+    }
+    if (impl_->prefetched_offset < impl_->prefetched.size())
+    {
+        const auto available = impl_->prefetched.size() - impl_->prefetched_offset;
+        const auto copied = (std::min)(available, buffer.size());
+        std::memcpy(buffer.data(), impl_->prefetched.data() + impl_->prefetched_offset, copied);
+        impl_->prefetched_offset += copied;
+        if (impl_->prefetched_offset == impl_->prefetched.size())
+        {
+            impl_->prefetched.clear();
+            impl_->prefetched_offset = 0;
+        }
+        return copied;
     }
 
     return impl_->io.receive_with_options(buffer, options);

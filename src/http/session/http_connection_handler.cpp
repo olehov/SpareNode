@@ -43,18 +43,7 @@ constexpr int response_writer_error_detail_base = 100;
 /// @return Request-line plus header bound, or zero when the addition would overflow.
 [[nodiscard]] std::size_t maximum_metadata_bytes(const HttpRequestParserLimits &limits) noexcept
 {
-    constexpr std::size_t request_line_ending_bytes = 2;
-    constexpr std::size_t maximum = (std::numeric_limits<std::size_t>::max)();
-    if (limits.max_request_line_bytes > maximum - request_line_ending_bytes)
-    {
-        return 0;
-    }
-    const std::size_t line_and_ending = limits.max_request_line_bytes + request_line_ending_bytes;
-    if (limits.max_header_bytes > maximum - line_and_ending)
-    {
-        return 0;
-    }
-    return line_and_ending + limits.max_header_bytes;
+    return maximum_http_request_head_bytes(limits);
 }
 
 /// @brief Selects the standard response status for one parser failure.
@@ -492,7 +481,7 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     const std::size_t metadata_limit = maximum_metadata_bytes(config.parser_limits);
-    const auto session_started = std::chrono::steady_clock::now();
+    const auto session_started = connection.accepted_at();
     auto deadline_state = detail::RequestDeadlines::create(config.timeouts, session_started);
     if (metadata_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
         config.max_drain_bytes == 0 || config.drain_timeout <= std::chrono::milliseconds::zero() ||
@@ -503,6 +492,7 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
             error_detail(HttpSessionFailureCode::invalid_config)});
     }
     auto &deadlines = deadline_state.value();
+    deadlines.record_progress(connection.last_receive_progress());
 
     try
     {
@@ -539,6 +529,15 @@ network::ConnectionHandler make_http_connection_handler(std::shared_ptr<const Ht
         }
         return handle_http_connection(std::move(connection), *router, stop_token, config);
     };
+}
+
+network::ConnectionAdmissionOptions
+make_http_connection_admission(const HttpConnectionHandlerConfig &config)
+{
+    return {.max_prefix_bytes = maximum_http_request_head_bytes(config.parser_limits),
+            .completion_marker = "\r\n\r\n",
+            .inactivity_timeout = config.timeouts.headers,
+            .total_timeout = config.timeouts.total};
 }
 
 } // namespace sparenode::http

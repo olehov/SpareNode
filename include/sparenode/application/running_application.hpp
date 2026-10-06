@@ -47,10 +47,12 @@ class RunningApplication final
     /// @param[in] config Validated parser-independent application settings.
     /// @param[in] handler Handler copied into each configured server.
     /// @param[in] observers Failure observers copied into each configured server.
+    /// @param[in] admission Optional bounded prefix gate copied into each server.
     /// @return Fully running RAII owner, or a structured startup failure.
     [[nodiscard]] static Result<RunningApplication, ApplicationStartError>
     start(configuration::runtime::AppConfig config, network::ConnectionHandler handler,
-          RunningApplicationObservers observers = {});
+          RunningApplicationObservers observers = {},
+          std::optional<network::ConnectionAdmissionOptions> admission = std::nullopt);
 
     /// @brief Transfers ownership of validated settings and all running servers.
     /// @param[in,out] other Application whose resources are transferred.
