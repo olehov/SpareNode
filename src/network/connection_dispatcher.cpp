@@ -316,6 +316,8 @@ struct ConnectionDispatcher::Impl final
         {
             return;
         }
+        entry->connection.impl_->prefetched = std::move(entry->prefix);
+        entry->connection.impl_->prefetched_offset = 0;
         TcpConnection connection = std::move(entry->connection);
         entry.reset();
         {
@@ -374,7 +376,6 @@ struct ConnectionDispatcher::Impl final
                 if (size == 0 || entry->prefix.size() == admission_options_.max_prefix_bytes ||
                     prefix_complete(entry.value(), previous_size))
                 {
-                    entry->connection.impl_->prefetched = std::move(entry->prefix);
                     promote(index);
                 }
                 return;

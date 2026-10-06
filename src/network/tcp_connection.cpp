@@ -1,6 +1,7 @@
 #include "sparenode/network/detail/tcp_impl.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -87,6 +88,11 @@ TcpConnection::receive_with_options(const std::span<std::byte> buffer,
     {
         return unexpected(
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::cancellation, 0});
+    }
+    if (options.deadline.has_value() &&
+        std::chrono::steady_clock::now() >= options.deadline.value())
+    {
+        return unexpected(NetworkError{NetworkOperation::receive, NetworkErrorDomain::timeout, 0});
     }
     if (impl_->prefetched_offset < impl_->prefetched.size())
     {
