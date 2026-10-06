@@ -9,6 +9,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "sparenode/configuration/shared_root.hpp"
@@ -323,6 +324,37 @@ TEST_CASE("Unpublished stage names are excluded from listing and direct reads",
         fixture.root, ".SPARENODE-UPLOAD-controlled.tmp");
     CHECK((differently_cased.has_value()) == false);
 #endif
+}
+
+TEST_CASE("File reads reject ordinary symlinks to unpublished upload stages",
+          "[filesystem][upload][security][symlink]")
+{
+    UploadFixture fixture;
+    const auto stage = fixture.share / ".sparenode-upload-controlled.tmp";
+    {
+        std::ofstream output(stage, std::ios::binary);
+        REQUIRE(output.is_open());
+        output << "unpublished";
+    }
+
+    std::error_code link_error;
+    std::filesystem::create_symlink(stage, fixture.share / "public-alias.txt", link_error);
+#if defined(_WIN32) && !defined(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    constexpr int privilege_not_held = 1314; // Win32 ERROR_PRIVILEGE_NOT_HELD.
+    if (link_error == std::error_code(privilege_not_held, std::system_category()))
+    {
+        SKIP("Windows symbolic-link creation requires Developer Mode or the symlink privilege");
+    }
+#endif
+    INFO(link_error.message());
+    REQUIRE_FALSE(link_error);
+
+    const auto aliased =
+        sparenode::filesystem::FileReadStream::open(fixture.root, "public-alias.txt");
+    REQUIRE_FALSE(aliased);
+    CHECK(aliased.error().code == sparenode::filesystem::FileReadErrorCode::invalid_path);
+    CHECK(aliased.error().path_error ==
+          sparenode::filesystem::SafePathErrorCode::invalid_component);
 }
 
 #ifndef _WIN32

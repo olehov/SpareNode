@@ -412,6 +412,12 @@ Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoo
     {
         return unexpected(SafePathError{confined_path.error(), std::string(requested_path)});
     }
+    const auto resolved_relative_path = confined_path->lexically_relative(shared_root.path());
+    if (std::ranges::any_of(resolved_relative_path, detail::is_upload_stage_component))
+    {
+        return unexpected(
+            SafePathError{SafePathErrorCode::invalid_component, std::string(requested_path)});
+    }
     return SafePath(std::move(confined_path).value());
 }
 
