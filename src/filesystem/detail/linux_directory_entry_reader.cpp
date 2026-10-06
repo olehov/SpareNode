@@ -70,6 +70,12 @@ ConfinedDirectory::ConfinedDirectory(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory &ConfinedDirectory::operator=(ConfinedDirectory &&) noexcept = default;
 ConfinedDirectory::~ConfinedDirectory() = default;
 
+/// @brief Returns the retained parent descriptor for relative operations.
+int ConfinedDirectory::native_handle() const noexcept
+{
+    return implementation_->directory.get();
+}
+
 /// @brief Opens a POSIX directory whose descriptor path remains inside the shared root.
 Result<ConfinedDirectory, std::error_code>
 open_confined_directory(const std::filesystem::path &shared_root,

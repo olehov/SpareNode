@@ -11,7 +11,8 @@ one persistent `HttpBodyDecoder` for fixed-length and chunked framing. Both mode
 write decoded payload through the same `RequestBodyIngestor` into a uniquely created
 temporary file; chunk syntax is never stored or reparsed. Empty bodies create no file.
 The route receives the exact decoded size and shared ownership of the completed
-artifact, whose final owner removes it unless upload finalization calls `release()`.
+artifact. Upload finalization copies that artifact into a staging file within the
+share; the artifact's final owner removes its original temporary file.
 
 Native receives request at most `receive_chunk_bytes` at a time, bounded also by
 the combined request-line, CRLF, and header configuration. The body limit no longer
