@@ -1,11 +1,13 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <stop_token>
+#include <string>
 
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
@@ -25,6 +27,8 @@ enum class DispatchErrorCode : std::uint8_t
     cancelled,                        ///< The caller cancelled a blocked submission.
     worker_start_failed,              ///< The operating system could not create a worker.
     resource_allocation_failed,       ///< Dispatcher storage could not be allocated.
+    invalid_admission_config,         ///< Header admission limits are incomplete or inconsistent.
+    admission_start_failed,           ///< Admission wake resources could not be initialized.
 };
 
 /// @brief Describes a dispatcher configuration or submission failure.
@@ -87,6 +91,22 @@ struct ConnectionDispatcherOptions
     std::size_t pending_connection_limit{};
 };
 
+/// @brief Defines a bounded prefix-ingestion gate before request workers receive sockets.
+struct ConnectionAdmissionOptions
+{
+    /// @brief Maximum socket prefix buffered before forced worker dispatch.
+    std::size_t max_prefix_bytes{};
+
+    /// @brief Marker that makes a connection ready for a request worker.
+    std::string completion_marker;
+
+    /// @brief Maximum silence allowed while the inspected prefix remains incomplete.
+    std::chrono::milliseconds inactivity_timeout{};
+
+    /// @brief Non-renewable budget measured from socket acceptance.
+    std::chrono::milliseconds total_timeout{};
+};
+
 /// @brief Groups dispatcher limits and callbacks into one extensible configuration.
 struct ConnectionDispatcherConfig
 {
@@ -98,9 +118,12 @@ struct ConnectionDispatcherConfig
 
     /// @brief Optional callback invoked after a handler failure is isolated.
     ConnectionFailureObserver failure_observer;
+
+    /// @brief Optional bounded gate that keeps incomplete protocol prefixes off workers.
+    std::optional<ConnectionAdmissionOptions> admission{std::nullopt};
 };
 
-/// @brief Dispatches accepted TCP connections through a bounded fixed worker pool.
+/// @brief Dispatches accepted TCP connections through bounded admission and worker stages.
 ///
 /// The dispatcher owns every successfully submitted connection until a worker
 /// transfers it to the configured handler. The class is safe for concurrent

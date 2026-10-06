@@ -140,6 +140,33 @@ void send_all(const sparenode::test::TestClientSocket &client, const std::string
     }
 }
 
+/// @brief Receives one complete response without extending a fixed test deadline per fragment.
+/// @param[in] client Connected native test client.
+/// @param[in] deadline Absolute completion bound shared by every receive operation.
+/// @return Complete response bytes observed before orderly shutdown.
+[[nodiscard]] std::string
+receive_until_closed_before(const sparenode::test::TestClientSocket &client,
+                            const std::chrono::steady_clock::time_point deadline)
+{
+    std::string response;
+    std::array<std::byte, 512> buffer{};
+    while (true)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        REQUIRE(now < deadline);
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
+        const auto received = client.receive_within(buffer, remaining);
+        const std::ptrdiff_t received_bytes = sparenode::test::require_optional(received);
+        REQUIRE(received_bytes >= 0);
+        if (received_bytes == 0)
+        {
+            return response;
+        }
+        response.append(reinterpret_cast<const char *>(buffer.data()),
+                        static_cast<std::size_t>(received_bytes));
+    }
+}
+
 /// @brief Removes only the dynamic Date field when comparing otherwise identical wire metadata.
 /// @param[in] response Complete final response containing one generated Date field.
 /// @return Response with that field removed; verifies its fixed width and uniqueness.
@@ -614,8 +641,9 @@ TEST_CASE("An HTTP timeout is logged and releases the sole worker for another re
     const sparenode::logging::Logger logger(std::make_shared<sparenode::logging::ConsoleLogSink>(
         output, sparenode::logging::ConsoleColorMode::disabled));
     auto router = std::make_shared<sparenode::http::HttpRouter>();
-    auto handler = sparenode::http::make_http_connection_handler(
-        router, {.timeouts = {.headers = std::chrono::seconds{1}}, .deadline_provider = {}});
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.headers = std::chrono::seconds{1}}, .deadline_provider = {}};
+    auto handler = sparenode::http::make_http_connection_handler(router, config);
     std::promise<sparenode::network::ConnectionFailure> failure;
     auto observed = failure.get_future();
     auto observer = [log_failure = sparenode::logging::make_connection_failure_log_observer(logger),
@@ -625,7 +653,14 @@ TEST_CASE("An HTTP timeout is logged and releases the sole worker for another re
         failure.set_value(value);
     };
     auto started = sparenode::network::ConnectionServer::start(
-        {{"127.0.0.1", 0}, 128, false, {{1, 4}, std::move(handler), observer}, {}});
+        {{"127.0.0.1", 0},
+         128,
+         false,
+         {{1, 4},
+          std::move(handler),
+          observer,
+          sparenode::http::make_http_connection_admission(config)},
+         {}});
     REQUIRE(started.has_value());
     auto server = std::move(started).value();
     const auto endpoint = server.local_endpoint();
@@ -639,6 +674,67 @@ TEST_CASE("An HTTP timeout is logged and releases the sole worker for another re
     CHECK(receive_until_closed(active).starts_with("HTTP/1.1 404 Not Found\r\n"));
     server.request_stop();
     CHECK(output.str().contains("domain=timeout"));
+}
+
+TEST_CASE("Incomplete headers do not occupy every request worker",
+          "[http][session][integration][admission][security]")
+{
+    constexpr std::size_t worker_count = 4;
+    auto router = std::make_shared<sparenode::http::HttpRouter>();
+    std::promise<std::string> payload_promise;
+    auto payload = payload_promise.get_future();
+    REQUIRE(
+        router->register_route(sparenode::http::HttpMethod::post, "/",
+                               [&payload_promise](const sparenode::http::HttpRequestView &request,
+                                                  const sparenode::http::HttpRouteParameters &)
+                               {
+                                   payload_promise.set_value(request_body_text(request));
+                                   return ok_response();
+                               }));
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.headers = std::chrono::seconds{30},
+                     .body = std::chrono::seconds{5},
+                     .total = std::chrono::seconds{30}},
+        .deadline_provider = {}};
+    auto handler = sparenode::http::make_http_connection_handler(router, config);
+    auto started = sparenode::network::ConnectionServer::start(
+        {{"127.0.0.1", 0},
+         128,
+         true,
+         {{worker_count, 16},
+          std::move(handler),
+          {},
+          sparenode::http::make_http_connection_admission(config)},
+         {}});
+    REQUIRE(started.has_value());
+    auto server = std::move(started).value();
+    const auto endpoint = sparenode::test::require_optional(server.local_endpoint());
+
+    std::vector<sparenode::test::TestClientSocket> stalled;
+    stalled.reserve(worker_count);
+    for (std::size_t index = 0; index < worker_count; ++index)
+    {
+        stalled.push_back(sparenode::test::connect_test_client(endpoint));
+        send_all(stalled.back(), "GET / HTTP/1.1\r\nHost: localhost\r\nX-Slow: ");
+    }
+
+    auto healthy = sparenode::test::connect_test_client(endpoint);
+    const auto healthy_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    send_all(healthy, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata");
+    CHECK(
+        receive_until_closed_before(healthy, healthy_deadline).starts_with("HTTP/1.1 200 OK\r\n"));
+    REQUIRE(payload.wait_until(healthy_deadline) == std::future_status::ready);
+    CHECK(payload.get() == "data");
+    for (const auto &client : stalled)
+    {
+        CHECK_FALSE(client.peer_closes_within(std::chrono::milliseconds{20}));
+    }
+
+    server.request_stop();
+    for (const auto &client : stalled)
+    {
+        CHECK(client.peer_closes_within(std::chrono::seconds{1}));
+    }
 }
 
 TEST_CASE("HTTP session routes decoded chunked payload after trailers", "[http][session][chunked]")

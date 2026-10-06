@@ -81,6 +81,10 @@ namespace
         return "worker_start_failed";
     case network::DispatchErrorCode::resource_allocation_failed:
         return "resource_allocation_failed";
+    case network::DispatchErrorCode::invalid_admission_config:
+        return "invalid_admission_config";
+    case network::DispatchErrorCode::admission_start_failed:
+        return "admission_start_failed";
     }
     return "unknown";
 }

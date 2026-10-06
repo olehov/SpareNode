@@ -92,10 +92,10 @@ struct ConnectionServerConfig
     }
 };
 
-/// @brief Accepts TCP clients and dispatches them through a bounded fixed worker pool.
+/// @brief Accepts TCP clients and dispatches them through bounded admission and worker stages.
 ///
-/// The server owns one long-lived accept thread and the fixed worker count configured
-/// in `ConnectionDispatcherConfig`; it never creates one thread per connection.
+/// The server owns one accept thread, an optional admission poller thread, and the fixed worker
+/// count configured in `ConnectionDispatcherConfig`; it never creates one thread per connection.
 /// Destruction requests cancellation and waits for the accept thread and all workers.
 ///
 /// @warning Destruction and moves must not overlap any operation on the same server.

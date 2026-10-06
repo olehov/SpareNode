@@ -64,14 +64,16 @@ int main(const int argc, const char *const argv[])
     }
     const auto router =
         std::make_shared<const sparenode::http::HttpRouter>(std::move(router_result).value());
-    auto handler = sparenode::http::make_http_connection_handler(
-        router,
-        {.timeouts = config_result->servers().front().http_timeouts(), .deadline_provider = {}});
+    const sparenode::http::HttpConnectionHandlerConfig handler_config{
+        .timeouts = config_result->servers().front().http_timeouts(), .deadline_provider = {}};
+    auto handler = sparenode::http::make_http_connection_handler(router, handler_config);
+    auto admission = sparenode::http::make_http_connection_admission(handler_config);
     sparenode::application::RunningApplicationObservers observers{
         sparenode::logging::make_connection_failure_log_observer(logger),
         sparenode::logging::make_connection_server_failure_log_observer(logger)};
     auto application_result = sparenode::application::RunningApplication::start(
-        std::move(config_result).value(), std::move(handler), std::move(observers));
+        std::move(config_result).value(), std::move(handler), std::move(observers),
+        std::move(admission));
     if (!application_result)
     {
         const std::string diagnostic =

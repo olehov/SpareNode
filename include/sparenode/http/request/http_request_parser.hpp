@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -24,6 +25,24 @@ struct HttpRequestParserLimits
     std::size_t max_trailer_bytes{8192};         ///< Trailer section including final CRLF.
     std::size_t max_trailer_count{32};           ///< Maximum discarded trailer fields.
 };
+
+/// @brief Computes the largest request-line and header prefix accepted by the parser.
+/// @param[in] limits Independent request-line and header boundaries.
+/// @return Combined byte bound including request-line CRLF, or zero on overflow.
+[[nodiscard]] constexpr std::size_t
+maximum_http_request_head_bytes(const HttpRequestParserLimits &limits) noexcept
+{
+    constexpr std::size_t request_line_ending_bytes = 2;
+    constexpr std::size_t maximum = (std::numeric_limits<std::size_t>::max)();
+    if (limits.max_request_line_bytes > maximum - request_line_ending_bytes)
+    {
+        return 0;
+    }
+    const std::size_t line_and_ending = limits.max_request_line_bytes + request_line_ending_bytes;
+    return limits.max_header_bytes > maximum - line_and_ending
+               ? 0
+               : line_and_ending + limits.max_header_bytes;
+}
 
 /// @brief Identifies why an HTTP request cannot be parsed safely.
 enum class HttpRequestParseErrorCode : std::uint8_t

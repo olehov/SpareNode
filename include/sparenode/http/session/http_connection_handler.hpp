@@ -72,4 +72,10 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
 make_http_connection_handler(std::shared_ptr<const HttpRouter> router,
                              HttpConnectionHandlerConfig config = {});
 
+/// @brief Creates the bounded header-ingestion gate paired with a session config.
+/// @param[in] config Parser and receive deadlines used by request workers.
+/// @return Admission settings that release complete, oversized, or expired prefixes.
+[[nodiscard]] network::ConnectionAdmissionOptions
+make_http_connection_admission(const HttpConnectionHandlerConfig &config = {});
+
 } // namespace sparenode::http
