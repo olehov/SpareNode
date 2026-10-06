@@ -89,6 +89,12 @@ TEST_CASE("Connection dispatcher rejects invalid resource limits",
     REQUIRE_FALSE(missing_handler.has_value());
     CHECK(missing_handler.error() ==
           network::DispatchError{network::DispatchErrorCode::missing_connection_handler, 0});
+
+    auto invalid_admission = network::ConnectionDispatcher::create(
+        {{1, 1}, successful_handler(), {}, network::ConnectionAdmissionOptions{}});
+    REQUIRE_FALSE(invalid_admission.has_value());
+    CHECK(invalid_admission.error() ==
+          network::DispatchError{network::DispatchErrorCode::invalid_admission_config, 0});
 }
 
 TEST_CASE("Connection dispatcher processes multiple connections concurrently",
@@ -266,6 +272,37 @@ TEST_CASE("A full dispatcher queue supports caller cancellation",
 
     gate.open();
     dispatcher.request_stop();
+}
+
+TEST_CASE("Header admission shares the bounded dispatcher capacity",
+          "[network][dispatcher][admission][capacity][cancel]")
+{
+    const network::ConnectionAdmissionOptions admission{.max_prefix_bytes = 64,
+                                                        .completion_marker = "\r\n\r\n",
+                                                        .inactivity_timeout =
+                                                            std::chrono::seconds{5},
+                                                        .total_timeout = std::chrono::seconds{10}};
+    auto dispatcher = create_dispatcher({{1, 2}, successful_handler(), {}, admission});
+    auto first = sparenode::test::create_connected_tcp_pair();
+    auto second = sparenode::test::create_connected_tcp_pair();
+    auto blocked = sparenode::test::create_connected_tcp_pair();
+    REQUIRE(dispatcher.submit(std::move(first.server), {}).has_value());
+    REQUIRE(dispatcher.submit(std::move(second.server), {}).has_value());
+
+    std::optional<sparenode::Result<void, network::DispatchError>> submission;
+    std::jthread producer(
+        [&](const std::stop_token &stop_token)
+        { submission.emplace(dispatcher.submit(std::move(blocked.server), stop_token)); });
+    producer.request_stop();
+    producer.join();
+
+    auto &result = sparenode::test::require_optional(submission);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == network::DispatchError{network::DispatchErrorCode::cancelled, 0});
+    dispatcher.request_stop();
+    CHECK(first.client.peer_closes_within(test_timeout));
+    CHECK(second.client.peer_closes_within(test_timeout));
+    CHECK(blocked.client.peer_closes_within(test_timeout));
 }
 
 TEST_CASE("Dispatcher shutdown wakes blocked producers and drops queued ownership",
