@@ -434,7 +434,9 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
         }
         if (request.complete())
         {
-            return dispatch_and_respond(connection, context.router, request.request(),
+            const auto options =
+                file_options(bounded_read_options(context, HttpRequestReadPhase::body));
+            return dispatch_and_respond(connection, context.router, request.request(options),
                                         context.stop_token, context.config);
         }
         const auto phase =

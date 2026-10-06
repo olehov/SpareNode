@@ -76,8 +76,10 @@ class BufferedRequest final
         return metadata_.empty();
     }
     /// @brief Builds a request borrowing this adapter's stable storage after completion.
+    /// @param[in] options Cancellation and deadline retained for later body publication.
     /// @return Complete request; callers must first check complete().
-    [[nodiscard]] HttpRequestView request() const
+    [[nodiscard]] HttpRequestView
+    request(const filesystem::TemporaryFileIoOptions &options = {}) const
     {
         if (!head_.has_value() || !ingestor_.has_value() || !ingestor_->complete())
         {
@@ -85,7 +87,7 @@ class BufferedRequest final
         }
         const auto &ingestor = ingestor_.value();
         return HttpRequestViewAccess::create_file_backed(head_.value(), ingestor.body_size(),
-                                                         ingestor.artifact());
+                                                         ingestor.artifact(), options);
     }
 
     /// @brief Consumes the header expectation decision once, before waiting for more body bytes.
