@@ -1,8 +1,8 @@
 # Upload finalization
 
 `filesystem::finalize_upload` publishes a completed `TemporaryFile` under a
-validated relative path in a configured `SharedRoot`. It is the filesystem
-operation for SN-034; an HTTP upload route is a separate task.
+validated relative path in a configured `SharedRoot`. The filesystem API uses
+this operation for raw `PUT` request bodies on locations with `write = true`.
 
 The caller retains ownership of the completed source. The finalizer validates
 the destination with `SafePath`, opens its parent as a confined directory, and

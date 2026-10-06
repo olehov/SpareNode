@@ -1,11 +1,12 @@
-# Filesystem read API
+# Filesystem API
 
-SpareNode exposes each configured filesystem location through two read-only HTTP routes.
+SpareNode exposes each configured filesystem location through read and upload HTTP routes.
 For a location configured as `/api/Documents`:
 
 - `GET /api/Documents` lists the location root.
 - `GET /api/Documents/*` lists a directory or serves a regular file identified by the
   wildcard suffix.
+- `PUT /api/Documents/*` creates a file from the raw request body.
 
 The suffix is an untrusted, URL-encoded UTF-8 relative path. It passes through
 `SafePath` before any directory operation. A location with `read = false` returns
@@ -81,3 +82,20 @@ syntax returns `400`; missing, unsupported-object, or confinement-rejected paths
 denied filesystem access returns `403`; unexpected host
 filesystem failures return `500`. Error bodies contain stable identifiers and
 do not include native error text or paths.
+
+## Upload response
+
+An upload uses its wildcard suffix as the URL-encoded relative destination path. The request body
+may use `Content-Length` or chunked transfer coding; both forms pass through the same bounded
+decoder and temporary-file sink. The route receives only a completed artifact and publishes it
+through the confined upload finalizer. Empty request bodies create empty files.
+
+The location must explicitly set `write = true`; otherwise the route returns `403 Forbidden`.
+Successful publication returns `201 Created` with `{"status":"created"}`. Existing destinations
+are preserved and return `409 Conflict`. Missing parents return `404`, while invalid destination
+syntax returns `400`. Uploads never create parent directories implicitly.
+
+Publication revalidates the destination through `SafePath`, holds a confined native parent handle,
+copies into a private sibling stage, flushes it, and atomically publishes without replacement.
+Incomplete, disconnected, cancelled, expired, or failed request bodies never invoke the route, and
+their temporary artifacts remain under automatic cleanup ownership.
