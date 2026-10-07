@@ -26,6 +26,7 @@ add_executable(sparenode_tests
     filesystem/directory_creator_test.cpp
     filesystem/directory_listing_test.cpp
     filesystem/file_read_stream_test.cpp
+    filesystem/filesystem_entry_remover_test.cpp
     filesystem/filesystem_security_test.cpp
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
