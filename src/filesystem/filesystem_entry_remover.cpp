@@ -5,7 +5,6 @@
 #include <string>
 #include <system_error>
 
-#include "detail/filesystem_entry_remover.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
 
@@ -56,7 +55,8 @@ remove_filesystem_entry(const configuration::SharedRoot &shared_root,
                 FilesystemEntryRemovalError{FilesystemEntryRemovalErrorCode::invalid_destination});
         }
 
-        auto parent = detail::open_confined_directory(shared_root.path(), path.parent_path());
+        auto parent =
+            detail::open_confined_mutation_directory(shared_root.path(), path.parent_path());
         if (!parent)
         {
             return unexpected(FilesystemEntryRemovalError{

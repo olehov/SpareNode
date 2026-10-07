@@ -1,4 +1,4 @@
-#include "filesystem_entry_remover.hpp"
+#include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 
 #ifdef _WIN32
 
@@ -28,7 +28,7 @@ failure_from_windows_error(const DWORD native_error) noexcept
     {
         code = FilesystemEntryRemovalErrorCode::not_found;
     }
-    else if (native_error == ERROR_DIR_NOT_EMPTY || native_error == ERROR_BUSY)
+    else if (native_error == ERROR_DIR_NOT_EMPTY)
     {
         code = FilesystemEntryRemovalErrorCode::directory_not_empty;
     }
