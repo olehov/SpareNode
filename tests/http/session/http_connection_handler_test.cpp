@@ -457,22 +457,24 @@ TEST_CASE("HTTP session gives body publication a fresh bounded deadline",
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     std::stop_source stop;
-    const auto receive_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
     REQUIRE(router.register_route(sparenode::http::HttpMethod::put, "/upload",
                                   [&](const sparenode::http::HttpRequestView &request,
                                       const sparenode::http::HttpRouteParameters &)
                                   {
                                       const auto options = request.temporary_file_options();
                                       REQUIRE(options.deadline.has_value());
-                                      CHECK(options.deadline.value() > receive_deadline);
+                                      const auto remaining = options.deadline.value() -
+                                                             std::chrono::steady_clock::now();
+                                      CHECK(remaining > std::chrono::minutes{4});
+                                      CHECK(remaining <= std::chrono::minutes{5});
                                       CHECK(options.stop_token == stop.get_token());
                                       return ok_response();
                                   }));
     const sparenode::http::HttpConnectionHandlerConfig config{
-        .timeouts = {.body = std::chrono::seconds{5}},
-        .deadline_provider = [receive_deadline](sparenode::http::HttpRequestReadPhase,
-                                                sparenode::network::NetworkDeadline)
-        { return receive_deadline; },
+        .timeouts = {.body = std::chrono::minutes{5}},
+        .deadline_provider =
+            [](sparenode::http::HttpRequestReadPhase, sparenode::network::NetworkDeadline)
+        { return std::chrono::steady_clock::now() + std::chrono::minutes{1}; },
     };
 
     send_all(pair.client, "PUT /upload HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n\r\nx");
