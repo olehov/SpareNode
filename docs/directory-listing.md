@@ -1,7 +1,7 @@
 # Filesystem API
 
-SpareNode exposes each configured filesystem location through read, upload, and directory-creation
-HTTP routes.
+SpareNode exposes each configured filesystem location through read, upload, directory-creation,
+and deletion HTTP routes.
 For a location configured as `/api/Documents`:
 
 - `GET /api/Documents` lists the location root.
@@ -9,6 +9,7 @@ For a location configured as `/api/Documents`:
   wildcard suffix.
 - `PUT /api/Documents/*` creates a file from the raw request body.
 - `POST /api/Documents/*` creates one empty directory at the requested path.
+- `DELETE /api/Documents/*` deletes one file, link, or empty directory.
 
 The suffix is an untrusted, URL-encoded UTF-8 relative path. It passes through
 `SafePath` before any directory operation. A location with `read = false` returns
@@ -116,3 +117,20 @@ The destination passes through `SafePath`, after which SpareNode opens and reval
 directory against the configured root. Native creation is exclusive and relative to that stable
 parent handle or descriptor, preventing a concurrent path replacement from redirecting the new
 directory outside the sandbox.
+
+## Deletion response
+
+Deletion uses `DELETE` with an empty request body and requires the location to explicitly set
+`delete = true`. This permission is disabled by default and remains independent from `read` and
+`write`. A successful request returns `200 OK` with `{"status":"deleted"}`.
+
+File deletion and empty-directory deletion are supported. Recursive deletion is intentionally
+unsupported: a non-empty directory is preserved and returns `409 Conflict`. The configured root
+cannot be deleted. A final symbolic link or junction is deleted as an entry rather than following
+it, but its target must first pass `SafePath` confinement. External, dangling, or unsupported links
+are therefore rejected without deleting either the link or its target.
+
+The parent directory is opened and revalidated against the configured root. Native deletion is
+then performed relative to that stable parent descriptor or handle, so concurrent path replacement
+cannot redirect the operation outside the sandbox. Native paths and system error details are never
+included in the HTTP response.
