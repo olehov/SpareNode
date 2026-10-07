@@ -63,12 +63,11 @@ create_confined_directory(const ConfinedDirectory &parent, const std::filesystem
                                parent.native_handle(), nullptr);
     IO_STATUS_BLOCK status_block{};
     HANDLE directory = INVALID_HANDLE_VALUE;
-    const auto status = NtCreateFile(
-        &directory, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE, &attributes,
-        &status_block, nullptr, FILE_ATTRIBUTE_DIRECTORY,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_CREATE,
-        FILE_DIRECTORY_FILE | FILE_OPEN_FOR_BACKUP_INTENT | FILE_SYNCHRONOUS_IO_NONALERT, nullptr,
-        0);
+    const auto status =
+        NtCreateFile(&directory, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                     &attributes, &status_block, nullptr, FILE_ATTRIBUTE_DIRECTORY,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_CREATE,
+                     FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0);
     if (status < 0)
     {
         return unexpected(failure(status));
