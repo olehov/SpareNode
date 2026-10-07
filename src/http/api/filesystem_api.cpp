@@ -15,6 +15,7 @@
 
 #include "sparenode/configuration/runtime/location_config.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
+#include "sparenode/filesystem/directory_creator.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
@@ -31,6 +32,8 @@ namespace
 {
 
 using configuration::runtime::LocationConfig;
+using filesystem::DirectoryCreationError;
+using filesystem::DirectoryCreationErrorCode;
 using filesystem::DirectoryListingEntry;
 using filesystem::DirectoryListingError;
 using filesystem::DirectoryListingErrorCode;
@@ -320,6 +323,34 @@ public_error(const TemporaryFileError &error) noexcept
     return {HttpStatusCode::internal_server_error, "internal_error"};
 }
 
+/// @brief Maps one directory-creation failure without exposing native paths or errors.
+[[nodiscard]] std::pair<HttpStatusCode, std::string_view>
+public_error(const DirectoryCreationError &error) noexcept
+{
+    switch (error.code)
+    {
+    case DirectoryCreationErrorCode::invalid_destination:
+        if (error.path_error.has_value() &&
+            (error.path_error->code == filesystem::SafePathErrorCode::outside_shared_root ||
+             error.path_error->code == filesystem::SafePathErrorCode::resolution_failed ||
+             error.path_error->code == filesystem::SafePathErrorCode::unsupported_reparse_point))
+        {
+            return {HttpStatusCode::not_found, "not_found"};
+        }
+        return {HttpStatusCode::bad_request, "invalid_path"};
+    case DirectoryCreationErrorCode::parent_unavailable:
+        return {HttpStatusCode::not_found, "parent_not_found"};
+    case DirectoryCreationErrorCode::destination_exists:
+        return {HttpStatusCode::conflict, "destination_exists"};
+    case DirectoryCreationErrorCode::permission_denied:
+        return {HttpStatusCode::forbidden, "permission_denied"};
+    case DirectoryCreationErrorCode::creation_failed:
+    case DirectoryCreationErrorCode::resource_failure:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
 /// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
 make_file_response(filesystem::FileReadStream stream, const std::string_view content_type)
@@ -466,6 +497,37 @@ handle_upload(const LocationConfig &location, const HttpRequestView &request,
     }
 }
 
+/// @brief Creates one empty directory at a confined request path.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_directory_creation(const LocationConfig &location, const HttpRequestView &request,
+                          const std::string_view requested_path)
+{
+    try
+    {
+        if (!location.permissions().allows_write())
+        {
+            return make_json_response(HttpStatusCode::forbidden, "{\"error\":\"write_forbidden\"}");
+        }
+        if (request.body_size() != 0)
+        {
+            return make_json_response(HttpStatusCode::bad_request,
+                                      "{\"error\":\"body_not_allowed\"}");
+        }
+        const auto created = filesystem::create_directory(location.root(), requested_path);
+        if (!created)
+        {
+            return make_public_error_response(public_error(created.error()));
+        }
+        return make_json_response(HttpStatusCode::created, "{\"status\":\"created\"}");
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(
+            HttpRouteError{HttpRouteErrorCode::handler_failure,
+                           static_cast<int>(DirectoryCreationErrorCode::resource_failure)});
+    }
+}
+
 } // namespace
 
 /// @brief Registers filesystem endpoints for every validated runtime location.
@@ -521,6 +583,26 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
             {
                 return unexpected(FilesystemApiError{
                     FilesystemApiErrorCode::route_registration_failed, upload_nested.error()});
+            }
+            auto create_exact = router.register_route(
+                HttpMethod::post, location.api_path(),
+                [location](const HttpRequestView &request, const HttpRouteParameters &)
+                { return handle_directory_creation(location, request, {}); });
+            if (!create_exact)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, create_exact.error()});
+            }
+            auto create_nested = router.register_route(
+                HttpMethod::post, nested_path,
+                [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+                    return handle_directory_creation(location, request,
+                                                     parameters.wildcard_suffix());
+                });
+            if (!create_nested)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, create_nested.error()});
             }
         }
         return router;

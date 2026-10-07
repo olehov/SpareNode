@@ -48,6 +48,7 @@ add_library(sparenode_core STATIC
     src/configuration/runtime_config_mapper.cpp
     src/configuration/shared_root.cpp
     src/filesystem/detail/path_request_decoder.cpp
+    src/filesystem/directory_creator.cpp
     src/filesystem/directory_listing.cpp
     src/filesystem/safe_path.cpp
     src/filesystem/temporary_file.cpp
@@ -88,6 +89,7 @@ if(WIN32)
         src/filesystem/detail/windows_handle.cpp
         src/filesystem/detail/windows_handle_path.cpp
         src/filesystem/detail/windows_file_read_stream.cpp
+        src/filesystem/detail/windows_directory_creator.cpp
         src/filesystem/detail/windows_directory_entry_reader.cpp
         src/filesystem/detail/windows_path_inspector.cpp
         src/filesystem/detail/windows_upload_finalizer.cpp
@@ -95,6 +97,7 @@ if(WIN32)
 else()
     target_sources(sparenode_core PRIVATE
         src/filesystem/detail/linux_file_read_stream.cpp
+        src/filesystem/detail/linux_directory_creator.cpp
         src/filesystem/detail/linux_directory_entry_reader.cpp
         src/filesystem/detail/linux_upload_finalizer.cpp
     )
