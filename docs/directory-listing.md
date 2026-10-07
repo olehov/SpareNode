@@ -1,12 +1,14 @@
 # Filesystem API
 
-SpareNode exposes each configured filesystem location through read and upload HTTP routes.
+SpareNode exposes each configured filesystem location through read, upload, and directory-creation
+HTTP routes.
 For a location configured as `/api/Documents`:
 
 - `GET /api/Documents` lists the location root.
 - `GET /api/Documents/*` lists a directory or serves a regular file identified by the
   wildcard suffix.
 - `PUT /api/Documents/*` creates a file from the raw request body.
+- `POST /api/Documents/*` creates one empty directory at the requested path.
 
 The suffix is an untrusted, URL-encoded UTF-8 relative path. It passes through
 `SafePath` before any directory operation. A location with `read = false` returns
@@ -99,3 +101,18 @@ Publication revalidates the destination through `SafePath`, holds a confined nat
 copies into a private sibling stage, flushes it, and atomically publishes without replacement.
 Incomplete, disconnected, cancelled, expired, or failed request bodies never invoke the route, and
 their temporary artifacts remain under automatic cleanup ownership.
+
+## Directory creation response
+
+Directory creation uses `POST` with an empty request body and the wildcard suffix as the
+URL-encoded relative destination. The location must explicitly set `write = true`. A successful
+request returns `201 Created` with `{"status":"created"}`.
+
+Only the final directory is created. Its parent must already exist inside the configured root;
+missing parents return `404`. Existing files, directories, or links are preserved and return
+`409 Conflict`. A nonempty request body or invalid destination syntax returns `400`.
+
+The destination passes through `SafePath`, after which SpareNode opens and revalidates the parent
+directory against the configured root. Native creation is exclusive and relative to that stable
+parent handle or descriptor, preventing a concurrent path replacement from redirecting the new
+directory outside the sandbox.
