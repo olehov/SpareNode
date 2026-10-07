@@ -130,7 +130,8 @@ cannot be deleted. A final symbolic link or junction is deleted as an entry rath
 it, but its target must first pass `SafePath` confinement. External, dangling, or unsupported links
 are therefore rejected without deleting either the link or its target.
 
-The parent directory is opened and revalidated against the configured root. Native deletion is
-then performed relative to that stable parent descriptor or handle, so concurrent path replacement
-cannot redirect the operation outside the sandbox. Native paths and system error details are never
-included in the HTTP response.
+The parent directory is opened and revalidated against the configured root. On Windows, a
+read-handle directory oplock blocks relocation of the parent or any ancestor until deletion
+finishes. On Linux, deletion runs in an isolated thread whose Landlock policy grants removal only
+beneath the retained shared-root descriptor. If the kernel does not provide Landlock, deletion
+fails closed. Native paths and system error details are never included in the HTTP response.
