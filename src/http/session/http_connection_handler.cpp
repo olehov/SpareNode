@@ -378,6 +378,20 @@ struct HttpSessionRunContext
     network::NetworkDeadline started;          ///< Session start for injected policies.
 };
 
+/// @brief Starts a fresh bounded file-publication budget after request ingestion completes.
+/// @param[in] context Active session and its validated body timeout.
+/// @return Existing cancellation token paired with a new body-sized absolute deadline.
+[[nodiscard]] filesystem::TemporaryFileIoOptions
+publication_file_options(const HttpSessionRunContext &context) noexcept
+{
+    const auto now = std::chrono::steady_clock::now();
+    const auto budget = std::chrono::duration_cast<network::NetworkDeadline::duration>(
+        context.config.timeouts.body);
+    const auto remaining = network::NetworkDeadline::max() - now;
+    const auto deadline = budget > remaining ? network::NetworkDeadline::max() : now + budget;
+    return {.stop_token = context.stop_token, .deadline = deadline};
+}
+
 /// @brief Combines the current phase deadline with the optional shorter provider deadline.
 [[nodiscard]] network::NetworkIoOptions bounded_read_options(const HttpSessionRunContext &context,
                                                              const HttpRequestReadPhase phase)
@@ -434,9 +448,8 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
         }
         if (request.complete())
         {
-            const auto options =
-                file_options(bounded_read_options(context, HttpRequestReadPhase::body));
-            return dispatch_and_respond(connection, context.router, request.request(options),
+            return dispatch_and_respond(connection, context.router,
+                                        request.request(publication_file_options(context)),
                                         context.stop_token, context.config);
         }
         const auto phase =
