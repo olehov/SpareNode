@@ -435,8 +435,10 @@ TEST_CASE("HTTP connection session rejects the first timeout beyond its deadline
     sparenode::http::HttpRouter router;
     const auto remaining = (sparenode::network::NetworkDeadline::max)().time_since_epoch() -
                            std::chrono::steady_clock::now().time_since_epoch();
-    const auto request_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(remaining) +
-                                 std::chrono::milliseconds{1};
+    // Exceed any difference between the connection's earlier accepted_at() and this clock sample.
+    constexpr auto clock_sample_margin = std::chrono::minutes{1};
+    const auto request_timeout =
+        std::chrono::duration_cast<std::chrono::milliseconds>(remaining) + clock_sample_margin;
     const sparenode::http::HttpConnectionHandlerConfig config{
         .timeouts = {.total = request_timeout},
         .deadline_provider = {},
@@ -447,6 +449,41 @@ TEST_CASE("HTTP connection session rejects the first timeout beyond its deadline
 
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().domain == sparenode::network::NetworkErrorDomain::validation);
+}
+
+TEST_CASE("HTTP session gives body publication a fresh bounded deadline",
+          "[http][session][upload][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::stop_source stop;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::put, "/upload",
+                                  [&](const sparenode::http::HttpRequestView &request,
+                                      const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      const auto options = request.temporary_file_options();
+                                      REQUIRE(options.deadline.has_value());
+                                      const auto remaining = options.deadline.value() -
+                                                             std::chrono::steady_clock::now();
+                                      CHECK(remaining > std::chrono::minutes{4});
+                                      CHECK(remaining <= std::chrono::minutes{5});
+                                      CHECK(options.stop_token == stop.get_token());
+                                      return ok_response();
+                                  }));
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.body = std::chrono::minutes{5}},
+        .deadline_provider =
+            [](sparenode::http::HttpRequestReadPhase, sparenode::network::NetworkDeadline)
+        { return std::chrono::steady_clock::now() + std::chrono::minutes{1}; },
+    };
+
+    send_all(pair.client, "PUT /upload HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n\r\nx");
+    pair.client.shutdown_send();
+    const auto result = sparenode::http::handle_http_connection(std::move(pair.server), router,
+                                                                stop.get_token(), config);
+
+    REQUIRE(result.has_value());
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
 }
 
 TEST_CASE("HTTP connection handler runs through the TCP dispatcher",

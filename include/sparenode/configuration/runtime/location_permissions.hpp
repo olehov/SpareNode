@@ -9,7 +9,7 @@ class LocationPermissions final
   public:
     /// @brief Creates one complete permission set.
     /// @param[in] allow_read Permits reading files and directory metadata.
-    /// @param[in] allow_write Permits creating or replacing file content.
+    /// @param[in] allow_write Permits creating file content through upload operations.
     /// @param[in] allow_delete Permits deleting files or directories.
     explicit constexpr LocationPermissions(const bool allow_read = true,
                                            const bool allow_write = false,
@@ -26,7 +26,7 @@ class LocationPermissions final
     }
 
     /// @brief Reports whether write operations are permitted.
-    /// @return `true` when file content may be created or replaced.
+    /// @return `true` when file content may be created through upload operations.
     [[nodiscard]] constexpr bool allows_write() const noexcept
     {
         return allow_write_;

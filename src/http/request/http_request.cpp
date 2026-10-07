@@ -52,6 +52,11 @@ std::shared_ptr<filesystem::TemporaryFile> HttpRequestView::temporary_body() con
     return temporary_body_;
 }
 
+filesystem::TemporaryFileIoOptions HttpRequestView::temporary_file_options() const noexcept
+{
+    return temporary_file_options_;
+}
+
 /// @brief Finds the first case-insensitive header-name match.
 std::string_view HttpRequestView::header(const std::string_view name) const noexcept
 {

@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -17,6 +18,8 @@
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/temporary_file.hpp"
+#include "sparenode/filesystem/upload_finalizer.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request.hpp"
@@ -33,6 +36,10 @@ using filesystem::DirectoryListingError;
 using filesystem::DirectoryListingErrorCode;
 using filesystem::FileReadError;
 using filesystem::FileReadErrorCode;
+using filesystem::TemporaryFileError;
+using filesystem::TemporaryFileErrorCode;
+using filesystem::UploadFinalizationError;
+using filesystem::UploadFinalizationErrorCode;
 
 /// @brief Appends one string using JSON escaping without changing valid UTF-8 bytes.
 void append_json_string(std::string &output, const std::string_view value)
@@ -164,12 +171,18 @@ entry_type_name(const filesystem::DirectoryEntryType type) noexcept
     {
     case HttpStatusCode::ok:
         return "OK";
+    case HttpStatusCode::created:
+        return "Created";
     case HttpStatusCode::bad_request:
         return "Bad Request";
     case HttpStatusCode::forbidden:
         return "Forbidden";
     case HttpStatusCode::not_found:
         return "Not Found";
+    case HttpStatusCode::request_timeout:
+        return "Request Timeout";
+    case HttpStatusCode::conflict:
+        return "Conflict";
     case HttpStatusCode::content_too_large:
         return "Content Too Large";
     default:
@@ -246,6 +259,62 @@ public_error(const FileReadError &error) noexcept
     case FileReadErrorCode::filesystem_failure:
     case FileReadErrorCode::cancelled:
     case FileReadErrorCode::resource_allocation_failed:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
+/// @brief Maps one upload publication failure without exposing native paths or error details.
+[[nodiscard]] std::pair<HttpStatusCode, std::string_view>
+public_error(const UploadFinalizationError &error) noexcept
+{
+    switch (error.code)
+    {
+    case UploadFinalizationErrorCode::invalid_destination:
+        if (error.path_error.has_value() &&
+            (error.path_error->code == filesystem::SafePathErrorCode::outside_shared_root ||
+             error.path_error->code == filesystem::SafePathErrorCode::resolution_failed ||
+             error.path_error->code == filesystem::SafePathErrorCode::unsupported_reparse_point))
+        {
+            return {HttpStatusCode::not_found, "not_found"};
+        }
+        return {HttpStatusCode::bad_request, "invalid_path"};
+    case UploadFinalizationErrorCode::parent_unavailable:
+        return {HttpStatusCode::not_found, "parent_not_found"};
+    case UploadFinalizationErrorCode::destination_exists:
+        return {HttpStatusCode::conflict, "destination_exists"};
+    case UploadFinalizationErrorCode::invalid_source:
+        return {HttpStatusCode::bad_request, "invalid_upload"};
+    case UploadFinalizationErrorCode::cancelled:
+    case UploadFinalizationErrorCode::deadline_exceeded:
+        return {HttpStatusCode::request_timeout, "upload_interrupted"};
+    case UploadFinalizationErrorCode::source_read_failed:
+    case UploadFinalizationErrorCode::staging_failed:
+    case UploadFinalizationErrorCode::staging_write_failed:
+    case UploadFinalizationErrorCode::staging_flush_failed:
+    case UploadFinalizationErrorCode::publish_failed:
+    case UploadFinalizationErrorCode::resource_failure:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
+/// @brief Maps temporary-source lifecycle failures to stable upload responses.
+[[nodiscard]] std::pair<HttpStatusCode, std::string_view>
+public_error(const TemporaryFileError &error) noexcept
+{
+    switch (error.code)
+    {
+    case TemporaryFileErrorCode::cancelled:
+    case TemporaryFileErrorCode::deadline_exceeded:
+        return {HttpStatusCode::request_timeout, "upload_interrupted"};
+    case TemporaryFileErrorCode::temporary_directory_unavailable:
+    case TemporaryFileErrorCode::create_failed:
+    case TemporaryFileErrorCode::write_failed:
+    case TemporaryFileErrorCode::flush_failed:
+    case TemporaryFileErrorCode::close_failed:
+    case TemporaryFileErrorCode::invalid_state:
+    case TemporaryFileErrorCode::resource_allocation_failed:
         return {HttpStatusCode::internal_server_error, "internal_error"};
     }
     return {HttpStatusCode::internal_server_error, "internal_error"};
@@ -341,6 +410,62 @@ handle_resource(const LocationConfig &location, const MimeTypeRegistry &mime_typ
     }
 }
 
+/// @brief Publishes one complete decoded request body under a confined destination path.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_upload(const LocationConfig &location, const HttpRequestView &request,
+              const std::string_view requested_path)
+{
+    try
+    {
+        if (!location.permissions().allows_write())
+        {
+            return make_json_response(HttpStatusCode::forbidden, "{\"error\":\"write_forbidden\"}");
+        }
+
+        auto retained_artifact = request.temporary_body();
+        std::optional<filesystem::TemporaryFile> materialized_artifact;
+        const filesystem::TemporaryFile *source = retained_artifact.get();
+        if (source == nullptr)
+        {
+            if (request.body_size() != request.body().size())
+            {
+                return make_json_response(HttpStatusCode::bad_request,
+                                          "{\"error\":\"invalid_upload\"}");
+            }
+            auto created = filesystem::TemporaryFile::create();
+            if (!created)
+            {
+                return make_public_error_response(public_error(created.error()));
+            }
+            materialized_artifact.emplace(std::move(created).value());
+            const auto options = request.temporary_file_options();
+            if (auto written = materialized_artifact->write(request.body(), options); !written)
+            {
+                return make_public_error_response(public_error(written.error()));
+            }
+            if (auto completed = materialized_artifact->complete(options); !completed)
+            {
+                return make_public_error_response(public_error(completed.error()));
+            }
+            source = &materialized_artifact.value();
+        }
+
+        auto published = filesystem::finalize_upload(location.root(), requested_path, *source,
+                                                     request.temporary_file_options());
+        if (!published)
+        {
+            return make_public_error_response(public_error(published.error()));
+        }
+        return make_json_response(HttpStatusCode::created, "{\"status\":\"created\"}");
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(
+            HttpRouteError{HttpRouteErrorCode::handler_failure,
+                           static_cast<int>(UploadFinalizationErrorCode::resource_failure)});
+    }
+}
+
 } // namespace
 
 /// @brief Registers filesystem endpoints for every validated runtime location.
@@ -378,6 +503,24 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
             {
                 return unexpected(FilesystemApiError{
                     FilesystemApiErrorCode::route_registration_failed, nested.error()});
+            }
+            auto upload_exact = router.register_route(
+                HttpMethod::put, location.api_path(),
+                [location](const HttpRequestView &request, const HttpRouteParameters &)
+                { return handle_upload(location, request, {}); });
+            if (!upload_exact)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, upload_exact.error()});
+            }
+            auto upload_nested = router.register_route(
+                HttpMethod::put, nested_path,
+                [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+                { return handle_upload(location, request, parameters.wildcard_suffix()); });
+            if (!upload_nested)
+            {
+                return unexpected(FilesystemApiError{
+                    FilesystemApiErrorCode::route_registration_failed, upload_nested.error()});
             }
         }
         return router;

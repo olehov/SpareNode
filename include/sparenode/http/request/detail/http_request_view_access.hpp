@@ -27,13 +27,16 @@ struct HttpRequestViewAccess
     /// @param[in] head Validated metadata whose source remains alive.
     /// @param[in] body_size Exact decoded bytes persisted in the artifact.
     /// @param[in] artifact Optional completed artifact; null represents an empty body.
+    /// @param[in] options Cancellation and deadline retained for later publication.
     /// @return Request retaining metadata views and shared temporary-file ownership.
     [[nodiscard]] static HttpRequestView
     create_file_backed(HttpRequestHead head, const std::uint64_t body_size,
-                       std::shared_ptr<filesystem::TemporaryFile> artifact)
+                       std::shared_ptr<filesystem::TemporaryFile> artifact,
+                       const filesystem::TemporaryFileIoOptions &options = {})
     {
         HttpRequestView request(head.method, head.target, std::move(head.fields), {}, body_size);
         request.temporary_body_ = std::move(artifact);
+        request.temporary_file_options_ = options;
         request.target_storage_ = std::move(head.target_storage);
         return request;
     }
