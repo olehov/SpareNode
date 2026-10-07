@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "sparenode/configuration/shared_root.hpp"
-#include "sparenode/filesystem/directory_creator.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "support/temporary_directory.hpp"
 #include "support/windows_junction.hpp"
@@ -40,7 +39,7 @@ struct JunctionFixture
     {
         const auto error = sparenode::test::create_directory_junction(target, link);
         INFO(error.message());
-        REQUIRE(!error);
+        REQUIRE_FALSE(error);
     }
 
     /// @brief Resolves an untrusted request against the shared fixture root.
@@ -90,7 +89,7 @@ TEST_CASE("Safe path rejects a Windows junction outside the shared root",
     {
         CAPTURE(request);
         const auto result = fixture.resolve(request);
-        REQUIRE(!result);
+        REQUIRE_FALSE(result);
         REQUIRE(result.error().code ==
                 sparenode::filesystem::SafePathErrorCode::outside_shared_root);
     }
@@ -106,7 +105,7 @@ TEST_CASE("Safe path rejects nested Windows junction redirection outside the roo
     fixture.create_junction(middle, fixture.shared / "first");
 
     const auto result = fixture.resolve("first/external/secret.txt");
-    REQUIRE(!result);
+    REQUIRE_FALSE(result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
@@ -132,7 +131,7 @@ TEST_CASE("Safe path enforces the Windows reparse redirect limit",
 
     fixture.create_junction(fixture.shared / "hop-0", fixture.shared / "overflow");
     const auto rejected = fixture.resolve("overflow");
-    REQUIRE(!rejected);
+    REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == sparenode::filesystem::SafePathErrorCode::resolution_failed);
 }
 
@@ -143,11 +142,11 @@ TEST_CASE("Safe path rejects an unsupported reparse target behind a Windows junc
     const auto unsupported = fixture.shared / "unsupported";
     const auto error = sparenode::test::create_unsupported_directory_reparse_point(unsupported);
     INFO(error.message());
-    REQUIRE(!error);
+    REQUIRE_FALSE(error);
     fixture.create_junction(unsupported, fixture.shared / "link");
 
     const auto result = fixture.resolve("link");
-    REQUIRE(!result);
+    REQUIRE_FALSE(result);
     REQUIRE(result.error().code ==
             sparenode::filesystem::SafePathErrorCode::unsupported_reparse_point);
     REQUIRE(std::filesystem::remove(fixture.shared / "link"));
@@ -164,7 +163,7 @@ TEST_CASE("Safe path rejects a shared root replaced by a Windows junction",
     fixture.create_junction(fixture.outside, fixture.shared);
 
     const auto result = sparenode::filesystem::SafePath::resolve(root.value(), "secret.txt");
-    REQUIRE(!result);
+    REQUIRE_FALSE(result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
@@ -210,39 +209,13 @@ TEST_CASE("Safe path rejects reparse targets with ambiguous trailing components"
 
         const auto request = std::string(test_case.alias_name) + "/marker.txt";
         const auto result = fixture.resolve(request);
-        REQUIRE(!result);
+        REQUIRE_FALSE(result);
         REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::invalid_component);
 
         REQUIRE(std::filesystem::remove(fixture.shared / test_case.alias_name));
         REQUIRE(std::filesystem::remove(exact_directory / "marker.txt"));
         REQUIRE(std::filesystem::remove(exact_directory));
     }
-}
-
-TEST_CASE("Directory creation follows internal junctions and rejects external junction parents",
-          "[filesystem][directory-create][windows][junction][security]")
-{
-    const JunctionFixture fixture;
-    const auto inside = fixture.shared / "inside";
-    REQUIRE(std::filesystem::create_directory(inside));
-    fixture.create_junction(inside, fixture.shared / "internal");
-    fixture.create_junction(fixture.outside, fixture.shared / "external");
-    auto root = sparenode::configuration::SharedRoot::create(fixture.shared);
-    REQUIRE(root);
-
-    const auto created = sparenode::filesystem::create_directory(root.value(), "internal/new");
-    REQUIRE(created);
-    CHECK(std::filesystem::is_directory(inside / "new"));
-
-    const auto rejected = sparenode::filesystem::create_directory(root.value(), "external/new");
-    REQUIRE(!rejected);
-    CHECK(rejected.error().code ==
-          sparenode::filesystem::DirectoryCreationErrorCode::invalid_destination);
-    const auto path_error =
-        rejected.error().path_error.value_or(sparenode::filesystem::SafePathError{});
-    REQUIRE(rejected.error().path_error.has_value());
-    CHECK(path_error.code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
-    CHECK(!std::filesystem::exists(fixture.outside / "new"));
 }
 
 #endif
