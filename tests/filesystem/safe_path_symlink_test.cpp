@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/directory_creator.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -61,7 +62,7 @@ void create_link(const std::filesystem::path &target, const std::filesystem::pat
     }
 #endif
     INFO(error.message());
-    REQUIRE_FALSE(error);
+    REQUIRE(error.value() == 0);
 }
 } // namespace
 
@@ -105,7 +106,7 @@ TEST_CASE("Safe path follows internal file links and rejects external file links
     REQUIRE(accepted);
     REQUIRE(accepted->path() == normalized_root->path() / "file.txt");
     const auto rejected = fixture.resolve("external");
-    REQUIRE_FALSE(rejected);
+    REQUIRE(!rejected);
     REQUIRE(rejected.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
@@ -120,7 +121,7 @@ TEST_CASE("Safe path rejects external directory links even with a missing suffix
     {
         CAPTURE(request);
         const auto result = fixture.resolve(request);
-        REQUIRE_FALSE(result);
+        REQUIRE(!result);
         REQUIRE(result.error().code ==
                 sparenode::filesystem::SafePathErrorCode::outside_shared_root);
         REQUIRE(result.error().requested_path == request);
@@ -144,7 +145,7 @@ TEST_CASE("Safe path checks the final target of nested symbolic links",
     std::filesystem::remove(fixture.shared / "second");
     create_link(fixture.outside, fixture.shared / "second");
     const auto rejected = fixture.resolve("first");
-    REQUIRE_FALSE(rejected);
+    REQUIRE(!rejected);
     REQUIRE(rejected.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
@@ -162,7 +163,7 @@ TEST_CASE("Safe path rejects dangling symbolic links and cycles",
     {
         CAPTURE(request);
         const auto result = fixture.resolve(request);
-        REQUIRE_FALSE(result);
+        REQUIRE(!result);
         REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::resolution_failed);
     }
 }
@@ -188,7 +189,7 @@ TEST_CASE("Safe path rejects a shared root replaced with an external link",
     std::filesystem::remove(fixture.shared);
     create_link(fixture.outside, fixture.shared);
     const auto result = sparenode::filesystem::SafePath::resolve(root.value(), "missing.txt");
-    REQUIRE_FALSE(result);
+    REQUIRE(!result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
 }
 
@@ -198,6 +199,32 @@ TEST_CASE("Safe path fails closed when an existing prefix is not a directory",
     const SymlinkFixture fixture;
     REQUIRE(std::ofstream(fixture.shared / "file.txt").good());
     const auto result = fixture.resolve("file.txt/child");
-    REQUIRE_FALSE(result);
+    REQUIRE(!result);
     REQUIRE(result.error().code == sparenode::filesystem::SafePathErrorCode::resolution_failed);
+}
+
+TEST_CASE("Directory creation follows internal links and rejects external link parents",
+          "[filesystem][directory-create][symlink][security]")
+{
+    const SymlinkFixture fixture;
+    const auto inside = fixture.shared / "inside";
+    std::filesystem::create_directory(inside);
+    create_link(inside, fixture.shared / "internal");
+    create_link(fixture.outside, fixture.shared / "external");
+    auto root = sparenode::configuration::SharedRoot::create(fixture.shared);
+    REQUIRE(root);
+
+    const auto created = sparenode::filesystem::create_directory(root.value(), "internal/new");
+    REQUIRE(created);
+    CHECK(std::filesystem::is_directory(inside / "new"));
+
+    const auto rejected = sparenode::filesystem::create_directory(root.value(), "external/new");
+    REQUIRE(!rejected);
+    CHECK(rejected.error().code ==
+          sparenode::filesystem::DirectoryCreationErrorCode::invalid_destination);
+    const auto path_error =
+        rejected.error().path_error.value_or(sparenode::filesystem::SafePathError{});
+    REQUIRE(rejected.error().path_error.has_value());
+    CHECK(path_error.code == sparenode::filesystem::SafePathErrorCode::outside_shared_root);
+    CHECK(!std::filesystem::exists(fixture.outside / "new"));
 }

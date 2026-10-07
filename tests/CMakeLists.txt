@@ -23,6 +23,7 @@ add_executable(sparenode_tests
     configuration/config_validator_test.cpp
     configuration/runtime_config_mapper_test.cpp
     configuration/shared_root_test.cpp
+    filesystem/directory_creator_test.cpp
     filesystem/directory_listing_test.cpp
     filesystem/file_read_stream_test.cpp
     filesystem/filesystem_security_test.cpp
