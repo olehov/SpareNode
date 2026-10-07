@@ -26,7 +26,7 @@ struct FilesystemApiError
 
 /// @brief Builds the immutable-ready version-one filesystem API routes.
 /// @param[in] server Validated server whose locations define the endpoints.
-/// @return Router containing directory listing endpoints, or a startup failure.
+/// @return Router containing configured filesystem endpoints, or a startup failure.
 [[nodiscard]] Result<HttpRouter, FilesystemApiError>
 make_filesystem_api_router(const configuration::runtime::ServerConfig &server);
 
