@@ -157,6 +157,20 @@ void create_file_link(const std::filesystem::path &target, const std::filesystem
     return std::move(response).value();
 }
 
+/// @brief Dispatches one POST directory-creation request through a validated filesystem router.
+[[nodiscard]] sparenode::http::HttpResponse dispatch_post(const sparenode::http::HttpRouter &router,
+                                                          const std::string_view target,
+                                                          const std::string_view body = {})
+{
+    const std::string source =
+        "POST " + std::string(target) +
+        " HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + std::to_string(body.size()) +
+        "\r\n\r\n" + std::string(body);
+    auto response = router.dispatch(parse_request(source));
+    REQUIRE(response);
+    return std::move(response).value();
+}
+
 /// @brief Sends all bytes through a potentially partial loopback socket operation.
 void send_all(const sparenode::test::TestClientSocket &client, const std::string_view source)
 {
@@ -364,6 +378,80 @@ TEST_CASE("Disconnected partial uploads never reach the configured location",
     const auto response = receive_until_closed(pair.client);
     CHECK(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     CHECK_FALSE(std::filesystem::exists(directory.path() / "partial.txt"));
+}
+
+TEST_CASE("Filesystem API creates one directory inside a writable location",
+          "[http][filesystem-api][directory-create]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-directory-create");
+    REQUIRE(std::filesystem::create_directory(directory.path() / "parent"));
+    auto router =
+        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, true));
+    REQUIRE(router);
+
+    const auto response = dispatch_post(router.value(), "/api/Documents/parent/new%20directory");
+
+    CHECK(response.status_code() == sparenode::http::HttpStatusCode::created);
+    CHECK(body_text(response) == "{\"status\":\"created\"}");
+    CHECK(std::filesystem::is_directory(directory.path() / "parent" / "new directory"));
+}
+
+TEST_CASE("Filesystem API enforces write permission for directory creation",
+          "[http][filesystem-api][directory-create][permissions]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-directory-denied");
+    auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
+    REQUIRE(router);
+
+    const auto response = dispatch_post(router.value(), "/api/Documents/rejected");
+
+    CHECK(response.status_code() == sparenode::http::HttpStatusCode::forbidden);
+    CHECK(body_text(response) == "{\"error\":\"write_forbidden\"}");
+    CHECK_FALSE(std::filesystem::exists(directory.path() / "rejected"));
+}
+
+TEST_CASE("Filesystem API reports directory conflicts and request errors",
+          "[http][filesystem-api][directory-create][errors]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-directory-errors");
+    REQUIRE(std::filesystem::create_directory(directory.path() / "existing"));
+    auto router =
+        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, true));
+    REQUIRE(router);
+
+    const auto conflict = dispatch_post(router.value(), "/api/Documents/existing");
+    CHECK(conflict.status_code() == sparenode::http::HttpStatusCode::conflict);
+    CHECK(body_text(conflict) == "{\"error\":\"destination_exists\"}");
+
+    const auto missing_parent = dispatch_post(router.value(), "/api/Documents/missing/child");
+    CHECK(missing_parent.status_code() == sparenode::http::HttpStatusCode::not_found);
+    CHECK(body_text(missing_parent) == "{\"error\":\"parent_not_found\"}");
+
+    const auto root = dispatch_post(router.value(), "/api/Documents");
+    CHECK(root.status_code() == sparenode::http::HttpStatusCode::bad_request);
+    CHECK(body_text(root) == "{\"error\":\"invalid_path\"}");
+
+    const auto body = dispatch_post(router.value(), "/api/Documents/with-body", "unexpected");
+    CHECK(body.status_code() == sparenode::http::HttpStatusCode::bad_request);
+    CHECK(body_text(body) == "{\"error\":\"body_not_allowed\"}");
+    CHECK_FALSE(std::filesystem::exists(directory.path() / "with-body"));
+}
+
+TEST_CASE("Filesystem API confines directory creation to the configured root",
+          "[http][filesystem-api][directory-create][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-directory-shared");
+    const sparenode::test::TemporaryDirectory outside("sparenode-files-api-directory-outside");
+    auto router =
+        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, true));
+    REQUIRE(router);
+
+    const auto target = "/api/Documents/%2E%2E/" + outside.path().filename().string() + "/escaped";
+    const auto response = dispatch_post(router.value(), target);
+
+    CHECK(response.status_code() == sparenode::http::HttpStatusCode::not_found);
+    CHECK(body_text(response) == "{\"error\":\"not_found\"}");
+    CHECK_FALSE(std::filesystem::exists(outside.path() / "escaped"));
 }
 
 TEST_CASE("Filesystem API registers multiple configured locations with segment boundaries",
