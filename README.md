@@ -137,6 +137,14 @@ supported HTTP/1.1 request subset without owning request bytes. Outgoing message
 use the [HTTP response and streaming layer](docs/http-response.md), which supports
 validated in-memory responses and fixed-buffer incremental body transmission.
 
+## Authentication
+
+SpareNode v0.1 uses a single-owner authentication model with credential-provider
+and session boundaries that remain independent of the concrete secret source.
+The [MVP authentication model](docs/authentication-model.md) defines identity,
+login/logout, protected routes, session lifetime, and the responsibilities of the
+remaining authentication and transport-security work.
+
 ## Shared directory
 
 SpareNode requires an explicit `--config <path>` argument selecting `spnode.conf`.
