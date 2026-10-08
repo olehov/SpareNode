@@ -18,6 +18,7 @@
 #include "sparenode/filesystem/directory_creator.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
+#include "sparenode/filesystem/filesystem_entry_remover.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
 #include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
@@ -39,6 +40,8 @@ using filesystem::DirectoryListingError;
 using filesystem::DirectoryListingErrorCode;
 using filesystem::FileReadError;
 using filesystem::FileReadErrorCode;
+using filesystem::FilesystemEntryRemovalError;
+using filesystem::FilesystemEntryRemovalErrorCode;
 using filesystem::TemporaryFileError;
 using filesystem::TemporaryFileErrorCode;
 using filesystem::UploadFinalizationError;
@@ -351,6 +354,35 @@ public_error(const DirectoryCreationError &error) noexcept
     return {HttpStatusCode::internal_server_error, "internal_error"};
 }
 
+/// @brief Maps one deletion failure without exposing native paths or errors.
+[[nodiscard]] std::pair<HttpStatusCode, std::string_view>
+public_error(const FilesystemEntryRemovalError &error) noexcept
+{
+    switch (error.code)
+    {
+    case FilesystemEntryRemovalErrorCode::invalid_destination:
+        if (error.path_error.has_value() &&
+            (error.path_error->code == filesystem::SafePathErrorCode::outside_shared_root ||
+             error.path_error->code == filesystem::SafePathErrorCode::resolution_failed ||
+             error.path_error->code == filesystem::SafePathErrorCode::unsupported_reparse_point))
+        {
+            return {HttpStatusCode::not_found, "not_found"};
+        }
+        return {HttpStatusCode::bad_request, "invalid_path"};
+    case FilesystemEntryRemovalErrorCode::parent_unavailable:
+    case FilesystemEntryRemovalErrorCode::not_found:
+        return {HttpStatusCode::not_found, "not_found"};
+    case FilesystemEntryRemovalErrorCode::directory_not_empty:
+        return {HttpStatusCode::conflict, "directory_not_empty"};
+    case FilesystemEntryRemovalErrorCode::permission_denied:
+        return {HttpStatusCode::forbidden, "permission_denied"};
+    case FilesystemEntryRemovalErrorCode::removal_failed:
+    case FilesystemEntryRemovalErrorCode::resource_failure:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
 /// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
 make_file_response(filesystem::FileReadStream stream, const std::string_view content_type)
@@ -528,6 +560,60 @@ handle_directory_creation(const LocationConfig &location, const HttpRequestView 
     }
 }
 
+/// @brief Deletes one file, link, or empty directory through the configured location policy.
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_deletion(const LocationConfig &location, const HttpRequestView &request,
+                const std::string_view requested_path)
+{
+    try
+    {
+        if (!location.permissions().allows_delete())
+        {
+            return make_json_response(HttpStatusCode::forbidden,
+                                      "{\"error\":\"delete_forbidden\"}");
+        }
+        if (request.body_size() != 0)
+        {
+            return make_json_response(HttpStatusCode::bad_request,
+                                      "{\"error\":\"body_not_allowed\"}");
+        }
+        if (auto removed = filesystem::remove_filesystem_entry(location.root(), requested_path);
+            !removed)
+        {
+            return make_public_error_response(public_error(removed.error()));
+        }
+        return make_json_response(HttpStatusCode::ok, "{\"status\":\"deleted\"}");
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(
+            HttpRouteError{HttpRouteErrorCode::handler_failure,
+                           static_cast<int>(FilesystemEntryRemovalErrorCode::resource_failure)});
+    }
+}
+
+/// @brief Registers exact and nested variants of one location operation.
+[[nodiscard]] Result<void, HttpRouteRegistrationError>
+register_location_routes(HttpRouter &router, const HttpMethod method,
+                         const std::string_view api_path, HttpRouteHandler exact_handler,
+                         HttpRouteHandler nested_handler)
+{
+    if (auto exact = router.register_route(method, std::string(api_path), std::move(exact_handler));
+        !exact)
+    {
+        return unexpected(exact.error());
+    }
+    const auto nested_path = api_path == "/" ? std::string("/*") : std::string(api_path) + "/*";
+    return router.register_route(method, nested_path, std::move(nested_handler));
+}
+
+/// @brief Converts one route-pair registration failure into an API construction failure.
+[[nodiscard]] FilesystemApiError
+registration_failure(const HttpRouteRegistrationError error) noexcept
+{
+    return {FilesystemApiErrorCode::route_registration_failed, error};
+}
+
 } // namespace
 
 /// @brief Registers filesystem endpoints for every validated runtime location.
@@ -545,64 +631,48 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
         HttpRouter router;
         for (const auto &location : server.locations())
         {
-            auto exact = router.register_route(
-                HttpMethod::get, location.api_path(),
+            auto read = register_location_routes(
+                router, HttpMethod::get, location.api_path(),
                 [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
-                { return handle_resource(location, *mime_types, {}); });
-            if (!exact)
-            {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, exact.error()});
-            }
-            const auto nested_path =
-                location.api_path() == "/" ? std::string("/*") : location.api_path() + "/*";
-            auto nested = router.register_route(
-                HttpMethod::get, nested_path,
+                { return handle_resource(location, *mime_types, {}); },
                 [location, mime_types](const HttpRequestView &,
                                        const HttpRouteParameters &parameters)
                 { return handle_resource(location, *mime_types, parameters.wildcard_suffix()); });
-            if (!nested)
+            if (!read)
             {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, nested.error()});
+                return unexpected(registration_failure(read.error()));
             }
-            auto upload_exact = router.register_route(
-                HttpMethod::put, location.api_path(),
+            auto upload = register_location_routes(
+                router, HttpMethod::put, location.api_path(),
                 [location](const HttpRequestView &request, const HttpRouteParameters &)
-                { return handle_upload(location, request, {}); });
-            if (!upload_exact)
-            {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, upload_exact.error()});
-            }
-            auto upload_nested = router.register_route(
-                HttpMethod::put, nested_path,
+                { return handle_upload(location, request, {}); },
                 [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
                 { return handle_upload(location, request, parameters.wildcard_suffix()); });
-            if (!upload_nested)
+            if (!upload)
             {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, upload_nested.error()});
+                return unexpected(registration_failure(upload.error()));
             }
-            auto create_exact = router.register_route(
-                HttpMethod::post, location.api_path(),
+            auto create = register_location_routes(
+                router, HttpMethod::post, location.api_path(),
                 [location](const HttpRequestView &request, const HttpRouteParameters &)
-                { return handle_directory_creation(location, request, {}); });
-            if (!create_exact)
-            {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, create_exact.error()});
-            }
-            auto create_nested = router.register_route(
-                HttpMethod::post, nested_path,
+                { return handle_directory_creation(location, request, {}); },
                 [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
                     return handle_directory_creation(location, request,
                                                      parameters.wildcard_suffix());
                 });
-            if (!create_nested)
+            if (!create)
             {
-                return unexpected(FilesystemApiError{
-                    FilesystemApiErrorCode::route_registration_failed, create_nested.error()});
+                return unexpected(registration_failure(create.error()));
+            }
+            auto remove = register_location_routes(
+                router, HttpMethod::delete_method, location.api_path(),
+                [location](const HttpRequestView &request, const HttpRouteParameters &)
+                { return handle_deletion(location, request, {}); },
+                [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+                { return handle_deletion(location, request, parameters.wildcard_suffix()); });
+            if (!remove)
+            {
+                return unexpected(registration_failure(remove.error()));
             }
         }
         return router;

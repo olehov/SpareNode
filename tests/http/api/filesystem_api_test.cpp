@@ -90,14 +90,15 @@ namespace
 /// @brief Creates one server backed by the supplied temporary location.
 [[nodiscard]] sparenode::configuration::runtime::ServerConfig
 make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true,
-            sparenode::http::MimeTypeRegistry mime_types = {}, const bool allow_write = false)
+            sparenode::http::MimeTypeRegistry mime_types = {}, const bool allow_write = false,
+            const bool allow_delete = false)
 {
     auto root = sparenode::configuration::SharedRoot::create(directory.path());
     REQUIRE(root);
     std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root).value(),
-        sparenode::configuration::runtime::LocationPermissions{allow_read, allow_write, false});
+    locations.emplace_back("/api/Documents", std::move(root).value(),
+                           sparenode::configuration::runtime::LocationPermissions{
+                               allow_read, allow_write, allow_delete});
     return {{"127.0.0.1", 0},
             false,
             1,
@@ -164,6 +165,20 @@ void create_file_link(const std::filesystem::path &target, const std::filesystem
 {
     const std::string source =
         "POST " + std::string(target) +
+        " HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + std::to_string(body.size()) +
+        "\r\n\r\n" + std::string(body);
+    auto response = router.dispatch(parse_request(source));
+    REQUIRE(response);
+    return std::move(response).value();
+}
+
+/// @brief Dispatches one DELETE request through a validated filesystem router.
+[[nodiscard]] sparenode::http::HttpResponse
+dispatch_delete(const sparenode::http::HttpRouter &router, const std::string_view target,
+                const std::string_view body = {})
+{
+    const std::string source =
+        "DELETE " + std::string(target) +
         " HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + std::to_string(body.size()) +
         "\r\n\r\n" + std::string(body);
     auto response = router.dispatch(parse_request(source));
@@ -452,6 +467,74 @@ TEST_CASE("Filesystem API confines directory creation to the configured root",
     CHECK(response.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(response) == "{\"error\":\"not_found\"}");
     CHECK_FALSE(std::filesystem::exists(outside.path() / "escaped"));
+}
+
+TEST_CASE("Filesystem API keeps deletion disabled by default",
+          "[http][filesystem-api][delete][permissions]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-delete-denied");
+    REQUIRE(std::ofstream(directory.path() / "retained.txt") << "content");
+    auto router = sparenode::http::make_filesystem_api_router(make_server(directory));
+    REQUIRE(router);
+
+    const auto response = dispatch_delete(router.value(), "/api/Documents/retained.txt");
+
+    CHECK(response.status_code() == sparenode::http::HttpStatusCode::forbidden);
+    CHECK(body_text(response) == "{\"error\":\"delete_forbidden\"}");
+    CHECK(std::filesystem::exists(directory.path() / "retained.txt"));
+}
+
+TEST_CASE("Filesystem API deletes files and empty directories when explicitly enabled",
+          "[http][filesystem-api][delete]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-delete");
+    REQUIRE(std::ofstream(directory.path() / "file.txt") << "content");
+    REQUIRE(std::filesystem::create_directory(directory.path() / "empty"));
+    auto router =
+        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, false, true));
+    REQUIRE(router);
+
+    const auto file = dispatch_delete(router.value(), "/api/Documents/file.txt");
+    const auto empty = dispatch_delete(router.value(), "/api/Documents/empty");
+
+    CHECK(file.status_code() == sparenode::http::HttpStatusCode::ok);
+    CHECK(body_text(file) == "{\"status\":\"deleted\"}");
+    CHECK(empty.status_code() == sparenode::http::HttpStatusCode::ok);
+    CHECK(!std::filesystem::exists(directory.path() / "file.txt"));
+    CHECK(!std::filesystem::exists(directory.path() / "empty"));
+}
+
+TEST_CASE("Filesystem API reports safe deletion failures",
+          "[http][filesystem-api][delete][errors][security]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-delete-errors");
+    const sparenode::test::TemporaryDirectory outside("sparenode-files-api-delete-outside");
+    const auto populated = directory.path() / "populated";
+    REQUIRE(std::filesystem::create_directory(populated));
+    REQUIRE(std::ofstream(populated / "child.txt") << "content");
+    REQUIRE(std::ofstream(outside.path() / "retained.txt") << "content");
+    auto router =
+        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, false, true));
+    REQUIRE(router);
+
+    const auto root = dispatch_delete(router.value(), "/api/Documents");
+    CHECK(root.status_code() == sparenode::http::HttpStatusCode::bad_request);
+    const auto nonempty = dispatch_delete(router.value(), "/api/Documents/populated");
+    CHECK(nonempty.status_code() == sparenode::http::HttpStatusCode::conflict);
+    CHECK(body_text(nonempty) == "{\"error\":\"directory_not_empty\"}");
+    const auto missing = dispatch_delete(router.value(), "/api/Documents/missing");
+    CHECK(missing.status_code() == sparenode::http::HttpStatusCode::not_found);
+    const auto body = dispatch_delete(router.value(), "/api/Documents/populated", "unexpected");
+    CHECK(body.status_code() == sparenode::http::HttpStatusCode::bad_request);
+    CHECK(body_text(body) == "{\"error\":\"body_not_allowed\"}");
+    CHECK(std::filesystem::exists(populated / "child.txt"));
+
+    const auto traversal_target =
+        "/api/Documents/%2E%2E/" + outside.path().filename().string() + "/retained.txt";
+    const auto traversal = dispatch_delete(router.value(), traversal_target);
+    CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
+    CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
+    CHECK(std::filesystem::exists(outside.path() / "retained.txt"));
 }
 
 TEST_CASE("Filesystem API registers multiple configured locations with segment boundaries",

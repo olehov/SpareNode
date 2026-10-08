@@ -7,6 +7,7 @@
 #include <optional>
 #include <system_error>
 
+#include "sparenode/filesystem/filesystem_entry_remover.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
 #include "sparenode/result.hpp"
 
@@ -55,6 +56,10 @@ class ConfinedDirectory final
     /// @brief Borrows the stable POSIX parent descriptor for handle-relative operations.
     /// @return Native descriptor retained by this directory context.
     [[nodiscard]] int native_handle() const noexcept;
+
+    /// @brief Borrows the stable POSIX root descriptor used by kernel confinement.
+    /// @return Native descriptor for the configured shared root.
+    [[nodiscard]] int root_native_handle() const noexcept;
 #endif
 
   private:
@@ -68,6 +73,8 @@ class ConfinedDirectory final
 
     friend Result<ConfinedDirectory, std::error_code>
     open_confined_directory(const std::filesystem::path &, const std::filesystem::path &);
+    friend Result<ConfinedDirectory, std::error_code>
+    open_confined_mutation_directory(const std::filesystem::path &, const std::filesystem::path &);
     friend std::optional<ConfinedEntryMetadata>
     read_confined_directory_entry(const ConfinedDirectory &, const std::filesystem::path &);
 };
@@ -79,6 +86,14 @@ class ConfinedDirectory final
 [[nodiscard]] Result<ConfinedDirectory, std::error_code>
 open_confined_directory(const std::filesystem::path &shared_root,
                         const std::filesystem::path &directory);
+
+/// @brief Opens a directory context that prevents or confines relocation during mutation.
+/// @param[in] shared_root Canonical filesystem boundary.
+/// @param[in] directory Validated parent used by the mutation.
+/// @return Mutation-safe directory context, or the directory-level filesystem error.
+[[nodiscard]] Result<ConfinedDirectory, std::error_code>
+open_confined_mutation_directory(const std::filesystem::path &shared_root,
+                                 const std::filesystem::path &directory);
 
 /// @brief Opens one child relative to a retained directory and reads handle-bound metadata.
 /// @param[in] directory Stable context returned by open_confined_directory.
@@ -98,5 +113,12 @@ read_confined_directory_entry(const ConfinedDirectory &directory,
 publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile &source,
                         const std::filesystem::path &native_name,
                         const TemporaryFileIoOptions &options);
+
+/// @brief Deletes one child entry without following its final link.
+/// @param[in] parent Mutation-safe context returned by open_confined_mutation_directory.
+/// @param[in] native_name Single native basename to delete.
+/// @return Success or a structured native deletion failure.
+[[nodiscard]] Result<void, FilesystemEntryRemovalError>
+remove_confined_entry(const ConfinedDirectory &parent, const std::filesystem::path &native_name);
 
 } // namespace sparenode::filesystem::detail

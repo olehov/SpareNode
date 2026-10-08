@@ -50,6 +50,7 @@ add_library(sparenode_core STATIC
     src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/directory_creator.cpp
     src/filesystem/directory_listing.cpp
+    src/filesystem/filesystem_entry_remover.cpp
     src/filesystem/safe_path.cpp
     src/filesystem/temporary_file.cpp
     src/filesystem/upload_finalizer.cpp
@@ -91,6 +92,7 @@ if(WIN32)
         src/filesystem/detail/windows_file_read_stream.cpp
         src/filesystem/detail/windows_directory_creator.cpp
         src/filesystem/detail/windows_directory_entry_reader.cpp
+        src/filesystem/detail/windows_filesystem_entry_remover.cpp
         src/filesystem/detail/windows_path_inspector.cpp
         src/filesystem/detail/windows_upload_finalizer.cpp
     )
@@ -99,6 +101,7 @@ else()
         src/filesystem/detail/linux_file_read_stream.cpp
         src/filesystem/detail/linux_directory_creator.cpp
         src/filesystem/detail/linux_directory_entry_reader.cpp
+        src/filesystem/detail/linux_filesystem_entry_remover.cpp
         src/filesystem/detail/linux_upload_finalizer.cpp
     )
 endif()

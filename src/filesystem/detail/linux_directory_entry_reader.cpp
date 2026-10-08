@@ -57,6 +57,7 @@ open_directory(const std::filesystem::path &path)
 /// @brief Holds the stable Linux parent descriptor and verified root path.
 struct ConfinedDirectory::Implementation
 {
+    FileDescriptor root;               ///< Root used to constrain destructive operations.
     FileDescriptor directory;          ///< Parent used for every relative entry open.
     std::filesystem::path shared_root; ///< Root path resolved from its stable descriptor.
 };
@@ -74,6 +75,12 @@ ConfinedDirectory::~ConfinedDirectory() = default;
 int ConfinedDirectory::native_handle() const noexcept
 {
     return implementation_->directory.get();
+}
+
+/// @brief Returns the retained shared-root descriptor for kernel confinement.
+int ConfinedDirectory::root_native_handle() const noexcept
+{
+    return implementation_->root.get();
 }
 
 /// @brief Opens a POSIX directory whose descriptor path remains inside the shared root.
@@ -112,8 +119,17 @@ open_confined_directory(const std::filesystem::path &shared_root,
     }
     auto implementation =
         std::make_unique<ConfinedDirectory::Implementation>(ConfinedDirectory::Implementation{
-            std::move(directory_descriptor).value(), std::move(stable_root).value()});
+            std::move(root_descriptor).value(), std::move(directory_descriptor).value(),
+            std::move(stable_root).value()});
     return ConfinedDirectory(std::move(implementation));
+}
+
+/// @brief Opens a Linux mutation context whose root descriptor can anchor Landlock.
+Result<ConfinedDirectory, std::error_code>
+open_confined_mutation_directory(const std::filesystem::path &shared_root,
+                                 const std::filesystem::path &directory)
+{
+    return open_confined_directory(shared_root, directory);
 }
 
 /// @brief Opens one child relative to a stable parent and reads only handle-bound metadata.

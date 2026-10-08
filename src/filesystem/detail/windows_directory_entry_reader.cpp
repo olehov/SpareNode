@@ -18,6 +18,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <winioctl.h>
 #include <winternl.h>
 
 namespace sparenode::filesystem::detail
@@ -27,13 +28,22 @@ namespace
 
 /// @brief Opens a filesystem object with optional final reparse traversal suppression.
 [[nodiscard]] Result<UniqueWindowsHandle, std::error_code>
-open_path(const std::filesystem::path &path, const bool open_reparse_point)
+open_path(const std::filesystem::path &path, const bool open_reparse_point,
+          const bool allow_delete_sharing = true, const bool require_oplock = false)
 {
-    constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    auto sharing = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    if (allow_delete_sharing)
+    {
+        sharing |= FILE_SHARE_DELETE;
+    }
     auto flags = FILE_FLAG_BACKUP_SEMANTICS;
     if (open_reparse_point)
     {
         flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+    if (require_oplock)
+    {
+        flags |= FILE_FLAG_OVERLAPPED | FILE_FLAG_OPEN_REQUIRING_OPLOCK;
     }
     const auto handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, sharing, nullptr,
                                     OPEN_EXISTING, flags, nullptr);
@@ -42,6 +52,67 @@ open_path(const std::filesystem::path &path, const bool open_reparse_point)
         return unexpected(last_windows_error());
     }
     return UniqueWindowsHandle(handle);
+}
+
+/// @brief Keeps one asynchronous directory oplock request alive.
+struct DirectoryOplock
+{
+    UniqueWindowsHandle directory;         ///< Owns the handle carrying the pending request.
+    REQUEST_OPLOCK_INPUT_BUFFER input{};   ///< Requested read-handle oplock level.
+    REQUEST_OPLOCK_OUTPUT_BUFFER output{}; ///< Break details populated by the filesystem.
+    OVERLAPPED operation{};                ///< Pending oplock request state.
+    UniqueWindowsHandle event;             ///< Signals an oplock break.
+    bool request_pending{};                ///< Whether the kernel still references this state.
+
+    /// @brief Cancels and drains the asynchronous request before releasing its storage.
+    ~DirectoryOplock() noexcept
+    {
+        if (!request_pending)
+        {
+            return;
+        }
+        static_cast<void>(CancelIoEx(directory.get(), &operation));
+        DWORD transferred{};
+        static_cast<void>(GetOverlappedResult(directory.get(), &operation, &transferred, TRUE));
+    }
+
+    /// @brief Borrows the directory handle protected by this oplock.
+    [[nodiscard]] HANDLE native_handle() const noexcept
+    {
+        return directory.get();
+    }
+};
+
+/// @brief Requests a read-handle oplock that blocks directory and ancestor relocation.
+[[nodiscard]] Result<std::unique_ptr<DirectoryOplock>, std::error_code>
+request_directory_oplock(UniqueWindowsHandle directory)
+{
+    const auto event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (event == nullptr)
+    {
+        return unexpected(last_windows_error());
+    }
+    auto oplock = std::make_unique<DirectoryOplock>();
+    oplock->directory = std::move(directory);
+    oplock->event = UniqueWindowsHandle(event);
+    oplock->input.StructureVersion = REQUEST_OPLOCK_CURRENT_VERSION;
+    oplock->input.StructureLength = sizeof(oplock->input);
+    oplock->input.RequestedOplockLevel = OPLOCK_LEVEL_CACHE_READ | OPLOCK_LEVEL_CACHE_HANDLE;
+    oplock->input.Flags = REQUEST_OPLOCK_INPUT_FLAG_REQUEST;
+    oplock->output.StructureVersion = REQUEST_OPLOCK_CURRENT_VERSION;
+    oplock->output.StructureLength = sizeof(oplock->output);
+    oplock->operation.hEvent = oplock->event.get();
+    const auto requested = DeviceIoControl(oplock->directory.get(), FSCTL_REQUEST_OPLOCK,
+                                           &oplock->input, sizeof(oplock->input), &oplock->output,
+                                           sizeof(oplock->output), nullptr, &oplock->operation);
+    if (requested == FALSE && GetLastError() == ERROR_IO_PENDING)
+    {
+        oplock->request_pending = true;
+        return oplock;
+    }
+    return unexpected(requested == FALSE
+                          ? last_windows_error()
+                          : std::make_error_code(std::errc::operation_not_supported));
 }
 
 /// @brief Opens one basename relative to a retained directory handle.
@@ -126,8 +197,15 @@ classify_entry(const FILE_ATTRIBUTE_TAG_INFO &link_information,
 /// @brief Holds the stable Windows parent handle and verified root path.
 struct ConfinedDirectory::Implementation
 {
-    UniqueWindowsHandle directory;     ///< Parent used for every relative entry open.
-    std::filesystem::path shared_root; ///< Root path resolved from its stable handle.
+    std::unique_ptr<DirectoryOplock> oplock; ///< Optional relocation barrier.
+    UniqueWindowsHandle directory;           ///< Parent when no relocation barrier is required.
+    std::filesystem::path shared_root;       ///< Root path resolved from its stable handle.
+
+    /// @brief Borrows the parent handle from its applicable owner.
+    [[nodiscard]] HANDLE native_handle() const noexcept
+    {
+        return oplock ? oplock->native_handle() : directory.get();
+    }
 };
 
 ConfinedDirectory::ConfinedDirectory(std::unique_ptr<Implementation> implementation) noexcept
@@ -142,7 +220,7 @@ ConfinedDirectory::~ConfinedDirectory() = default;
 /// @brief Returns the retained parent handle for relative operations.
 void *ConfinedDirectory::native_handle() const noexcept
 {
-    return implementation_->directory.get();
+    return implementation_->native_handle();
 }
 
 /// @brief Opens a Windows directory whose final handle path remains inside the shared root.
@@ -183,7 +261,55 @@ open_confined_directory(const std::filesystem::path &shared_root,
 
     auto implementation =
         std::make_unique<ConfinedDirectory::Implementation>(ConfinedDirectory::Implementation{
-            std::move(directory_handle).value(), std::move(stable_root).value()});
+            nullptr, std::move(directory_handle).value(), std::move(stable_root).value()});
+    return ConfinedDirectory(std::move(implementation));
+}
+
+/// @brief Opens a Windows mutation parent under an oplock that blocks ancestor relocation.
+Result<ConfinedDirectory, std::error_code>
+open_confined_mutation_directory(const std::filesystem::path &shared_root,
+                                 const std::filesystem::path &directory)
+{
+    auto directory_handle = open_path(directory, false, true, true);
+    if (!directory_handle)
+    {
+        return unexpected(directory_handle.error());
+    }
+    auto oplock = request_directory_oplock(std::move(directory_handle).value());
+    if (!oplock)
+    {
+        return unexpected(oplock.error());
+    }
+
+    auto root_handle = open_path(shared_root, false);
+    if (!root_handle)
+    {
+        return unexpected(root_handle.error());
+    }
+    auto stable_root = query_final_windows_path(root_handle->get());
+    if (!stable_root)
+    {
+        return unexpected(stable_root.error());
+    }
+    if (!paths_equal(stable_root.value(), shared_root.lexically_normal()))
+    {
+        return unexpected(std::make_error_code(std::errc::operation_not_permitted));
+    }
+
+    auto stable_directory = query_final_windows_path(oplock.value()->native_handle());
+    if (!stable_directory)
+    {
+        return unexpected(stable_directory.error());
+    }
+    if (!is_within_root(stable_directory.value(), PathBoundary{stable_root.value()},
+                        windows_path_components_equal))
+    {
+        return unexpected(std::make_error_code(std::errc::operation_not_permitted));
+    }
+
+    auto implementation =
+        std::make_unique<ConfinedDirectory::Implementation>(ConfinedDirectory::Implementation{
+            std::move(oplock).value(), {}, std::move(stable_root).value()});
     return ConfinedDirectory(std::move(implementation));
 }
 
@@ -197,8 +323,8 @@ read_confined_directory_entry(const ConfinedDirectory &directory,
         return std::nullopt;
     }
     const auto &context = *directory.implementation_;
-    auto link_handle = open_relative(context.directory.get(), native_name, true);
-    auto target_handle = open_relative(context.directory.get(), native_name, false);
+    auto link_handle = open_relative(context.native_handle(), native_name, true);
+    auto target_handle = open_relative(context.native_handle(), native_name, false);
     if (!link_handle || !target_handle)
     {
         return std::optional<ConfinedEntryMetadata>{};
