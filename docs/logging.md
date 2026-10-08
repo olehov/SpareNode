@@ -84,3 +84,10 @@ directory paths, credentials, tokens, session identifiers, or file contents.
 
 File output, rotation, retention, remote shipping, metrics, and tracing remain
 outside the MVP logging scope.
+
+Authentication adds only bounded state-change audit records. A successful login
+or logout may include the authenticated principal identifier and effective client
+network address. Submitted login values, failed-attempt bodies, passwords,
+password verifiers, cookies, session identifiers, and CSRF values are excluded.
+Client addresses are treated as potentially identifying metadata, and forwarded
+addresses are accepted only through the explicit trusted-proxy policy.
