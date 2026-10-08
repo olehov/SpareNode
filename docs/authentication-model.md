@@ -130,8 +130,10 @@ SN-108. The following rules apply:
    the owner session.
 
 Malformed input returns `400 Bad Request`. Temporarily unavailable credential infrastructure fails
-closed with a generic service error. Passwords, verifier strings, session identifiers, and cookie
-values are never included in responses or logs.
+closed with `503 Service Unavailable` and the stable
+`{"error":"authentication_unavailable"}` body. The response does not distinguish provider,
+verification, or secret-source failures. Passwords, verifier strings, session identifiers, and
+cookie values are never included in responses or logs.
 
 SN-107 defines login Origin handling and the final cookie attributes. SN-108 defines when the
 transport is sufficiently protected to accept credentials.
