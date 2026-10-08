@@ -183,6 +183,29 @@ TEST_CASE("Filesystem entry removal rejects links outside the shared root",
 
 #ifdef _WIN32
 
+TEST_CASE("Rejected mutation directories release their pending oplocks",
+          "[filesystem][delete][windows][security]")
+{
+    const sparenode::test::TemporaryDirectory fixture("sparenode-delete-oplock-cleanup");
+    const auto shared = fixture.path() / "shared";
+    const auto outside = fixture.path() / "outside";
+    const auto moved_outside = fixture.path() / "moved-outside";
+    REQUIRE(std::filesystem::create_directory(shared));
+    REQUIRE(std::filesystem::create_directory(outside));
+    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    REQUIRE(root_result);
+    const auto root = std::move(root_result).value();
+
+    const auto rejected =
+        sparenode::filesystem::detail::open_confined_mutation_directory(root.path(), outside);
+    REQUIRE_FALSE(rejected);
+
+    std::error_code relocation_error;
+    std::filesystem::rename(outside, moved_outside, relocation_error);
+    REQUIRE_FALSE(relocation_error);
+    CHECK(std::filesystem::is_directory(moved_outside));
+}
+
 TEST_CASE("Filesystem entry removal deletes an internal junction instead of its target",
           "[filesystem][delete][windows][junction][security]")
 {
