@@ -223,6 +223,9 @@ SN-108 owns the complete network-exposure contract and its configuration validat
   implementation;
 - forwarding headers from an untrusted client never prove that a request used HTTPS.
 
+The implemented modes, proxy header contract, effective request context, and deployment examples
+are specified in [Authentication transport and network exposure](authentication-transport.md).
+
 SN-107 owns browser-origin, CSRF, credentialed CORS, security-header, and untrusted inline-preview
 controls. SN-044 owns bounded login throttling and recovery from temporary lockout. These controls
 are required independently; authentication, TLS, CSRF protection, and rate limiting do not replace

@@ -1,8 +1,10 @@
 # SpareNode persistent configuration format example.
 # Start SpareNode with: sparenode --config /path/to/spnode.conf
 server {
-    bind "0.0.0.0";
+    # Safe default: direct HTTP is reachable only from this host.
+    bind "127.0.0.1";
     port 8080;
+    transport_mode "loopback_http";
     multithreading true;
     worker_threads 4;
     log_level "info";

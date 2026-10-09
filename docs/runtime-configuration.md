@@ -22,6 +22,7 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - the multithreading switch and configured worker count;
 - the minimum `logging::LogSeverity`;
 - grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
+- an immutable `HttpTransportPolicy` defining the direct-peer and HTTPS trust boundary;
 - an immutable MIME type registry loaded once from the optional external mapping file;
 - an ordered collection of `runtime::LocationConfig` values.
 
@@ -40,8 +41,10 @@ Omitted directives map to these values:
 
 | Setting | Runtime value |
 | --- | --- |
-| bind | `0.0.0.0` |
+| bind | `127.0.0.1` |
 | port | `8080` |
+| transport mode | `loopback_http` |
+| trusted proxy | none |
 | multithreading | `false` |
 | worker threads | `1` |
 | log level | `info` |
