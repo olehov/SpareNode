@@ -76,7 +76,13 @@ TEST_CASE("Direct HTTP modes derive identity only from the socket peer", "[http]
         CHECK(context->client_address == "192.0.2.44");
         CHECK_FALSE(context->secure);
         CHECK_FALSE(context->trusted_proxy);
+        CHECK(sparenode::http::http_transport_allows_peer(policy, {"fe80::1%3", 1234}));
         CHECK_FALSE(sparenode::http::http_transport_allows_peer(policy, {"not-an-ip", 1234}));
+        CHECK_FALSE(sparenode::http::http_transport_allows_peer(policy, {"192.0.2.44%3", 1234}));
+        CHECK_FALSE(sparenode::http::http_transport_allows_peer(policy, {"fe80::1%", 1234}));
+        CHECK_FALSE(sparenode::http::http_transport_allows_peer(policy, {"fe80::1%eth0", 1234}));
+        CHECK_FALSE(
+            sparenode::http::http_transport_allows_peer(policy, {"fe80::1%4294967296", 1234}));
     }
 }
 
@@ -115,6 +121,8 @@ TEST_CASE("Trusted proxy mode requires one HTTPS scheme and one numeric client",
     check_error("X-Forwarded-Proto: https\r\nX-Forwarded-For: 192.0.2.8, 198.51.100.4\r\n",
                 Code::invalid_forwarded_client);
     check_error("X-Forwarded-Proto: https\r\nX-Forwarded-For: client.example\r\n",
+                Code::invalid_forwarded_client);
+    check_error("X-Forwarded-Proto: https\r\nX-Forwarded-For: fe80::1%3\r\n",
                 Code::invalid_forwarded_client);
 
     constexpr std::string_view valid_source =

@@ -311,9 +311,9 @@ TEST_CASE("Trusted proxy session closes every other direct peer before request p
 TEST_CASE("HTTP connection session fails closed on invalid trusted proxy metadata",
           "[http][session][integration][transport]")
 {
-    const auto scenario =
-        GENERATE(std::pair{"X-Forwarded-For: 192.0.2.25\r\n", "400"},
-                 std::pair{"X-Forwarded-Proto: http\r\nX-Forwarded-For: 192.0.2.25\r\n", "403"});
+    const auto scenario = GENERATE(
+        std::pair{"X-Forwarded-For: 192.0.2.25\r\n", "400 Bad Request"},
+        std::pair{"X-Forwarded-Proto: http\r\nX-Forwarded-For: 192.0.2.25\r\n", "403 Forbidden"});
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     const sparenode::http::HttpConnectionHandlerConfig config{
@@ -325,7 +325,7 @@ TEST_CASE("HTTP connection session fails closed on invalid trusted proxy metadat
     pair.client.shutdown_send();
     REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config));
     CHECK(receive_until_closed(pair.client)
-              .starts_with("HTTP/1.1 " + std::string(scenario.second) + ' '));
+              .starts_with("HTTP/1.1 " + std::string(scenario.second) + "\r\n"));
 }
 
 TEST_CASE("HTTP connection session returns a bounded parser error response",
