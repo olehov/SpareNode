@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include <cstdint>
 #include <string_view>
 
 #include "sparenode/http/detail/ascii.hpp"
@@ -66,6 +68,35 @@ struct ParsedIpAddress
     return std::nullopt;
 }
 
+/// @brief Accepts a numeric socket peer, including a numeric IPv6 scope identifier.
+/// @param[in] text Address produced from an accepted native socket endpoint.
+/// @return `true` for plain numeric IP addresses or scoped numeric IPv6 addresses.
+[[nodiscard]] bool is_numeric_socket_peer_address(const std::string_view text) noexcept
+{
+    if (parse_ip_address(text).has_value())
+    {
+        return true;
+    }
+
+    const auto separator = text.find('%');
+    if (separator == std::string_view::npos || separator == 0 || separator + 1 == text.size() ||
+        text.find('%', separator + 1) != std::string_view::npos)
+    {
+        return false;
+    }
+
+    const auto parsed_address = parse_ip_address(text.substr(0, separator));
+    if (!parsed_address.has_value() || parsed_address->family != AF_INET6)
+    {
+        return false;
+    }
+
+    const auto scope = text.substr(separator + 1);
+    std::uint32_t scope_id{};
+    const auto [end, error] = std::from_chars(scope.data(), scope.data() + scope.size(), scope_id);
+    return error == std::errc{} && end == scope.data() + scope.size();
+}
+
 /// @brief Reports whether one numeric address belongs to the host loopback range.
 [[nodiscard]] bool is_loopback_address(const std::string_view address) noexcept
 {
@@ -112,7 +143,7 @@ bool http_transport_allows_peer(const HttpTransportPolicy &policy,
     case HttpTransportMode::loopback_http:
         return is_loopback_address(peer.address);
     case HttpTransportMode::trusted_lan_http:
-        return parse_ip_address(peer.address).has_value();
+        return is_numeric_socket_peer_address(peer.address);
     case HttpTransportMode::trusted_proxy_https:
     {
         if (!policy.trusted_proxy)

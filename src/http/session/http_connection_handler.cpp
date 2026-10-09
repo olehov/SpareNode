@@ -142,6 +142,8 @@ request_error_status(const detail::BufferedRequestError &error) noexcept
     {
     case HttpStatusCode::bad_request:
         return "Bad Request";
+    case HttpStatusCode::forbidden:
+        return "Forbidden";
     case HttpStatusCode::expectation_failed:
         return "Expectation Failed";
     case HttpStatusCode::content_too_large:
