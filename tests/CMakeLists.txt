@@ -34,6 +34,7 @@ add_executable(sparenode_tests
     filesystem/upload_finalizer_test.cpp
     http/api/filesystem_api_test.cpp
     http/session/http_connection_handler_test.cpp
+    http/session/http_transport_policy_test.cpp
     http/session/request_deadlines_test.cpp
     http/request/http_request_parser_test.cpp
     http/request/http_body_decoder_test.cpp

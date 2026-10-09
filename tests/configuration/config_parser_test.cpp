@@ -87,6 +87,8 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     worker_threads 4;
     log_level "debug";
     mime_types_file "mime.types";
+    transport_mode "trusted_proxy_https";
+    trusted_proxy "127.0.0.1";
     location "/api/Documents" {
         path "/srv/Documents";
         read true;
@@ -96,7 +98,7 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
 })";
 
     const auto configuration = require_configuration(input);
-    REQUIRE(configuration.server.directives.size() == 6);
+    REQUIRE(configuration.server.directives.size() == 8);
     CHECK(configuration.server.directives[0].kind ==
           sparenode::configuration::directives::ServerDirectiveKind::bind);
     CHECK(std::get<std::string>(configuration.server.directives[0].value.scalar) == "127.0.0.1");
@@ -107,6 +109,13 @@ TEST_CASE("Configuration parser creates typed values for the complete grammar",
     CHECK(configuration.server.directives[5].kind ==
           sparenode::configuration::directives::ServerDirectiveKind::mime_types_file);
     CHECK(std::get<std::string>(configuration.server.directives[5].value.scalar) == "mime.types");
+    CHECK(configuration.server.directives[6].kind ==
+          sparenode::configuration::directives::ServerDirectiveKind::transport_mode);
+    CHECK(std::get<std::string>(configuration.server.directives[6].value.scalar) ==
+          "trusted_proxy_https");
+    CHECK(configuration.server.directives[7].kind ==
+          sparenode::configuration::directives::ServerDirectiveKind::trusted_proxy);
+    CHECK(std::get<std::string>(configuration.server.directives[7].value.scalar) == "127.0.0.1");
 
     REQUIRE(configuration.server.locations.size() == 1);
     const auto &location = configuration.server.locations.front();
@@ -251,6 +260,17 @@ TEST_CASE("Configuration parser rejects unexpected names nesting and value types
     {
         const auto error =
             require_parser_error("server { mime_types_file \"mime.types\" \"mime1.types\"; }");
+        CHECK(sparenode::test::require_optional(error.expected) ==
+              ConfigParserExpectation::semicolon);
+        CHECK(sparenode::test::require_optional(error.actual_token_kind) ==
+              ConfigTokenKind::string_literal);
+    }
+
+    SECTION("multiple transport values")
+    {
+        const std::string directive = GENERATE("transport_mode", "trusted_proxy");
+        const auto error =
+            require_parser_error("server { " + directive + " \"first\" \"second\"; }");
         CHECK(sparenode::test::require_optional(error.expected) ==
               ConfigParserExpectation::semicolon);
         CHECK(sparenode::test::require_optional(error.actual_token_kind) ==

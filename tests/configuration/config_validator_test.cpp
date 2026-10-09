@@ -203,6 +203,89 @@ TEST_CASE("Configuration validator enforces worker thread relationships",
     }
 }
 
+TEST_CASE("Configuration validator enforces authentication transport boundaries",
+          "[configuration][validator][transport]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-transport-validator");
+
+    SECTION("safe default and explicit loopback addresses")
+    {
+        auto defaults = sparenode::configuration::ConfigValidator::validate(
+            parse_configuration(make_configuration(directory.path())));
+        CHECK(defaults.has_value());
+
+        auto ipv4_range = sparenode::configuration::ConfigValidator::validate(
+            parse_configuration(make_configuration(directory.path(), "bind \"127.20.30.40\";\n")));
+        CHECK(ipv4_range.has_value());
+
+        auto ipv6 = sparenode::configuration::ConfigValidator::validate(
+            parse_configuration(make_configuration(directory.path(), "bind \"::1\";\n")));
+        CHECK(ipv6.has_value());
+    }
+
+    SECTION("loopback mode rejects network-facing listeners")
+    {
+        const auto errors =
+            require_validation_errors(make_configuration(directory.path(), "bind \"0.0.0.0\";\n"));
+        CHECK(contains_error(errors, ConfigValidationErrorCode::unsafe_transport_bind));
+    }
+
+    SECTION("trusted LAN mode makes plaintext network access explicit")
+    {
+        auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), "bind \"0.0.0.0\";\n"
+                                                 "transport_mode \"trusted_lan_http\";\n")));
+        CHECK(result.has_value());
+    }
+
+    SECTION("trusted proxy mode requires one numeric proxy and a restricted listener")
+    {
+        auto accepted = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), "bind \"192.0.2.10\";\n"
+                                                 "transport_mode \"trusted_proxy_https\";\n"
+                                                 "trusted_proxy \"192.0.2.1\";\n")));
+        CHECK(accepted.has_value());
+
+        const auto missing = require_validation_errors(
+            make_configuration(directory.path(), "transport_mode \"trusted_proxy_https\";\n"));
+        CHECK(contains_error(missing, ConfigValidationErrorCode::missing_trusted_proxy));
+
+        const auto invalid = require_validation_errors(
+            make_configuration(directory.path(), "transport_mode \"trusted_proxy_https\";\n"
+                                                 "trusted_proxy \"proxy.internal\";\n"));
+        CHECK(contains_error(invalid, ConfigValidationErrorCode::invalid_trusted_proxy));
+
+        const auto wildcard = require_validation_errors(make_configuration(
+            directory.path(), "bind \"::\";\ntransport_mode \"trusted_proxy_https\";\n"
+                              "trusted_proxy \"::1\";\n"));
+        CHECK(contains_error(wildcard, ConfigValidationErrorCode::unsafe_transport_bind));
+    }
+
+    SECTION("trusted proxy is rejected in direct modes")
+    {
+        const auto loopback = require_validation_errors(
+            make_configuration(directory.path(), "trusted_proxy \"127.0.0.1\";\n"));
+        CHECK(contains_error(loopback, ConfigValidationErrorCode::unexpected_trusted_proxy));
+
+        const auto lan = require_validation_errors(
+            make_configuration(directory.path(), "transport_mode \"trusted_lan_http\";\n"
+                                                 "trusted_proxy \"192.0.2.1\";\n"));
+        CHECK(contains_error(lan, ConfigValidationErrorCode::unexpected_trusted_proxy));
+    }
+
+    SECTION("unsupported and duplicate transport directives are rejected")
+    {
+        const auto unsupported = require_validation_errors(
+            make_configuration(directory.path(), "transport_mode \"public_http\";\n"));
+        CHECK(contains_error(unsupported, ConfigValidationErrorCode::invalid_transport_mode));
+
+        const auto duplicate = require_validation_errors(
+            make_configuration(directory.path(), "transport_mode \"loopback_http\";\n"
+                                                 "transport_mode \"trusted_lan_http\";\n"));
+        CHECK(contains_error(duplicate, ConfigValidationErrorCode::duplicate_server_directive));
+    }
+}
+
 TEST_CASE("Configuration validator requires locations and rejects ambiguous paths",
           "[configuration][validator]")
 {
