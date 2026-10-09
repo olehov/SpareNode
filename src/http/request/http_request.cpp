@@ -82,6 +82,11 @@ std::vector<std::string_view> HttpRequestView::headers(const std::string_view na
     return values;
 }
 
+const HttpRequestTransportContext &HttpRequestView::transport() const noexcept
+{
+    return transport_;
+}
+
 /// @brief Converts a supported method into its canonical HTTP spelling.
 std::string_view to_string(const HttpMethod method) noexcept
 {

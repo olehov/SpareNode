@@ -20,6 +20,8 @@ enum class ServerDirectiveKind : std::uint8_t
     header_timeout_ms,  ///< Header read inactivity budget in milliseconds.
     body_timeout_ms,    ///< Body read inactivity budget in milliseconds.
     request_timeout_ms, ///< Total request receive budget in milliseconds.
+    transport_mode,     ///< Authentication transport and exposure policy string.
+    trusted_proxy,      ///< Sole numeric reverse-proxy address.
 };
 
 /// @brief Represents one syntactically valid directive inside a `server` block.

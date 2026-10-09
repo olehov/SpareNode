@@ -7,6 +7,7 @@
 #include "sparenode/configuration/runtime/location_config.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
+#include "sparenode/http/session/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 
@@ -25,15 +26,17 @@ class ServerConfig final
     /// @param[in] locations Validated filesystem locations in configuration order.
     /// @param[in] http_timeouts Validated HTTP receive budgets.
     /// @param[in] mime_types Validated immutable MIME mappings.
+    /// @param[in] transport_policy Validated peer and effective-HTTPS trust boundary.
     ServerConfig(network::TcpEndpoint endpoint, bool multithreading_enabled,
                  std::size_t worker_threads, logging::LogSeverity minimum_log_severity,
                  std::vector<LocationConfig> locations,
                  http::HttpRequestTimeouts http_timeouts = {},
-                 http::MimeTypeRegistry mime_types = {})
+                 http::MimeTypeRegistry mime_types = {},
+                 http::HttpTransportPolicy transport_policy = {})
         : endpoint_(std::move(endpoint)), multithreading_enabled_(multithreading_enabled),
           worker_threads_(worker_threads), minimum_log_severity_(minimum_log_severity),
           locations_(std::move(locations)), http_timeouts_(http_timeouts),
-          mime_types_(std::move(mime_types))
+          mime_types_(std::move(mime_types)), transport_policy_(std::move(transport_policy))
     {
     }
 
@@ -93,14 +96,22 @@ class ServerConfig final
         return mime_types_;
     }
 
+    /// @brief Returns the validated authentication transport boundary.
+    /// @return Direct loopback, explicit LAN, or trusted HTTPS proxy policy.
+    [[nodiscard]] const http::HttpTransportPolicy &transport_policy() const noexcept
+    {
+        return transport_policy_;
+    }
+
   private:
-    network::TcpEndpoint endpoint_;             ///< Numeric listener address and TCP port.
-    bool multithreading_enabled_;               ///< Enables the configured fixed worker pool.
-    std::size_t worker_threads_;                ///< Configured worker count.
-    logging::LogSeverity minimum_log_severity_; ///< Minimum emitted log severity.
-    std::vector<LocationConfig> locations_;     ///< Validated locations in configuration order.
-    http::HttpRequestTimeouts http_timeouts_;   ///< Immutable HTTP receive budgets.
-    http::MimeTypeRegistry mime_types_;         ///< Immutable response media-type mappings.
+    network::TcpEndpoint endpoint_;              ///< Numeric listener address and TCP port.
+    bool multithreading_enabled_;                ///< Enables the configured fixed worker pool.
+    std::size_t worker_threads_;                 ///< Configured worker count.
+    logging::LogSeverity minimum_log_severity_;  ///< Minimum emitted log severity.
+    std::vector<LocationConfig> locations_;      ///< Validated locations in configuration order.
+    http::HttpRequestTimeouts http_timeouts_;    ///< Immutable HTTP receive budgets.
+    http::MimeTypeRegistry mime_types_;          ///< Immutable response media-type mappings.
+    http::HttpTransportPolicy transport_policy_; ///< Immutable network exposure boundary.
 };
 
 } // namespace sparenode::configuration::runtime

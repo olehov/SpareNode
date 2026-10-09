@@ -36,6 +36,15 @@ struct HttpHeaderView
     std::string_view value; ///< Value with surrounding optional whitespace removed.
 };
 
+/// @brief Carries network identity after applying the configured proxy trust boundary.
+struct HttpRequestTransportContext
+{
+    std::string peer_address;   ///< Direct numeric TCP peer address.
+    std::string client_address; ///< Effective client address after trusted-proxy validation.
+    bool secure{};              ///< Whether the client-facing request used protected transport.
+    bool trusted_proxy{};       ///< Whether effective metadata came from the configured proxy.
+};
+
 /// @brief Borrows a complete parsed HTTP/1.1 request without copying its bytes.
 ///
 /// Metadata views remain valid only while their original input buffer remains alive,
@@ -82,6 +91,10 @@ class HttpRequestView
     /// @return Borrowed values in their original source order.
     [[nodiscard]] std::vector<std::string_view> headers(std::string_view name) const;
 
+    /// @brief Returns validated direct and effective transport metadata.
+    /// @return Context attached by the connection handler, or empty defaults for direct parsing.
+    [[nodiscard]] const HttpRequestTransportContext &transport() const noexcept;
+
   private:
     friend struct detail::HttpRequestViewAccess;
 
@@ -102,7 +115,8 @@ class HttpRequestView
     std::shared_ptr<const std::vector<std::byte>> body_storage_;  ///< Optional decoded-body owner.
     std::shared_ptr<filesystem::TemporaryFile> temporary_body_;   ///< Optional file-backed payload.
     filesystem::TemporaryFileIoOptions temporary_file_options_{}; ///< Publication I/O policy.
-    std::uint64_t body_size_{}; ///< Decoded memory or temporary-file payload bytes.
+    std::uint64_t body_size_{};             ///< Decoded memory or temporary-file payload bytes.
+    HttpRequestTransportContext transport_; ///< Validated peer, scheme, and proxy context.
 };
 
 /// @brief Returns the canonical uppercase spelling of a supported HTTP method.

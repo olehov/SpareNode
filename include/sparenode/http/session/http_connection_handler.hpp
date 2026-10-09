@@ -12,6 +12,7 @@
 #include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/http/request/request_body_ingestor.hpp"
 #include "sparenode/http/routing/http_router.hpp"
+#include "sparenode/http/session/http_transport_policy.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_io_options.hpp"
 
@@ -44,6 +45,7 @@ struct HttpConnectionHandlerConfig
     HttpRequestDeadlineProvider deadline_provider;       ///< Optional earlier per-read deadline.
     std::size_t max_drain_bytes{std::size_t{64} * 1024}; ///< Maximum extra socket bytes discarded.
     std::chrono::milliseconds drain_timeout{100};        ///< Absolute post-response drain budget.
+    HttpTransportPolicy transport_policy{}; ///< Direct/LAN/proxy request trust boundary.
 };
 
 /// @brief Handles exactly one HTTP/1.1 request on an exclusively owned connection.

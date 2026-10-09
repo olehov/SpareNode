@@ -65,7 +65,9 @@ int main(const int argc, const char *const argv[])
     const auto router =
         std::make_shared<const sparenode::http::HttpRouter>(std::move(router_result).value());
     const sparenode::http::HttpConnectionHandlerConfig handler_config{
-        .timeouts = config_result->servers().front().http_timeouts(), .deadline_provider = {}};
+        .timeouts = config_result->servers().front().http_timeouts(),
+        .deadline_provider = {},
+        .transport_policy = config_result->servers().front().transport_policy()};
     auto handler = sparenode::http::make_http_connection_handler(router, handler_config);
     auto admission = sparenode::http::make_http_connection_admission(handler_config);
     sparenode::application::RunningApplicationObservers observers{

@@ -10,6 +10,7 @@
 #include <variant>
 #include <vector>
 
+#include "sparenode/http/request/detail/http_request_view_access.hpp"
 #include "sparenode/http/response/http_response_writer.hpp"
 #include "sparenode/http/session/detail/buffered_request.hpp"
 #include "sparenode/http/session/detail/request_deadlines.hpp"
@@ -365,9 +366,10 @@ struct HttpSessionRunContext
     HttpSessionRunContext(const HttpRouter &router_value, const std::stop_token &stop_token_value,
                           const HttpConnectionHandlerConfig &config_value,
                           detail::RequestDeadlines &deadlines_value,
-                          const network::NetworkDeadline started_value) noexcept
+                          const network::NetworkDeadline started_value,
+                          const network::TcpEndpoint &peer_value) noexcept
         : router(router_value), stop_token(stop_token_value), config(config_value),
-          deadlines(deadlines_value), started(started_value)
+          deadlines(deadlines_value), started(started_value), peer(peer_value)
     {
     }
 
@@ -376,7 +378,16 @@ struct HttpSessionRunContext
     const HttpConnectionHandlerConfig &config; ///< Validated session policy.
     detail::RequestDeadlines &deadlines;       ///< Mutable receive deadline state.
     network::NetworkDeadline started;          ///< Session start for injected policies.
+    const network::TcpEndpoint &peer;          ///< Direct peer retained for transport validation.
 };
+
+/// @brief Maps trusted-proxy metadata failures to a bounded public response.
+[[nodiscard]] constexpr HttpStatusCode
+transport_error_status(const HttpTransportErrorCode code) noexcept
+{
+    return code == HttpTransportErrorCode::insecure_forwarded_scheme ? HttpStatusCode::forbidden
+                                                                     : HttpStatusCode::bad_request;
+}
 
 /// @brief Starts a fresh bounded file-publication budget after request ingestion completes.
 /// @param[in] context Active session and its validated body timeout.
@@ -448,8 +459,17 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
         }
         if (request.complete())
         {
-            return dispatch_and_respond(connection, context.router,
-                                        request.request(publication_file_options(context)),
+            auto complete_request = request.request(publication_file_options(context));
+            auto transport = resolve_http_transport(context.config.transport_policy, context.peer,
+                                                    complete_request);
+            if (!transport)
+            {
+                return send_error_response(connection, transport_error_status(transport.error()),
+                                           context.stop_token, context.config);
+            }
+            detail::HttpRequestViewAccess::set_transport(complete_request,
+                                                         std::move(transport).value());
+            return dispatch_and_respond(connection, context.router, complete_request,
                                         context.stop_token, context.config);
         }
         const auto phase =
@@ -508,11 +528,22 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
     }
     auto &deadlines = deadline_state.value();
     deadlines.record_progress(connection.last_receive_progress());
+    const auto peer = connection.peer_endpoint();
+    if (!peer.has_value())
+    {
+        return unexpected(network::NetworkError{
+            network::NetworkOperation::receive, network::NetworkErrorDomain::state,
+            error_detail(HttpSessionFailureCode::invalid_config)});
+    }
+    if (!http_transport_allows_peer(config.transport_policy, peer.value()))
+    {
+        return {};
+    }
 
     try
     {
-        return run_http_session(connection,
-                                {router, stop_token, config, deadlines, session_started});
+        return run_http_session(
+            connection, {router, stop_token, config, deadlines, session_started, peer.value()});
     }
     catch (const std::bad_alloc &)
     {

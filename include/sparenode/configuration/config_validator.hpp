@@ -27,6 +27,11 @@ enum class ConfigValidationErrorCode : std::uint8_t
     invalid_log_level,            ///< `log_level` is not a supported severity.
     invalid_mime_types_file,      ///< `mime_types_file` is empty.
     timeout_out_of_range,         ///< A receive timeout is outside 1 through 86400000 milliseconds.
+    invalid_transport_mode,       ///< `transport_mode` is not a supported deployment mode.
+    invalid_trusted_proxy,        ///< `trusted_proxy` is not one numeric IP address.
+    missing_trusted_proxy,        ///< Proxy HTTPS mode has no trusted proxy address.
+    unexpected_trusted_proxy,     ///< A trusted proxy is configured outside proxy mode.
+    unsafe_transport_bind,        ///< Listener exposure conflicts with its transport mode.
     invalid_location_path,        ///< A location argument is not a supported HTTP origin path.
     conflicting_location_path,    ///< Two location paths overlap or are duplicates.
     duplicate_location_directive, ///< A singleton location directive appears more than once.
