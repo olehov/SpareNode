@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "sparenode/http/request/http_request_timeouts.hpp"
+#include "sparenode/http/session/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 
 #ifdef _WIN32
@@ -45,6 +46,63 @@ using directives::ServerDirectiveKind;
     return inet_pton(AF_INET, value.c_str(), &ipv4) == 1 ||
            inet_pton(AF_INET6, value.c_str(), &ipv6) == 1;
 #endif
+}
+
+/// @brief Reports whether text identifies an IPv4 or IPv6 loopback address.
+[[nodiscard]] bool is_loopback_ip_address(const std::string &value) noexcept
+{
+    in_addr ipv4{};
+#ifdef _WIN32
+    if (InetPtonA(AF_INET, value.c_str(), &ipv4) == 1)
+#else
+    if (inet_pton(AF_INET, value.c_str(), &ipv4) == 1)
+#endif
+    {
+        constexpr unsigned char ipv4_loopback_prefix = 127;
+        return reinterpret_cast<const unsigned char *>(&ipv4)[0] == ipv4_loopback_prefix;
+    }
+    in6_addr ipv6{};
+#ifdef _WIN32
+    if (InetPtonA(AF_INET6, value.c_str(), &ipv6) != 1)
+#else
+    if (inet_pton(AF_INET6, value.c_str(), &ipv6) != 1)
+#endif
+    {
+        return false;
+    }
+    const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv6);
+    constexpr auto last_byte_offset = sizeof(ipv6) - 1;
+    return std::ranges::all_of(bytes, bytes + last_byte_offset,
+                               [](const unsigned char byte) { return byte == 0; }) &&
+           bytes[last_byte_offset] == 1;
+}
+
+/// @brief Reports whether text identifies an all-interface wildcard address.
+[[nodiscard]] bool is_unspecified_ip_address(const std::string &value) noexcept
+{
+    in_addr ipv4{};
+#ifdef _WIN32
+    if (InetPtonA(AF_INET, value.c_str(), &ipv4) == 1)
+#else
+    if (inet_pton(AF_INET, value.c_str(), &ipv4) == 1)
+#endif
+    {
+        const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv4);
+        return std::ranges::all_of(bytes, bytes + sizeof(ipv4),
+                                   [](const unsigned char byte) { return byte == 0; });
+    }
+    in6_addr ipv6{};
+#ifdef _WIN32
+    if (InetPtonA(AF_INET6, value.c_str(), &ipv6) != 1)
+#else
+    if (inet_pton(AF_INET6, value.c_str(), &ipv6) != 1)
+#endif
+    {
+        return false;
+    }
+    const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv6);
+    return std::ranges::all_of(bytes, bytes + sizeof(ipv6),
+                               [](const unsigned char byte) { return byte == 0; });
 }
 
 /// @brief Converts one decoded UTF-8 path value into the host filesystem representation.
@@ -166,6 +224,7 @@ class ValidationState final
             validate_server_directive(directive);
         }
         validate_threading_relationship();
+        validate_transport_relationship();
     }
 
     /// @brief Dispatches one server directive to its semantic rule.
@@ -197,6 +256,38 @@ class ValidationState final
         case ServerDirectiveKind::request_timeout_ms:
             validate_timeout(directive);
             break;
+        case ServerDirectiveKind::transport_mode:
+            validate_transport_mode(directive);
+            break;
+        case ServerDirectiveKind::trusted_proxy:
+            validate_trusted_proxy(directive);
+            break;
+        }
+    }
+
+    /// @brief Parses the explicit network-exposure mode.
+    void validate_transport_mode(const ParsedServerDirective &directive)
+    {
+        const auto parsed =
+            http::parse_http_transport_mode(std::get<std::string>(directive.value.scalar));
+        if (!parsed)
+        {
+            transport_mode_valid_ = false;
+            add_server_error(ConfigValidationErrorCode::invalid_transport_mode, directive,
+                             directive.value.location);
+            return;
+        }
+        transport_mode_ = parsed.value();
+    }
+
+    /// @brief Requires one numeric address for the sole trusted reverse proxy.
+    void validate_trusted_proxy(const ParsedServerDirective &directive)
+    {
+        trusted_proxy_directive_ = &directive;
+        if (!is_numeric_ip_address(std::get<std::string>(directive.value.scalar)))
+        {
+            add_server_error(ConfigValidationErrorCode::invalid_trusted_proxy, directive,
+                             directive.value.location);
         }
     }
 
@@ -217,10 +308,56 @@ class ValidationState final
     void validate_bind(const ParsedServerDirective &directive)
     {
         const auto &address = std::get<std::string>(directive.value.scalar);
+        bind_address_ = address;
+        bind_directive_ = &directive;
         if (!is_numeric_ip_address(address))
         {
             add_server_error(ConfigValidationErrorCode::invalid_bind_address, directive,
                              directive.value.location);
+        }
+    }
+
+    /// @brief Enforces safe listener and trusted-proxy combinations.
+    void validate_transport_relationship()
+    {
+        if (!transport_mode_valid_)
+        {
+            return;
+        }
+        if (transport_mode_ == http::HttpTransportMode::loopback_http)
+        {
+            if (!is_loopback_ip_address(bind_address_) && bind_directive_ != nullptr)
+            {
+                add_server_error(ConfigValidationErrorCode::unsafe_transport_bind, *bind_directive_,
+                                 bind_directive_->value.location);
+            }
+            if (trusted_proxy_directive_ != nullptr)
+            {
+                add_server_error(ConfigValidationErrorCode::unexpected_trusted_proxy,
+                                 *trusted_proxy_directive_);
+            }
+            return;
+        }
+        if (transport_mode_ == http::HttpTransportMode::trusted_lan_http)
+        {
+            if (trusted_proxy_directive_ != nullptr)
+            {
+                add_server_error(ConfigValidationErrorCode::unexpected_trusted_proxy,
+                                 *trusted_proxy_directive_);
+            }
+            return;
+        }
+        if (trusted_proxy_directive_ == nullptr)
+        {
+            ConfigValidationError error{ConfigValidationErrorCode::missing_trusted_proxy,
+                                        configuration_.server.closing_brace_location};
+            error.server_directive = ServerDirectiveKind::trusted_proxy;
+            errors_.push_back(std::move(error));
+        }
+        if (is_unspecified_ip_address(bind_address_) && bind_directive_ != nullptr)
+        {
+            add_server_error(ConfigValidationErrorCode::unsafe_transport_bind, *bind_directive_,
+                             bind_directive_->value.location);
         }
     }
 
@@ -424,6 +561,11 @@ class ValidationState final
     bool multithreading_enabled_{false};
     std::uint64_t worker_threads_{};
     const ParsedServerDirective *worker_threads_directive_{};
+    std::string bind_address_{"127.0.0.1"};
+    http::HttpTransportMode transport_mode_{http::HttpTransportMode::loopback_http};
+    bool transport_mode_valid_{true};
+    const ParsedServerDirective *bind_directive_{};
+    const ParsedServerDirective *trusted_proxy_directive_{};
 };
 
 } // namespace
@@ -499,6 +641,17 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
         return "mime_types_file must not be empty";
     case ConfigValidationErrorCode::timeout_out_of_range:
         return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
+    case ConfigValidationErrorCode::invalid_transport_mode:
+        return "transport_mode is not supported";
+    case ConfigValidationErrorCode::invalid_trusted_proxy:
+        return "trusted_proxy must be one numeric IPv4 or IPv6 address";
+    case ConfigValidationErrorCode::missing_trusted_proxy:
+        return "trusted_proxy is required in trusted_proxy_https mode";
+    case ConfigValidationErrorCode::unexpected_trusted_proxy:
+        return "trusted_proxy requires trusted_proxy_https mode";
+    case ConfigValidationErrorCode::unsafe_transport_bind:
+        return "bind must be loopback in loopback_http mode and non-wildcard in "
+               "trusted_proxy_https mode";
     case ConfigValidationErrorCode::invalid_location_path:
         return "location must be a supported absolute HTTP path";
     case ConfigValidationErrorCode::conflicting_location_path:

@@ -1,5 +1,6 @@
 #include "sparenode/configuration/config_parser.hpp"
 
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <optional>
@@ -316,41 +317,26 @@ class ParserState final
     [[nodiscard]] static std::optional<directives::ServerDirectiveKind>
     server_directive_kind(const std::string_view name) noexcept
     {
-        if (name == "bind")
+        using Kind = directives::ServerDirectiveKind;
+        constexpr std::array mappings{
+            std::pair{std::string_view{"bind"}, Kind::bind},
+            std::pair{std::string_view{"port"}, Kind::port},
+            std::pair{std::string_view{"multithreading"}, Kind::multithreading},
+            std::pair{std::string_view{"worker_threads"}, Kind::worker_threads},
+            std::pair{std::string_view{"header_timeout_ms"}, Kind::header_timeout_ms},
+            std::pair{std::string_view{"body_timeout_ms"}, Kind::body_timeout_ms},
+            std::pair{std::string_view{"request_timeout_ms"}, Kind::request_timeout_ms},
+            std::pair{std::string_view{"log_level"}, Kind::log_level},
+            std::pair{std::string_view{"mime_types_file"}, Kind::mime_types_file},
+            std::pair{std::string_view{"transport_mode"}, Kind::transport_mode},
+            std::pair{std::string_view{"trusted_proxy"}, Kind::trusted_proxy},
+        };
+        for (const auto &[mapping_name, kind] : mappings)
         {
-            return directives::ServerDirectiveKind::bind;
-        }
-        if (name == "port")
-        {
-            return directives::ServerDirectiveKind::port;
-        }
-        if (name == "multithreading")
-        {
-            return directives::ServerDirectiveKind::multithreading;
-        }
-        if (name == "worker_threads")
-        {
-            return directives::ServerDirectiveKind::worker_threads;
-        }
-        if (name == "header_timeout_ms")
-        {
-            return directives::ServerDirectiveKind::header_timeout_ms;
-        }
-        if (name == "body_timeout_ms")
-        {
-            return directives::ServerDirectiveKind::body_timeout_ms;
-        }
-        if (name == "request_timeout_ms")
-        {
-            return directives::ServerDirectiveKind::request_timeout_ms;
-        }
-        if (name == "log_level")
-        {
-            return directives::ServerDirectiveKind::log_level;
-        }
-        if (name == "mime_types_file")
-        {
-            return directives::ServerDirectiveKind::mime_types_file;
+            if (name == mapping_name)
+            {
+                return kind;
+            }
         }
         return std::nullopt;
     }
@@ -391,6 +377,8 @@ class ParserState final
         case directives::ServerDirectiveKind::bind:
         case directives::ServerDirectiveKind::log_level:
         case directives::ServerDirectiveKind::mime_types_file:
+        case directives::ServerDirectiveKind::transport_mode:
+        case directives::ServerDirectiveKind::trusted_proxy:
             return ConfigParserExpectation::string_literal;
         case directives::ServerDirectiveKind::port:
         case directives::ServerDirectiveKind::worker_threads:

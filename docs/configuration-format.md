@@ -12,10 +12,11 @@ support includes, substitutions, expressions, or executable statements.
 ## Complete example
 
 ```conf
-# SpareNode listens on every IPv4 interface on port 8080.
+# SpareNode accepts direct HTTP only from this host on port 8080.
 server {
-    bind "0.0.0.0";
+    bind "127.0.0.1";
     port 8080;
+    transport_mode "loopback_http";
     multithreading true;
     worker_threads 4;
     log_level "info";
@@ -76,9 +77,9 @@ identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 
 Version 1 reserves `server`, `location`, `bind`, `port`, `multithreading`,
 `worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
-`request_timeout_ms`, `mime_types_file`, `path`, `read`, `write`, `delete`, `true`, and
-`false` according to their grammatical positions. Keywords must be written in
-lowercase.
+`request_timeout_ms`, `mime_types_file`, `transport_mode`, `trusted_proxy`, `path`,
+`read`, `write`, `delete`, `true`, and `false` according to their grammatical
+positions. Keywords must be written in lowercase.
 
 ### Strings
 
@@ -138,6 +139,8 @@ server-item              = bind-directive
                          | header-timeout-directive
                          | body-timeout-directive
                          | request-timeout-directive
+                         | transport-mode-directive
+                         | trusted-proxy-directive
                          | location-block ;
 
 bind-directive           = "bind", string, ";" ;
@@ -149,6 +152,8 @@ mime-types-file-directive = "mime_types_file", string, ";" ;
 header-timeout-directive = "header_timeout_ms", integer, ";" ;
 body-timeout-directive   = "body_timeout_ms", integer, ";" ;
 request-timeout-directive = "request_timeout_ms", integer, ";" ;
+transport-mode-directive = "transport_mode", string, ";" ;
+trusted-proxy-directive  = "trusted_proxy", string, ";" ;
 
 location-block              = "location", string, "{", { location-directive }, "}" ;
 location-directive          = path-directive
@@ -176,8 +181,10 @@ prefix for that filesystem root.
 
 | Directive | Cardinality | Default | Semantic requirement |
 |---|---:|---|---|
-| `bind` | zero or one | `"0.0.0.0"` | Numeric IPv4 or IPv6 address |
+| `bind` | zero or one | `"127.0.0.1"` | Numeric IPv4 or IPv6 address permitted by the transport mode |
 | `port` | zero or one | `8080` | Decimal value from 1 through 65535 |
+| `transport_mode` | zero or one | `"loopback_http"` | One of `"loopback_http"`, `"trusted_lan_http"`, or `"trusted_proxy_https"` |
+| `trusted_proxy` | conditional | none | One numeric IPv4 or IPv6 address, required only in `trusted_proxy_https` mode |
 | `multithreading` | zero or one | `false` | Enables the configured worker pool when `true` |
 | `worker_threads` | conditional | none | Required with `multithreading true`; integer from 2 through 64 |
 | `log_level` | zero or one | `"info"` | One of `"debug"`, `"info"`, `"warning"`, or `"error"` |
@@ -189,6 +196,13 @@ prefix for that filesystem root.
 
 Hostnames are not accepted by `bind` in version 1. IPv6 addresses remain quoted
 strings, for example `bind "::";` or `bind "::1";`.
+
+The default `loopback_http` mode accepts only loopback bind and peer addresses.
+`trusted_lan_http` explicitly permits plaintext HTTP on a network-facing bind and ignores
+forwarding headers. `trusted_proxy_https` accepts requests only from the exact configured
+`trusted_proxy`, requires validated HTTPS forwarding metadata, and rejects wildcard bind
+addresses. See [Authentication transport and network exposure](authentication-transport.md)
+for the threat assumptions, proxy contract, and deployment examples.
 
 An absolute `mime_types_file` path is used directly. A relative path is resolved
 from the directory containing `spnode.conf`. The file is loaded once before
@@ -325,6 +339,9 @@ The last example contains unsupported `\S`; it must use
 Semantic errors are also fatal, including port `0`, an unsupported log level,
 an invalid location API path, an empty filesystem path, or a path that does not identify an
 acceptable directory on the host platform.
+
+Unsafe transport combinations are also fatal. For example, the default loopback mode cannot
+be combined with `bind "0.0.0.0";`, and proxy mode cannot omit `trusted_proxy`.
 
 A threading configuration is invalid when the switch and count disagree:
 

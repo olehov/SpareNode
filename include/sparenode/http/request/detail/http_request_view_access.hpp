@@ -7,6 +7,14 @@ namespace sparenode::http::detail
 /// @brief Constructs immutable views after validated head and body ingestion.
 struct HttpRequestViewAccess
 {
+    /// @brief Attaches connection-owned transport metadata before route dispatch.
+    /// @param[in,out] request Complete request receiving validated context.
+    /// @param[in] context Direct and effective peer metadata.
+    static void set_transport(HttpRequestView &request, HttpRequestTransportContext context)
+    {
+        request.transport_ = std::move(context);
+    }
+
     /// @brief Combines validated metadata with complete decoded body storage.
     /// @param[in] head Validated metadata whose source remains alive.
     /// @param[in] body Complete payload borrowed for the request lifetime.

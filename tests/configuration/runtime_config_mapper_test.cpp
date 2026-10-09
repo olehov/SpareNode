@@ -12,6 +12,7 @@
 #include "sparenode/configuration/runtime_config_mapper.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
+#include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
 namespace
@@ -60,7 +61,7 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
 
     REQUIRE(runtime_config.servers().size() == 1);
     const auto &server = runtime_config.servers().front();
-    CHECK(server.endpoint() == sparenode::network::TcpEndpoint{"0.0.0.0", 8080});
+    CHECK(server.endpoint() == sparenode::network::TcpEndpoint{"127.0.0.1", 8080});
     CHECK_FALSE(server.multithreading_enabled());
     CHECK(server.worker_threads() == 1);
     CHECK(server.effective_worker_count() == 1);
@@ -68,6 +69,8 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
     CHECK(server.http_timeouts().headers == std::chrono::seconds{10});
     CHECK(server.http_timeouts().body == std::chrono::seconds{10});
     CHECK(server.http_timeouts().total == std::chrono::seconds{30});
+    CHECK(server.transport_policy().mode == sparenode::http::HttpTransportMode::loopback_http);
+    CHECK_FALSE(server.transport_policy().trusted_proxy.has_value());
     REQUIRE(server.locations().size() == 1);
     CHECK(server.locations().front().api_path() == "/api/Documents");
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
@@ -83,7 +86,9 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
         make_configuration(directory.path(),
                            "bind \"::1\";\nport 8443;\nmultithreading true;\nworker_threads 8;\n"
                            "log_level \"warning\";\nheader_timeout_ms 1500;\n"
-                           "body_timeout_ms 2500;\nrequest_timeout_ms 90000;\n",
+                           "body_timeout_ms 2500;\nrequest_timeout_ms 90000;\n"
+                           "transport_mode \"trusted_proxy_https\";\n"
+                           "trusted_proxy \"::1\";\n",
                            "read false;\nwrite true;\ndelete true;\n");
     const auto validated = validate_configuration(input);
 
@@ -99,6 +104,9 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1500});
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2500});
     CHECK(server.http_timeouts().total == std::chrono::seconds{90});
+    CHECK(server.transport_policy().mode ==
+          sparenode::http::HttpTransportMode::trusted_proxy_https);
+    CHECK(sparenode::test::require_optional(server.transport_policy().trusted_proxy) == "::1");
     REQUIRE(server.locations().size() == 1);
     CHECK(server.locations().front().permissions() ==
           sparenode::configuration::runtime::LocationPermissions{false, true, true});

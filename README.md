@@ -136,6 +136,10 @@ The bounded [HTTP request parser](docs/http-request-parser.md) validates the
 supported HTTP/1.1 request subset without owning request bytes. Outgoing messages
 use the [HTTP response and streaming layer](docs/http-response.md), which supports
 validated in-memory responses and fixed-buffer incremental body transmission.
+Network exposure is controlled by the
+[authentication transport policy](docs/authentication-transport.md). The safe
+default listens on loopback; public Internet access requires HTTPS through one
+explicitly trusted reverse proxy.
 
 ## Authentication
 

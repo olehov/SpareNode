@@ -246,6 +246,88 @@ TEST_CASE("HTTP connection session reads incrementally routes and writes a respo
           "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
+TEST_CASE("HTTP connection session attaches metadata from its sole trusted HTTPS proxy",
+          "[http][session][integration][transport]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::get, "/api/status",
+                                  [](const sparenode::http::HttpRequestView &request,
+                                     const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      CHECK(request.transport().peer_address == "127.0.0.1");
+                                      CHECK(request.transport().client_address == "192.0.2.25");
+                                      CHECK(request.transport().secure);
+                                      CHECK(request.transport().trusted_proxy);
+                                      return ok_response();
+                                  }));
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .deadline_provider = {},
+        .transport_policy = {sparenode::http::HttpTransportMode::trusted_proxy_https, "127.0.0.1"}};
+
+    send_all(pair.client, "GET /api/status HTTP/1.1\r\nHost: local\r\n"
+                          "X-Forwarded-Proto: https\r\nX-Forwarded-For: 192.0.2.25\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config));
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+TEST_CASE("Direct loopback session ignores spoofed proxy metadata",
+          "[http][session][integration][transport]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    REQUIRE(router.register_route(sparenode::http::HttpMethod::get, "/api/status",
+                                  [](const sparenode::http::HttpRequestView &request,
+                                     const sparenode::http::HttpRouteParameters &)
+                                  {
+                                      CHECK(request.transport().peer_address == "127.0.0.1");
+                                      CHECK(request.transport().client_address == "127.0.0.1");
+                                      CHECK_FALSE(request.transport().secure);
+                                      CHECK_FALSE(request.transport().trusted_proxy);
+                                      return ok_response();
+                                  }));
+
+    send_all(pair.client, "GET /api/status HTTP/1.1\r\nHost: local\r\n"
+                          "X-Forwarded-Proto: https\r\nX-Forwarded-For: 192.0.2.25\r\n\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}));
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+TEST_CASE("Trusted proxy session closes every other direct peer before request processing",
+          "[http][session][integration][transport]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .deadline_provider = {},
+        .transport_policy = {sparenode::http::HttpTransportMode::trusted_proxy_https, "127.0.0.2"}};
+
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config));
+    CHECK(pair.client.peer_closes_within(std::chrono::seconds{1}));
+}
+
+TEST_CASE("HTTP connection session fails closed on invalid trusted proxy metadata",
+          "[http][session][integration][transport]")
+{
+    const auto scenario = GENERATE(
+        std::pair{"X-Forwarded-For: 192.0.2.25\r\n", "400 Bad Request"},
+        std::pair{"X-Forwarded-Proto: http\r\nX-Forwarded-For: 192.0.2.25\r\n", "403 Forbidden"});
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .deadline_provider = {},
+        .transport_policy = {sparenode::http::HttpTransportMode::trusted_proxy_https, "127.0.0.1"}};
+
+    send_all(pair.client,
+             "GET / HTTP/1.1\r\nHost: local\r\n" + std::string(scenario.first) + "\r\n");
+    pair.client.shutdown_send();
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router, {}, config));
+    CHECK(receive_until_closed(pair.client)
+              .starts_with("HTTP/1.1 " + std::string(scenario.second) + "\r\n"));
+}
+
 TEST_CASE("HTTP connection session returns a bounded parser error response",
           "[http][session][integration][error]")
 {

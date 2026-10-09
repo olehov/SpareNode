@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <string>
 #include <utility>
 #include <variant>
@@ -22,11 +23,12 @@ using directives::ServerDirectiveKind;
 /// @brief Holds mapper-local server values before immutable runtime construction.
 struct ServerValues
 {
-    http::HttpRequestTimeouts http_timeouts{};      ///< Default HTTP receive budgets.
-    network::TcpEndpoint endpoint{"0.0.0.0", 8080}; ///< Default listener endpoint.
-    bool multithreading_enabled{false};             ///< Default single-worker switch.
-    std::size_t worker_threads{1};                  ///< Default worker count.
+    http::HttpRequestTimeouts http_timeouts{};        ///< Default HTTP receive budgets.
+    network::TcpEndpoint endpoint{"127.0.0.1", 8080}; ///< Safe default listener endpoint.
+    bool multithreading_enabled{false};               ///< Default single-worker switch.
+    std::size_t worker_threads{1};                    ///< Default worker count.
     logging::LogSeverity minimum_log_severity{logging::LogSeverity::info}; ///< Default threshold.
+    http::HttpTransportPolicy transport_policy{}; ///< Default loopback-only HTTP boundary.
 };
 
 /// @brief Holds mapper-local permission values before immutable runtime construction.
@@ -82,6 +84,21 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
         server.http_timeouts.total =
             std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(
                 std::get<std::uint64_t>(directive.value.scalar))};
+        break;
+    case ServerDirectiveKind::transport_mode:
+    {
+        const auto mode =
+            http::parse_http_transport_mode(std::get<std::string>(directive.value.scalar));
+        if (!mode)
+        {
+            // ValidatedConfiguration construction guarantees this invariant.
+            std::terminate();
+        }
+        server.transport_policy.mode = *mode;
+        break;
+    }
+    case ServerDirectiveKind::trusted_proxy:
+        server.transport_policy.trusted_proxy = std::get<std::string>(directive.value.scalar);
         break;
     }
 }
@@ -141,7 +158,8 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
     std::vector<runtime::ServerConfig> servers;
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
                          server.worker_threads, server.minimum_log_severity, std::move(locations),
-                         server.http_timeouts, std::move(mime_types));
+                         server.http_timeouts, std::move(mime_types),
+                         std::move(server.transport_policy));
     return runtime::AppConfig(std::move(servers));
 }
 

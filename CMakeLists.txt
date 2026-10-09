@@ -57,6 +57,7 @@ add_library(sparenode_core STATIC
     src/http/api/filesystem_api.cpp
     src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
+    src/http/session/http_transport_policy.cpp
     src/http/request/http_request.cpp
     src/http/request/http_request_parser.cpp
     src/http/request/http_body_decoder.cpp
