@@ -26,6 +26,7 @@ enum class ConfigValidationErrorCode : std::uint8_t
     worker_threads_out_of_range,  ///< The enabled worker count is outside 2 through 64.
     invalid_log_level,            ///< `log_level` is not a supported severity.
     invalid_mime_types_file,      ///< `mime_types_file` is empty.
+    invalid_credentials_file,     ///< `credentials_file` is empty.
     timeout_out_of_range,         ///< A receive timeout is outside 1 through 86400000 milliseconds.
     invalid_transport_mode,       ///< `transport_mode` is not a supported deployment mode.
     invalid_trusted_proxy,        ///< `trusted_proxy` is not one numeric IP address.

@@ -14,6 +14,10 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
 add_executable(sparenode_tests
+    authentication/authentication_service_test.cpp
+    authentication/credential_file_provisioner_test.cpp
+    authentication/file_credential_provider_test.cpp
+    authentication/password_verifier_test.cpp
     application/command_line_test.cpp
     application/running_application_test.cpp
     configuration/config_lexer_test.cpp

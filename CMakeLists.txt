@@ -17,6 +17,19 @@ project(
 
 find_package(Threads REQUIRED)
 
+include(FetchContent)
+
+set(SODIUM_DISABLE_TESTS ON)
+set(SODIUM_MINIMAL ON)
+FetchContent_Declare(
+    Sodium
+    GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
+    GIT_TAG 9b2848dfc1b917a9410f0de9d81059b26cbfaa8d
+    GIT_SUBMODULES_RECURSE TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(Sodium)
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(SpareNodeBuildSettings)
@@ -38,6 +51,12 @@ configure_file(
 )
 
 add_library(sparenode_core STATIC
+    src/authentication/authentication_service.cpp
+    src/authentication/credential_file_provisioner.cpp
+    src/authentication/file_authentication.cpp
+    src/authentication/file_credential_provider.cpp
+    src/authentication/password_verifier.cpp
+    src/authentication/sensitive_password.cpp
     src/application/command_line.cpp
     src/application/running_application.cpp
     src/configuration/config_lexer.cpp
@@ -116,11 +135,12 @@ target_include_directories(sparenode_core PUBLIC
 )
 
 target_link_libraries(sparenode_core PRIVATE
+    sodium
     Threads::Threads
 )
 
 if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE ntdll ws2_32)
+    target_link_libraries(sparenode_core PRIVATE advapi32 ntdll ws2_32)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)
@@ -143,6 +163,22 @@ sparenode_enable_compiler_warnings(sparenode)
 sparenode_enable_cppcheck(sparenode)
 sparenode_enable_static_analysis(sparenode)
 
+add_executable(sparenode_credentials
+    apps/sparenode-credentials/main.cpp
+)
+
+set_target_properties(sparenode_credentials PROPERTIES
+    OUTPUT_NAME "sparenode-credentials"
+)
+
+target_link_libraries(sparenode_credentials PRIVATE
+    sparenode_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_credentials)
+sparenode_enable_cppcheck(sparenode_credentials)
+sparenode_enable_static_analysis(sparenode_credentials)
+
 sparenode_enable_documentation()
 
 include(CTest)
@@ -153,7 +189,7 @@ endif()
 include(GNUInstallDirs)
 
 install(
-    TARGETS sparenode
+    TARGETS sparenode sparenode_credentials
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
@@ -168,4 +204,10 @@ install(
 install(
     FILES "${PROJECT_SOURCE_DIR}/config/mime.types"
     DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/sparenode"
+)
+
+install(
+    FILES "${sodium_SOURCE_DIR}/libsodium/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/sparenode"
+    RENAME libsodium-LICENSE
 )

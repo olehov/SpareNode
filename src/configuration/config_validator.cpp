@@ -251,6 +251,9 @@ class ValidationState final
         case ServerDirectiveKind::mime_types_file:
             validate_mime_types_file(directive);
             break;
+        case ServerDirectiveKind::credentials_file:
+            validate_credentials_file(directive);
+            break;
         case ServerDirectiveKind::header_timeout_ms:
         case ServerDirectiveKind::body_timeout_ms:
         case ServerDirectiveKind::request_timeout_ms:
@@ -393,6 +396,16 @@ class ValidationState final
         if (std::get<std::string>(directive.value.scalar).empty())
         {
             add_server_error(ConfigValidationErrorCode::invalid_mime_types_file, directive,
+                             directive.value.location);
+        }
+    }
+
+    /// @brief Rejects an empty external owner credential path.
+    void validate_credentials_file(const ParsedServerDirective &directive)
+    {
+        if (std::get<std::string>(directive.value.scalar).empty())
+        {
+            add_server_error(ConfigValidationErrorCode::invalid_credentials_file, directive,
                              directive.value.location);
         }
     }
@@ -639,6 +652,8 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
         return "log_level is not supported";
     case ConfigValidationErrorCode::invalid_mime_types_file:
         return "mime_types_file must not be empty";
+    case ConfigValidationErrorCode::invalid_credentials_file:
+        return "credentials_file must not be empty";
     case ConfigValidationErrorCode::timeout_out_of_range:
         return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
     case ConfigValidationErrorCode::invalid_transport_mode:

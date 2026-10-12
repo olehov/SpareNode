@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <variant>
@@ -69,6 +70,7 @@ void apply_server_directive(const directives::ParsedServerDirective &directive,
         }
         break;
     case ServerDirectiveKind::mime_types_file:
+    case ServerDirectiveKind::credentials_file:
         break;
     case ServerDirectiveKind::header_timeout_ms:
         server.http_timeouts.headers =
@@ -130,7 +132,8 @@ void apply_location_directive(const directives::ParsedLocationDirective &directi
 /// @brief Applies validated directives over defaults, preserving HTTP receive budgets.
 /// @return Runtime servers and locations without parser metadata.
 runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &configuration,
-                                            http::MimeTypeRegistry mime_types)
+                                            http::MimeTypeRegistry mime_types,
+                                            std::filesystem::path credentials_file)
 {
     ServerValues server;
     const auto &parsed_server = configuration.parsed().server;
@@ -159,7 +162,7 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,
                          server.worker_threads, server.minimum_log_severity, std::move(locations),
                          server.http_timeouts, std::move(mime_types),
-                         std::move(server.transport_policy));
+                         std::move(server.transport_policy), std::move(credentials_file));
     return runtime::AppConfig(std::move(servers));
 }
 

@@ -328,6 +328,7 @@ class ParserState final
             std::pair{std::string_view{"request_timeout_ms"}, Kind::request_timeout_ms},
             std::pair{std::string_view{"log_level"}, Kind::log_level},
             std::pair{std::string_view{"mime_types_file"}, Kind::mime_types_file},
+            std::pair{std::string_view{"credentials_file"}, Kind::credentials_file},
             std::pair{std::string_view{"transport_mode"}, Kind::transport_mode},
             std::pair{std::string_view{"trusted_proxy"}, Kind::trusted_proxy},
         };
@@ -377,6 +378,7 @@ class ParserState final
         case directives::ServerDirectiveKind::bind:
         case directives::ServerDirectiveKind::log_level:
         case directives::ServerDirectiveKind::mime_types_file:
+        case directives::ServerDirectiveKind::credentials_file:
         case directives::ServerDirectiveKind::transport_mode:
         case directives::ServerDirectiveKind::trusted_proxy:
             return ConfigParserExpectation::string_literal;

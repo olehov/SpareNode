@@ -141,16 +141,19 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
     return output.str();
 }
 
-/// @brief Resolves the optional MIME mapping path relative to the main configuration file.
+/// @brief Resolves one optional server file path relative to the main configuration file.
+/// @param[in] configuration Validated configuration containing the optional directive.
+/// @param[in] kind File-path directive to locate.
+/// @param[in] config_path Main configuration source used as the relative-path base.
+/// @return Resolved path, or no value when the selected directive is absent.
 [[nodiscard]] std::optional<std::filesystem::path>
-mime_types_path(const ValidatedConfiguration &configuration,
-                const std::filesystem::path &config_path)
+configured_server_path(const ValidatedConfiguration &configuration,
+                       const directives::ServerDirectiveKind kind,
+                       const std::filesystem::path &config_path)
 {
-    using directives::ServerDirectiveKind;
     const auto &directives = configuration.parsed().server.directives;
     const auto directive =
-        std::ranges::find_if(directives, [](const auto &item)
-                             { return item.kind == ServerDirectiveKind::mime_types_file; });
+        std::ranges::find_if(directives, [kind](const auto &item) { return item.kind == kind; });
     if (directive == directives.end())
     {
         return std::nullopt;
@@ -163,6 +166,28 @@ mime_types_path(const ValidatedConfiguration &configuration,
         return path;
     }
     return config_path.parent_path() / path;
+}
+
+/// @brief Resolves the optional MIME mapping path relative to the main configuration file.
+[[nodiscard]] std::optional<std::filesystem::path>
+mime_types_path(const ValidatedConfiguration &configuration,
+                const std::filesystem::path &config_path)
+{
+    return configured_server_path(configuration, directives::ServerDirectiveKind::mime_types_file,
+                                  config_path);
+}
+
+/// @brief Resolves the configured or default owner credential path.
+[[nodiscard]] std::filesystem::path
+credentials_file_path(const ValidatedConfiguration &configuration,
+                      const std::filesystem::path &config_path)
+{
+    if (auto configured = configured_server_path(
+            configuration, directives::ServerDirectiveKind::credentials_file, config_path))
+    {
+        return std::move(*configured);
+    }
+    return config_path.parent_path() / "credentials.conf";
 }
 
 } // namespace
@@ -208,7 +233,9 @@ ConfigLoader::load(const std::filesystem::path &source_path)
         }
         mime_types = std::move(mime_result).value();
     }
-    return RuntimeConfigMapper::map(validation_result.value(), std::move(mime_types));
+    auto credentials_path = credentials_file_path(validation_result.value(), source_path);
+    return RuntimeConfigMapper::map(validation_result.value(), std::move(mime_types),
+                                    std::move(credentials_path));
 }
 
 std::string format_config_load_error(const ConfigLoadError &error)

@@ -65,6 +65,7 @@ compile_commands.json
 
 # Local application configuration
 /config/spnode.conf
+/config/credentials.conf
 /config/manual-tests/
 
 # IDE and editor files

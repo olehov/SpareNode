@@ -140,6 +140,26 @@ TEST_CASE("Configuration validator requires a nonempty singleton MIME file path"
     CHECK(duplicate.front().code == ConfigValidationErrorCode::duplicate_server_directive);
 }
 
+TEST_CASE("Configuration validator requires a nonempty singleton credential file path",
+          "[configuration][validator][authentication]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-credential-validator");
+
+    const auto accepted = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+        make_configuration(directory.path(), "credentials_file \"credentials.conf\";\n")));
+    REQUIRE(accepted.has_value());
+
+    const auto empty =
+        require_validation_errors(make_configuration(directory.path(), "credentials_file \"\";\n"));
+    REQUIRE(empty.size() == 1);
+    CHECK(empty.front().code == ConfigValidationErrorCode::invalid_credentials_file);
+
+    const auto duplicate = require_validation_errors(make_configuration(
+        directory.path(), "credentials_file \"first.conf\";\ncredentials_file \"second.conf\";\n"));
+    REQUIRE(duplicate.size() == 1);
+    CHECK(duplicate.front().code == ConfigValidationErrorCode::duplicate_server_directive);
+}
+
 TEST_CASE("Configuration validator collects independent server failures",
           "[configuration][validator]")
 {
