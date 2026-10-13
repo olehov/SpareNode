@@ -15,6 +15,10 @@ namespace
 {
 
 /// @brief Resolves directory aliases once while preserving the final no-follow filename check.
+///
+/// Path canonicalization cannot prevent an ancestor directory from being replaced before the
+/// resolved file is opened. Deployments must therefore allow only the service owner to write to
+/// the credential directory and each of its ancestors.
 [[nodiscard]] Result<std::filesystem::path, FileAuthenticationErrorCode>
 resolve_credential_path(const std::filesystem::path &credential_path)
 {
@@ -40,6 +44,12 @@ resolve_credential_path(const std::filesystem::path &credential_path)
 }
 
 /// @brief Rejects a resolved credential file reachable below any configured filesystem location.
+///
+/// Configured location roots are already canonical, including roots originally selected through a
+/// directory symlink. Walking upward from the credential parent detects only the unsafe case where
+/// a location can serve the credential. The reverse case, where a location is nested below the
+/// credential directory, remains safe because the server exposes only that location's subtree.
+/// Filesystem identity-comparison failures return `credential_read_failed` and fail startup closed.
 [[nodiscard]] Result<bool, FileAuthenticationErrorCode>
 credential_is_shared(const std::filesystem::path &resolved_credential_path,
                      const std::span<const configuration::runtime::LocationConfig> locations)
