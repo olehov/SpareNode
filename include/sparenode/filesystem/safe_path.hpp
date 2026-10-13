@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "sparenode/configuration/shared_root.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
 {

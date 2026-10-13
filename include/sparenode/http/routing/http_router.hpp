@@ -7,9 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/http/response/http_response.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {

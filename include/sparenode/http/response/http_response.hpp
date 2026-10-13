@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/http_status_code.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {

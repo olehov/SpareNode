@@ -7,10 +7,10 @@
 #include <span>
 #include <stop_token>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/network_io_options.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::network
 {

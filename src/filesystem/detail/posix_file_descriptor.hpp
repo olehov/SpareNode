@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <utility>
 
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem::detail
 {

@@ -43,10 +43,11 @@ cmake -S . -B build/cppcheck \
 cmake --build build/cppcheck --parallel
 ```
 
-Cppcheck runs as part of compilation only for the repository-owned
-`sparenode_core`, `sparenode`, and `sparenode_tests` targets. Catch2, generated
-files, and other third-party targets do not receive the integration. Use a
-fresh dedicated build directory so every translation unit is analyzed.
+Cppcheck runs as part of compilation for every repository-owned library,
+executable, and test target. Interface-only targets contain no translation
+units to analyze. Catch2, generated files, and other third-party targets do not
+receive the integration. Use a fresh dedicated build directory so every
+translation unit is analyzed.
 
 To select a non-default executable, configure with:
 

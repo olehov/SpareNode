@@ -50,6 +50,69 @@ configure_file(
     @ONLY
 )
 
+add_library(sparenode_foundation INTERFACE)
+
+target_compile_features(sparenode_foundation INTERFACE
+    cxx_std_23
+)
+
+target_include_directories(sparenode_foundation INTERFACE
+    "${PROJECT_SOURCE_DIR}/include"
+)
+
+add_library(sparenode_logging STATIC
+    src/logging/console_log_sink.cpp
+    src/logging/logger.cpp
+    src/logging/log_severity.cpp
+)
+
+target_link_libraries(sparenode_logging PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_logging)
+sparenode_enable_cppcheck(sparenode_logging)
+sparenode_enable_static_analysis(sparenode_logging)
+
+add_library(sparenode_network STATIC
+    src/network/connection_dispatcher.cpp
+    src/network/connection_server.cpp
+    src/network/tcp_connection.cpp
+    src/network/tcp_listener.cpp
+    src/network/detail/accept_wait.cpp
+    src/network/detail/connection_io.cpp
+    src/network/detail/native_socket.cpp
+    src/network/detail/socket_address.cpp
+    src/network/detail/socket_poller.cpp
+    src/network/detail/socket_wait.cpp
+)
+
+target_link_libraries(sparenode_network
+    PUBLIC sparenode_foundation
+    PRIVATE Threads::Threads
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_network PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_network)
+sparenode_enable_cppcheck(sparenode_network)
+sparenode_enable_static_analysis(sparenode_network)
+
+add_library(sparenode_network_logging STATIC
+    src/adapters/network_logging.cpp
+)
+
+target_link_libraries(sparenode_network_logging PUBLIC
+    sparenode_logging
+    sparenode_network
+)
+
+sparenode_enable_compiler_warnings(sparenode_network_logging)
+sparenode_enable_cppcheck(sparenode_network_logging)
+sparenode_enable_static_analysis(sparenode_network_logging)
+
 add_library(sparenode_core STATIC
     src/authentication/authentication_service.cpp
     src/authentication/credential_file_provisioner.cpp
@@ -89,20 +152,6 @@ add_library(sparenode_core STATIC
     src/http/routing/http_router.cpp
     src/http/response/http_response.cpp
     src/http/response/http_response_writer.cpp
-    src/logging/console_log_sink.cpp
-    src/logging/logger.cpp
-    src/logging/log_severity.cpp
-    src/logging/network_logging.cpp
-    src/network/connection_dispatcher.cpp
-    src/network/connection_server.cpp
-    src/network/tcp_connection.cpp
-    src/network/tcp_listener.cpp
-    src/network/detail/accept_wait.cpp
-    src/network/detail/connection_io.cpp
-    src/network/detail/native_socket.cpp
-    src/network/detail/socket_address.cpp
-    src/network/detail/socket_poller.cpp
-    src/network/detail/socket_wait.cpp
 )
 
 if(WIN32)
@@ -139,8 +188,14 @@ target_link_libraries(sparenode_core PRIVATE
     Threads::Threads
 )
 
+target_link_libraries(sparenode_core PUBLIC
+    sparenode_foundation
+    sparenode_logging
+    sparenode_network
+)
+
 if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE advapi32 ntdll ws2_32)
+    target_link_libraries(sparenode_core PRIVATE advapi32 ntdll)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)
@@ -153,6 +208,7 @@ add_executable(sparenode
 
 target_link_libraries(sparenode PRIVATE
     sparenode_core
+    sparenode_network_logging
 )
 
 target_include_directories(sparenode PRIVATE

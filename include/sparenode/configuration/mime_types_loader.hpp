@@ -5,8 +5,8 @@
 #include <filesystem>
 #include <string_view>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::configuration
 {

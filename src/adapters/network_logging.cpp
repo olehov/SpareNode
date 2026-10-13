@@ -1,4 +1,4 @@
-#include "sparenode/logging/network_logging.hpp"
+#include "sparenode/adapters/network_logging.hpp"
 
 #include <sstream>
 #include <utility>

@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <system_error>
 
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
 {

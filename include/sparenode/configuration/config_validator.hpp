@@ -9,7 +9,7 @@
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
 #include "sparenode/configuration/parsed_config.hpp"
 #include "sparenode/configuration/shared_root.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
 {

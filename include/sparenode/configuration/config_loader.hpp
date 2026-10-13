@@ -11,7 +11,7 @@
 #include "sparenode/configuration/config_validator.hpp"
 #include "sparenode/configuration/mime_types_loader.hpp"
 #include "sparenode/configuration/runtime/app_config.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
 {

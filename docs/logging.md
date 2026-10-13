@@ -62,6 +62,12 @@ formatting, filtering, concurrency, and failure-containment tests deterministic.
 
 ## Network error adapters
 
+The logging core is built as `sparenode_logging` and has no dependency on
+network types. Network-specific formatting and observers live in
+`sparenode_network_logging`, exposed through
+`sparenode/adapters/network_logging.hpp`. Application composition opts into
+that adapter explicitly.
+
 `format_network_error()` preserves a `NetworkError` operation, domain, and
 numeric code. `make_connection_failure_log_observer()` and
 `make_connection_server_failure_log_observer()` adapt the existing dispatcher

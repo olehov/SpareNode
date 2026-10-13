@@ -6,7 +6,7 @@
 
 #include "sparenode/configuration/config_lexer.hpp"
 #include "sparenode/configuration/parsed_config.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
 {

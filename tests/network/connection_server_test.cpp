@@ -11,11 +11,11 @@
 #include <stop_token>
 #include <utility>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/connection_server.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
-#include "sparenode/result.hpp"
 #include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 

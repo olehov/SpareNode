@@ -16,11 +16,11 @@
 #include <thread>
 #include <utility>
 
+#include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/response/http_response.hpp"
 #include "sparenode/http/session/http_connection_handler.hpp"
 #include "sparenode/logging/console_log_sink.hpp"
-#include "sparenode/logging/network_logging.hpp"
 #include "sparenode/network/connection_server.hpp"
 #include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
