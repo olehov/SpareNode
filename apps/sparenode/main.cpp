@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/application/command_line.hpp"
 #include "sparenode/application/running_application.hpp"
 #include "sparenode/authentication/file_authentication.hpp"
@@ -19,7 +20,6 @@
 #include "sparenode/http/session/http_connection_handler.hpp"
 #include "sparenode/logging/console_log_sink.hpp"
 #include "sparenode/logging/logger.hpp"
-#include "sparenode/logging/network_logging.hpp"
 #include "sparenode/version.hpp"
 
 namespace

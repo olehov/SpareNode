@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/app_config.hpp"
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/connection_server.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::application
 {

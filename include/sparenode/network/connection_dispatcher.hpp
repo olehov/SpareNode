@@ -9,9 +9,9 @@
 #include <stop_token>
 #include <string>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::network
 {

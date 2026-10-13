@@ -5,9 +5,9 @@
 #include <string>
 #include <string_view>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {

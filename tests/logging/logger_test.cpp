@@ -3,7 +3,6 @@
 #include <chrono>
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -14,8 +13,6 @@
 #include "sparenode/logging/console_log_sink.hpp"
 #include "sparenode/logging/detail/console_color_detection.hpp"
 #include "sparenode/logging/logger.hpp"
-#include "sparenode/logging/network_logging.hpp"
-#include "sparenode/network/network_error.hpp"
 
 namespace
 {
@@ -272,40 +269,4 @@ TEST_CASE("Logger contains exceptions raised by its sink", "[logging][failure]")
     const sparenode::logging::Logger logger(std::make_shared<FailingSink>());
 
     CHECK_NOTHROW(logger.log({sparenode::logging::LogSeverity::error, "test", "cannot escape"}));
-}
-
-TEST_CASE("Network logging preserves structured operation domain and code", "[logging][network]")
-{
-    const sparenode::network::NetworkError error{sparenode::network::NetworkOperation::receive,
-                                                 sparenode::network::NetworkErrorDomain::socket,
-                                                 42};
-
-    CHECK(sparenode::logging::format_network_error(error) ==
-          "operation=receive domain=socket code=42");
-
-    const sparenode::network::NetworkError timeout{sparenode::network::NetworkOperation::receive,
-                                                   sparenode::network::NetworkErrorDomain::timeout,
-                                                   0};
-    CHECK(sparenode::logging::format_network_error(timeout) ==
-          "operation=receive domain=timeout code=0");
-}
-
-TEST_CASE("Network observers report worker and server failure boundaries", "[logging][network]")
-{
-    auto sink = std::make_shared<CapturingSink>();
-    const sparenode::logging::Logger logger(sink);
-    auto connection_observer = sparenode::logging::make_connection_failure_log_observer(logger);
-    auto server_observer = sparenode::logging::make_connection_server_failure_log_observer(logger);
-
-    connection_observer({sparenode::network::ConnectionFailureKind::handler_error,
-                         sparenode::network::NetworkError{
-                             sparenode::network::NetworkOperation::send,
-                             sparenode::network::NetworkErrorDomain::cancellation, 0}});
-    server_observer(
-        {sparenode::network::ConnectionServerFailureKind::dispatch_error, std::nullopt,
-         sparenode::network::DispatchError{sparenode::network::DispatchErrorCode::stopped, 7}});
-
-    REQUIRE(sink->records().size() == 2);
-    CHECK(sink->records()[0].message == "handler_error operation=send domain=cancellation code=0");
-    CHECK(sink->records()[1].message == "dispatch_error dispatch_code=stopped native_code=7");
 }

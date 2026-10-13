@@ -7,8 +7,8 @@
 #include <span>
 #include <utility>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/request/http_request.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {

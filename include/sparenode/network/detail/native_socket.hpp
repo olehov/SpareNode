@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <span>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
-#include "sparenode/result.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN

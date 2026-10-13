@@ -5,11 +5,11 @@
 #include <stop_token>
 #include <string>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/http/response/http_response.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {

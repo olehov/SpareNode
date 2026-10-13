@@ -6,10 +6,10 @@
 #include <memory>
 #include <optional>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::network
 {

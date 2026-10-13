@@ -9,7 +9,7 @@
 
 #include "sparenode/filesystem/filesystem_entry_remover.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem::detail
 {

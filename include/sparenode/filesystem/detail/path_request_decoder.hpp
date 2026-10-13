@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem::detail
 {

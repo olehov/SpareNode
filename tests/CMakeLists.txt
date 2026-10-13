@@ -46,20 +46,13 @@ add_executable(sparenode_tests
     http/request/request_target_test.cpp
     http/routing/http_router_test.cpp
     http/response/http_response_test.cpp
-    logging/logger_test.cpp
-    network/accept_wait_test.cpp
-    network/connection_dispatcher_test.cpp
-    network/connection_server_test.cpp
-    network/connection_io_test.cpp
-    network/socket_wait_test.cpp
-    network/tcp_connection_test.cpp
-    network/tcp_listener_test.cpp
     smoke_test.cpp
 )
 
 target_link_libraries(sparenode_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_core
+    sparenode_network_logging
     Threads::Threads
 )
 
@@ -89,6 +82,83 @@ sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
+
+add_executable(sparenode_foundation_tests
+    foundation/result_test.cpp
+)
+
+target_link_libraries(sparenode_foundation_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_foundation_tests)
+sparenode_enable_cppcheck(sparenode_foundation_tests)
+sparenode_enable_static_analysis(sparenode_foundation_tests)
+
+catch_discover_tests(sparenode_foundation_tests)
+
+add_executable(sparenode_logging_tests
+    logging/logger_test.cpp
+)
+
+target_link_libraries(sparenode_logging_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_logging
+    Threads::Threads
+)
+
+sparenode_enable_compiler_warnings(sparenode_logging_tests)
+sparenode_enable_cppcheck(sparenode_logging_tests)
+sparenode_enable_static_analysis(sparenode_logging_tests)
+
+catch_discover_tests(sparenode_logging_tests)
+
+add_executable(sparenode_network_tests
+    network/accept_wait_test.cpp
+    network/connection_dispatcher_test.cpp
+    network/connection_server_test.cpp
+    network/connection_io_test.cpp
+    network/socket_wait_test.cpp
+    network/tcp_connection_test.cpp
+    network/tcp_listener_test.cpp
+)
+
+target_link_libraries(sparenode_network_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_network
+    Threads::Threads
+)
+
+target_include_directories(sparenode_network_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(WIN32)
+    # The network tests call Winsock directly to create their client socket.
+    target_link_libraries(sparenode_network_tests PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_network_tests)
+sparenode_enable_cppcheck(sparenode_network_tests)
+sparenode_enable_static_analysis(sparenode_network_tests)
+
+catch_discover_tests(sparenode_network_tests)
+
+add_executable(sparenode_network_logging_tests
+    adapters/network_logging_test.cpp
+)
+
+target_link_libraries(sparenode_network_logging_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_network_logging
+)
+
+sparenode_enable_compiler_warnings(sparenode_network_logging_tests)
+sparenode_enable_cppcheck(sparenode_network_logging_tests)
+sparenode_enable_static_analysis(sparenode_network_logging_tests)
+
+catch_discover_tests(sparenode_network_logging_tests)
 
 add_test(
     NAME sparenode_filesystem_security_suite

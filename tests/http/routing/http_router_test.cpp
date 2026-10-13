@@ -8,10 +8,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/routing/http_router.hpp"
-#include "sparenode/result.hpp"
 #include "support/optional.hpp"
 
 namespace

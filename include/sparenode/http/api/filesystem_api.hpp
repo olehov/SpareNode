@@ -3,8 +3,8 @@
 #include <cstdint>
 
 #include "sparenode/configuration/runtime/server_config.hpp"
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/routing/http_router.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {
