@@ -1,9 +1,22 @@
 #include "sparenode/authentication/file_credential_provider.hpp"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
-#include <fstream>
+#include <cstddef>
+#include <limits>
 #include <new>
-#include <system_error>
+#include <string>
 #include <utility>
 
 #include "sparenode/configuration/config_lexer.hpp"
@@ -128,33 +141,80 @@ class CredentialSourceParser final
     ConfigToken current_; ///< Most recently produced token.
 };
 
-/// @brief Reads a credential file through a fixed allocation that detects oversized input.
+#ifdef _WIN32
+
+/// @brief Closes one credential file handle on every return path.
+class CredentialFileHandle final
+{
+  public:
+    explicit CredentialFileHandle(const HANDLE handle) noexcept : handle_(handle)
+    {
+    }
+
+    ~CredentialFileHandle()
+    {
+        if (handle_ != INVALID_HANDLE_VALUE)
+        {
+            static_cast<void>(CloseHandle(handle_));
+        }
+    }
+
+    CredentialFileHandle(const CredentialFileHandle &) = delete;
+    CredentialFileHandle &operator=(const CredentialFileHandle &) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept
+    {
+        return handle_;
+    }
+
+  private:
+    HANDLE handle_{INVALID_HANDLE_VALUE}; ///< Validated credential-file handle.
+};
+
+/// @brief Opens, validates, and reads the final Windows object through one stable handle.
 [[nodiscard]] Result<std::string, CredentialProvisioningErrorCode>
 read_credential_source(const std::filesystem::path &path)
 {
     try
     {
-        std::error_code status_error;
-        const auto status = std::filesystem::symlink_status(path, status_error);
-        if (status_error || !std::filesystem::exists(status))
+        constexpr DWORD open_flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS |
+                                     FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN;
+        const auto native_handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                               OPEN_EXISTING, open_flags, nullptr);
+        if (native_handle == INVALID_HANDLE_VALUE)
         {
             return unexpected(CredentialProvisioningErrorCode::open_failed);
         }
-        if (!std::filesystem::is_regular_file(status))
+        const CredentialFileHandle handle(native_handle);
+
+        FILE_ATTRIBUTE_TAG_INFO attributes{};
+        if (GetFileInformationByHandleEx(handle.get(), FileAttributeTagInfo, &attributes,
+                                         sizeof(attributes)) == FALSE)
+        {
+            return unexpected(CredentialProvisioningErrorCode::read_failed);
+        }
+        if ((attributes.FileAttributes &
+             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
         {
             return unexpected(CredentialProvisioningErrorCode::not_regular_file);
         }
 
-        std::ifstream input(path, std::ios::binary);
-        if (!input.is_open())
+        LARGE_INTEGER native_size{};
+        if (GetFileSizeEx(handle.get(), &native_size) == FALSE || native_size.QuadPart < 0)
         {
-            return unexpected(CredentialProvisioningErrorCode::open_failed);
+            return unexpected(CredentialProvisioningErrorCode::read_failed);
+        }
+        if (static_cast<unsigned long long>(native_size.QuadPart) > maximum_credential_file_bytes)
+        {
+            return unexpected(CredentialProvisioningErrorCode::file_too_large);
         }
 
         std::string source(maximum_credential_file_bytes + 1, '\0');
-        input.read(source.data(), static_cast<std::streamsize>(source.size()));
-        const auto bytes_read = static_cast<std::size_t>(input.gcount());
-        if (input.bad())
+        static_assert(maximum_credential_file_bytes + 1 <=
+                      static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
+        DWORD bytes_read = 0;
+        if (ReadFile(handle.get(), source.data(), static_cast<DWORD>(source.size()), &bytes_read,
+                     nullptr) == FALSE)
         {
             return unexpected(CredentialProvisioningErrorCode::read_failed);
         }
@@ -174,6 +234,106 @@ read_credential_source(const std::filesystem::path &path)
         return unexpected(CredentialProvisioningErrorCode::read_failed);
     }
 }
+
+#else
+
+/// @brief Closes one credential file descriptor on every return path.
+class CredentialFileDescriptor final
+{
+  public:
+    explicit CredentialFileDescriptor(const int descriptor) noexcept : descriptor_(descriptor)
+    {
+    }
+
+    ~CredentialFileDescriptor()
+    {
+        if (descriptor_ >= 0)
+        {
+            static_cast<void>(::close(descriptor_));
+        }
+    }
+
+    CredentialFileDescriptor(const CredentialFileDescriptor &) = delete;
+    CredentialFileDescriptor &operator=(const CredentialFileDescriptor &) = delete;
+
+    [[nodiscard]] int get() const noexcept
+    {
+        return descriptor_;
+    }
+
+  private:
+    int descriptor_{-1}; ///< Validated credential-file descriptor.
+};
+
+/// @brief Opens, validates, and reads the final POSIX object through one stable descriptor.
+[[nodiscard]] Result<std::string, CredentialProvisioningErrorCode>
+read_credential_source(const std::filesystem::path &path)
+{
+    try
+    {
+        const int native_descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        if (native_descriptor < 0)
+        {
+            return unexpected(errno == ELOOP ? CredentialProvisioningErrorCode::not_regular_file
+                                             : CredentialProvisioningErrorCode::open_failed);
+        }
+        const CredentialFileDescriptor descriptor(native_descriptor);
+
+        struct stat attributes
+        {
+        };
+        if (::fstat(descriptor.get(), &attributes) != 0)
+        {
+            return unexpected(CredentialProvisioningErrorCode::read_failed);
+        }
+        if (!S_ISREG(attributes.st_mode))
+        {
+            return unexpected(CredentialProvisioningErrorCode::not_regular_file);
+        }
+        if (attributes.st_size < 0 ||
+            static_cast<unsigned long long>(attributes.st_size) > maximum_credential_file_bytes)
+        {
+            return unexpected(CredentialProvisioningErrorCode::file_too_large);
+        }
+
+        std::string source(maximum_credential_file_bytes + 1, '\0');
+        std::size_t bytes_read = 0;
+        while (bytes_read < source.size())
+        {
+            const auto received =
+                ::read(descriptor.get(), source.data() + bytes_read, source.size() - bytes_read);
+            if (received > 0)
+            {
+                bytes_read += static_cast<std::size_t>(received);
+                continue;
+            }
+            if (received == 0)
+            {
+                break;
+            }
+            if (errno != EINTR)
+            {
+                return unexpected(CredentialProvisioningErrorCode::read_failed);
+            }
+        }
+        if (bytes_read > maximum_credential_file_bytes)
+        {
+            return unexpected(CredentialProvisioningErrorCode::file_too_large);
+        }
+        source.resize(bytes_read);
+        return source;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(CredentialProvisioningErrorCode::resource_exhausted);
+    }
+    catch (...)
+    {
+        return unexpected(CredentialProvisioningErrorCode::read_failed);
+    }
+}
+
+#endif
 
 } // namespace
 

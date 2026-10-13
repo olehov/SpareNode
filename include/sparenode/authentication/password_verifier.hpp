@@ -49,7 +49,7 @@ class PasswordVerifier final
     /// @brief Checks the verifier syntax, algorithm, and bounded parameter profile.
     /// @param[in] encoded_verifier Candidate provider material.
     /// @return `true` only for the currently supported Argon2id profile.
-    [[nodiscard]] bool is_usable(std::string_view encoded_verifier) const noexcept;
+    [[nodiscard]] static bool is_usable(std::string_view encoded_verifier) noexcept;
 
   private:
     PasswordVerifier() = default;

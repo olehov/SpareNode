@@ -114,6 +114,31 @@ write_exclusive_file(const std::filesystem::path &path, const std::string_view c
 
 #else
 
+/// @brief Persists creation of a credential-file directory entry on POSIX filesystems.
+[[nodiscard]] bool sync_parent_directory(const std::filesystem::path &path) noexcept
+{
+    try
+    {
+        auto parent = path.parent_path();
+        if (parent.empty())
+        {
+            parent = ".";
+        }
+        const int directory = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (directory < 0)
+        {
+            return false;
+        }
+        const bool sync_succeeded = ::fsync(directory) == 0;
+        const bool close_succeeded = ::close(directory) == 0;
+        return sync_succeeded && close_succeeded;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 /// @brief Exclusively creates and fully writes one POSIX credential file with owner-only mode.
 [[nodiscard]] Result<void, CredentialFileProvisioningErrorCode>
 write_exclusive_file(const std::filesystem::path &path, const std::string_view content) noexcept
@@ -152,6 +177,10 @@ write_exclusive_file(const std::filesystem::path &path, const std::string_view c
     {
         write_succeeded = false;
     }
+    if (write_succeeded && !sync_parent_directory(path))
+    {
+        write_succeeded = false;
+    }
     if (!write_succeeded)
     {
         ::unlink(path.c_str());
@@ -184,11 +213,11 @@ map_verifier_error(const PasswordVerifierErrorCode code) noexcept
 
 } // namespace
 
-Result<void, CredentialFileProvisioningErrorCode>
-CredentialFileProvisioner::provision(const std::filesystem::path &output_path,
-                                     const std::string_view login, SensitivePassword password,
-                                     const PasswordVerifier &verifier)
+Result<void, CredentialFileProvisioningErrorCode> CredentialFileProvisioner::provision(
+    const std::filesystem::path &output_path, const std::string_view login,
+    SensitivePassword &&submitted_password, const PasswordVerifier &verifier)
 {
+    SensitivePassword password(std::move(submitted_password));
     if (!is_valid_owner_login(login))
     {
         return unexpected(CredentialFileProvisioningErrorCode::invalid_login);

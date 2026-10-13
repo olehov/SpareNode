@@ -96,7 +96,7 @@ PasswordVerifier::verify(const std::span<const char> password,
                                     static_cast<unsigned long long>(password.size())) == 0;
 }
 
-bool PasswordVerifier::is_usable(const std::string_view encoded_verifier) const noexcept
+bool PasswordVerifier::is_usable(const std::string_view encoded_verifier) noexcept
 {
     if (!encoded_verifier.starts_with(supported_password_profile))
     {

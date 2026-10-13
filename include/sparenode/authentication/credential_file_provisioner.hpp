@@ -36,7 +36,7 @@ class CredentialFileProvisioner final
     /// @return Success, or a non-sensitive provisioning failure.
     [[nodiscard]] static Result<void, CredentialFileProvisioningErrorCode>
     provision(const std::filesystem::path &output_path, std::string_view login,
-              SensitivePassword password, const PasswordVerifier &verifier);
+              SensitivePassword &&password, const PasswordVerifier &verifier);
 };
 
 /// @brief Returns a non-sensitive diagnostic for credential-file provisioning.

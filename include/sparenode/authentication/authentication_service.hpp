@@ -49,7 +49,7 @@ class AuthenticationService final
     /// @param[in,out] password Owned temporary plaintext consumed by this call.
     /// @return Authenticated identity, generic invalid credentials, or unavailable service.
     [[nodiscard]] Result<AuthenticatedCredential, AuthenticationErrorCode>
-    authenticate(std::string_view login, SensitivePassword password) const;
+    authenticate(std::string_view login, SensitivePassword &&password) const;
 
   private:
     /// @brief Stores fully initialized service dependencies and dummy verifier.

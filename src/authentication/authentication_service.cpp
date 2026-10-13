@@ -40,8 +40,10 @@ AuthenticationService::AuthenticationService(std::shared_ptr<const CredentialPro
 }
 
 Result<AuthenticatedCredential, AuthenticationErrorCode>
-AuthenticationService::authenticate(const std::string_view login, SensitivePassword password) const
+AuthenticationService::authenticate(const std::string_view login,
+                                    SensitivePassword &&submitted_password) const
 {
+    SensitivePassword password(std::move(submitted_password));
     try
     {
         const auto credential_result = provider_->find_by_login(login);

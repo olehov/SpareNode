@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
 #include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -146,6 +148,37 @@ TEST_CASE("File credential provider rejects missing and malformed material",
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error() == Error::file_too_large);
     }
+}
+
+TEST_CASE("File credential provider rejects a symbolic-link source",
+          "[authentication][credentials][security][symlink]")
+{
+    using Error = sparenode::authentication::CredentialProvisioningErrorCode;
+    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    REQUIRE(verifier_result.has_value());
+    const auto verifier = verifier_result.value();
+    auto encoded = verifier.hash(password_bytes("owner password"));
+    REQUIRE(encoded.has_value());
+
+    const sparenode::test::TemporaryDirectory directory("sparenode-owner-symlink");
+    const auto target = directory.path() / "target.conf";
+    {
+        std::ofstream output(target, std::ios::binary);
+        REQUIRE(output.is_open());
+        output << credential_source("admin", encoded.value());
+        REQUIRE(output.good());
+    }
+    const auto link = directory.path() / "credentials.conf";
+    std::error_code link_error;
+    std::filesystem::create_symlink(target, link, link_error);
+    if (link_error)
+    {
+        SKIP("Windows symbolic-link creation requires Developer Mode or the symlink privilege");
+    }
+
+    const auto result = sparenode::authentication::FileCredentialProvider::load(link, verifier);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == Error::not_regular_file);
 }
 
 TEST_CASE("File authentication rejects credentials inside a shared location",
