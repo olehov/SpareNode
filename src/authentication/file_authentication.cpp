@@ -14,21 +14,40 @@ namespace sparenode::authentication
 namespace
 {
 
-/// @brief Rejects a credential file reachable below any configured filesystem location.
+/// @brief Resolves directory aliases once while preserving the final no-follow filename check.
+[[nodiscard]] Result<std::filesystem::path, FileAuthenticationErrorCode>
+resolve_credential_path(const std::filesystem::path &credential_path)
+{
+    try
+    {
+        auto parent = credential_path.parent_path();
+        if (parent.empty())
+        {
+            parent = ".";
+        }
+        std::error_code path_error;
+        auto canonical_parent = std::filesystem::canonical(parent, path_error);
+        if (path_error)
+        {
+            return unexpected(FileAuthenticationErrorCode::credential_open_failed);
+        }
+        return canonical_parent / credential_path.filename();
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(FileAuthenticationErrorCode::resource_exhausted);
+    }
+}
+
+/// @brief Rejects a resolved credential file reachable below any configured filesystem location.
 [[nodiscard]] Result<bool, FileAuthenticationErrorCode>
-credential_is_shared(const std::filesystem::path &credential_path,
+credential_is_shared(const std::filesystem::path &resolved_credential_path,
                      const std::span<const configuration::runtime::LocationConfig> locations)
 {
     std::error_code path_error;
-    const auto canonical_credential = std::filesystem::canonical(credential_path, path_error);
-    if (path_error)
-    {
-        return unexpected(FileAuthenticationErrorCode::credential_open_failed);
-    }
-
     for (const auto &location : locations)
     {
-        auto current = canonical_credential.parent_path();
+        auto current = resolved_credential_path.parent_path();
         while (!current.empty())
         {
             path_error.clear();
@@ -93,7 +112,12 @@ Result<AuthenticationService, FileAuthenticationErrorCode> create_file_authentic
         return unexpected(FileAuthenticationErrorCode::cryptography_unavailable);
     }
 
-    const auto shared = credential_is_shared(credential_path, locations);
+    auto resolved_path = resolve_credential_path(credential_path);
+    if (!resolved_path)
+    {
+        return unexpected(resolved_path.error());
+    }
+    const auto shared = credential_is_shared(resolved_path.value(), locations);
     if (!shared)
     {
         return unexpected(shared.error());
@@ -103,7 +127,7 @@ Result<AuthenticationService, FileAuthenticationErrorCode> create_file_authentic
         return unexpected(FileAuthenticationErrorCode::credential_is_shared);
     }
 
-    auto provider = FileCredentialProvider::load(credential_path, verifier.value());
+    auto provider = FileCredentialProvider::load(resolved_path.value(), verifier.value());
     if (!provider)
     {
         return unexpected(map_provisioning_error(provider.error()));

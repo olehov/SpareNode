@@ -212,11 +212,21 @@ read_credential_source(const std::filesystem::path &path)
         std::string source(maximum_credential_file_bytes + 1, '\0');
         static_assert(maximum_credential_file_bytes + 1 <=
                       static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
-        DWORD bytes_read = 0;
-        if (ReadFile(handle.get(), source.data(), static_cast<DWORD>(source.size()), &bytes_read,
-                     nullptr) == FALSE)
+        std::size_t bytes_read = 0;
+        while (bytes_read < source.size())
         {
-            return unexpected(CredentialProvisioningErrorCode::read_failed);
+            DWORD received = 0;
+            if (ReadFile(handle.get(), source.data() + bytes_read,
+                         static_cast<DWORD>(source.size() - bytes_read), &received,
+                         nullptr) == FALSE)
+            {
+                return unexpected(CredentialProvisioningErrorCode::read_failed);
+            }
+            if (received == 0)
+            {
+                break;
+            }
+            bytes_read += received;
         }
         if (bytes_read > maximum_credential_file_bytes)
         {
