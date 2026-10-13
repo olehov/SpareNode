@@ -98,10 +98,28 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1200});
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2400});
     CHECK(server.http_timeouts().total == std::chrono::milliseconds{3600});
+    CHECK(server.credentials_file() == directory.path() / "credentials.conf");
     REQUIRE(server.locations().size() == 1);
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
     CHECK(server.locations().front().permissions() ==
           sparenode::configuration::runtime::LocationPermissions{false, true, true});
+}
+
+TEST_CASE("Configuration loader resolves the separate credential file beside the main config",
+          "[configuration][loader][authentication]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-config-credential-loader");
+    const auto location =
+        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
+    const auto config_path = write_config(
+        directory, make_config("credentials_file \"secrets/owner.conf\";\n", location));
+
+    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->servers().size() == 1);
+    CHECK(result->servers().front().credentials_file() ==
+          directory.path() / "secrets" / "owner.conf");
 }
 
 TEST_CASE("Configuration loader resolves and loads MIME mappings beside the main file",

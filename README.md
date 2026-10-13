@@ -60,7 +60,9 @@ Run these commands from a Visual Studio Developer PowerShell:
 cmake -S . -B build/msvc -A x64
 cmake --build build/msvc --config Debug --parallel
 Copy-Item config\spnode.conf.example config\spnode.conf
-# Set an existing share path, then run:
+# Set an existing location path. Keep the example loopback bind for local development.
+# On first run, create the persistent owner credential file:
+.\build\msvc\bin\Debug\sparenode-credentials.exe --output config\credentials.conf
 .\build\msvc\bin\Debug\sparenode.exe --config config\spnode.conf
 ```
 
@@ -72,7 +74,9 @@ Replace `Debug` with `Release` for an optimised build.
 cmake -S . -B build/gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/gcc --parallel
 cp config/spnode.conf.example config/spnode.conf
-# Set an existing share path, then run:
+# Set an existing location path. Keep the example loopback bind for local development.
+# On first run, create the persistent owner credential file:
+./build/gcc/bin/Debug/sparenode-credentials --output config/credentials.conf
 ./build/gcc/bin/Debug/sparenode --config config/spnode.conf
 ```
 
@@ -82,7 +86,9 @@ cp config/spnode.conf.example config/spnode.conf
 cmake -S . -B build/clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/clang --parallel
 cp config/spnode.conf.example config/spnode.conf
-# Set an existing share path, then run:
+# Set an existing location path. Keep the example loopback bind for local development.
+# On first run, create the persistent owner credential file:
+./build/clang/bin/Debug/sparenode-credentials --output config/credentials.conf
 ./build/clang/bin/Debug/sparenode --config config/spnode.conf
 ```
 
@@ -141,13 +147,31 @@ Network exposure is controlled by the
 default listens on loopback; public Internet access requires HTTPS through one
 explicitly trusted reverse proxy.
 
+`bind` and `transport_mode` must describe the same deployment boundary:
+
+| Intended use | Required configuration |
+|---|---|
+| Local development | `bind "127.0.0.1";` and `transport_mode "loopback_http";` |
+| Explicitly trusted LAN | A numeric LAN or wildcard bind and `transport_mode "trusted_lan_http";` |
+| HTTPS reverse proxy | A non-wildcard backend bind, `transport_mode "trusted_proxy_https";`, and the proxy's numeric `trusted_proxy` address |
+
+The distributable `config/spnode.conf.example` uses the local-development combination. Changing
+only its bind to `0.0.0.0` is invalid because `loopback_http` accepts loopback addresses only.
+Do not select `trusted_lan_http` merely to bypass this validation: credentials and session traffic
+remain plaintext in that mode. See the
+[transport deployment examples](docs/authentication-transport.md) before exposing the listener.
+
 ## Authentication
 
 SpareNode v0.1 uses a single-owner authentication model with credential-provider
 and session boundaries that remain independent of the concrete secret source.
 The [MVP authentication model](docs/authentication-model.md) defines identity,
 login/logout, protected routes, session lifetime, and the responsibilities of the
-remaining authentication and transport-security work.
+remaining authentication and transport-security work. The
+[owner credential provisioning guide](docs/credential-provisioning.md) documents the separate
+credential file, the interactive `sparenode-credentials` tool, Argon2id verifier generation, and
+fail-closed startup behavior. Plaintext passwords are never accepted through `spnode.conf` or the
+credential file.
 
 ## Shared directory
 

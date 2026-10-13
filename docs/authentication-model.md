@@ -50,9 +50,10 @@ malformed, or unsupported verification material fails startup without logging th
 password, verifier, salt, or environment contents. SpareNode does not create a default password and
 does not silently start protected routes without usable credentials.
 
-SN-041 selects the vetted password-hashing library and concrete provisioning adapter. Algorithm
-selection, parameter upgrades, and secure password setup belong there rather than in the session
-or HTTP layers.
+SN-041 uses libsodium Argon2id and a file-backed single-owner provider. Its credential-file grammar,
+bounded profile, startup failures, and provisioning procedure are documented in
+[Owner credential provisioning](credential-provisioning.md). Parameter upgrades and secure
+password setup remain outside the session and HTTP layers.
 
 ## Authentication flow
 

@@ -21,6 +21,7 @@ server {
     worker_threads 4;
     log_level "info";
     mime_types_file "mime.types";
+    credentials_file "credentials.conf";
     header_timeout_ms 10000;
     body_timeout_ms 10000;
     request_timeout_ms 30000;
@@ -77,7 +78,8 @@ identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 
 Version 1 reserves `server`, `location`, `bind`, `port`, `multithreading`,
 `worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
-`request_timeout_ms`, `mime_types_file`, `transport_mode`, `trusted_proxy`, `path`,
+`request_timeout_ms`, `mime_types_file`, `credentials_file`, `transport_mode`, `trusted_proxy`,
+`path`,
 `read`, `write`, `delete`, `true`, and `false` according to their grammatical
 positions. Keywords must be written in lowercase.
 
@@ -136,6 +138,7 @@ server-item              = bind-directive
                          | worker-threads-directive
                          | log-level-directive
                          | mime-types-file-directive
+                         | credentials-file-directive
                          | header-timeout-directive
                          | body-timeout-directive
                          | request-timeout-directive
@@ -149,6 +152,7 @@ threading-directive      = "multithreading", boolean, ";" ;
 worker-threads-directive = "worker_threads", integer, ";" ;
 log-level-directive      = "log_level", string, ";" ;
 mime-types-file-directive = "mime_types_file", string, ";" ;
+credentials-file-directive = "credentials_file", string, ";" ;
 header-timeout-directive = "header_timeout_ms", integer, ";" ;
 body-timeout-directive   = "body_timeout_ms", integer, ";" ;
 request-timeout-directive = "request_timeout_ms", integer, ";" ;
@@ -189,6 +193,7 @@ prefix for that filesystem root.
 | `worker_threads` | conditional | none | Required with `multithreading true`; integer from 2 through 64 |
 | `log_level` | zero or one | `"info"` | One of `"debug"`, `"info"`, `"warning"`, or `"error"` |
 | `mime_types_file` | zero or one | none | Non-empty path to a bounded `mime.types` file |
+| `credentials_file` | zero or one | `"credentials.conf"` | Non-empty path to the separate bounded owner credential file |
 | `header_timeout_ms` | zero or one | `10000` | Header receive inactivity, 1 through 86400000 milliseconds |
 | `body_timeout_ms` | zero or one | `10000` | Body receive inactivity, 1 through 86400000 milliseconds |
 | `request_timeout_ms` | zero or one | `30000` | Total request receive time, 1 through 86400000 milliseconds |
@@ -210,6 +215,13 @@ server resources start; unreadable or invalid content is fatal. When the directi
 is omitted, the runtime registry is empty and file responses use the safe unknown
 type fallback. See [MIME type configuration](mime-types.md) for syntax, bounds,
 diagnostics, and the browser safety policy.
+
+An absolute `credentials_file` path is used directly. A relative path is resolved from the
+directory containing `spnode.conf`. When omitted, SpareNode uses `credentials.conf` beside the
+main configuration file. The credential file is loaded before the listener starts and contains
+the owner login plus a self-contained Argon2id verifier, never a plaintext password. See
+[Owner credential provisioning](credential-provisioning.md) for its strict format, required file
+permissions, and the rule that it must remain outside every configured filesystem location.
 
 Receive timeouts use unsigned integer milliseconds without a unit suffix. Zero,
 negative values, quoted numbers, and values above 24 hours are rejected before

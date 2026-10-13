@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <utility>
 #include <vector>
 
@@ -27,16 +28,19 @@ class ServerConfig final
     /// @param[in] http_timeouts Validated HTTP receive budgets.
     /// @param[in] mime_types Validated immutable MIME mappings.
     /// @param[in] transport_policy Validated peer and effective-HTTPS trust boundary.
+    /// @param[in] credentials_file Resolved path to the separate owner credential file.
     ServerConfig(network::TcpEndpoint endpoint, bool multithreading_enabled,
                  std::size_t worker_threads, logging::LogSeverity minimum_log_severity,
                  std::vector<LocationConfig> locations,
                  http::HttpRequestTimeouts http_timeouts = {},
                  http::MimeTypeRegistry mime_types = {},
-                 http::HttpTransportPolicy transport_policy = {})
+                 http::HttpTransportPolicy transport_policy = {},
+                 std::filesystem::path credentials_file = {})
         : endpoint_(std::move(endpoint)), multithreading_enabled_(multithreading_enabled),
           worker_threads_(worker_threads), minimum_log_severity_(minimum_log_severity),
           locations_(std::move(locations)), http_timeouts_(http_timeouts),
-          mime_types_(std::move(mime_types)), transport_policy_(std::move(transport_policy))
+          mime_types_(std::move(mime_types)), transport_policy_(std::move(transport_policy)),
+          credentials_file_(std::move(credentials_file))
     {
     }
 
@@ -103,6 +107,13 @@ class ServerConfig final
         return transport_policy_;
     }
 
+    /// @brief Returns the resolved owner credential file path.
+    /// @return Path resolved against the main configuration file.
+    [[nodiscard]] const std::filesystem::path &credentials_file() const noexcept
+    {
+        return credentials_file_;
+    }
+
   private:
     network::TcpEndpoint endpoint_;              ///< Numeric listener address and TCP port.
     bool multithreading_enabled_;                ///< Enables the configured fixed worker pool.
@@ -112,6 +123,7 @@ class ServerConfig final
     http::HttpRequestTimeouts http_timeouts_;    ///< Immutable HTTP receive budgets.
     http::MimeTypeRegistry mime_types_;          ///< Immutable response media-type mappings.
     http::HttpTransportPolicy transport_policy_; ///< Immutable network exposure boundary.
+    std::filesystem::path credentials_file_;     ///< Separate owner credential source.
 };
 
 } // namespace sparenode::configuration::runtime

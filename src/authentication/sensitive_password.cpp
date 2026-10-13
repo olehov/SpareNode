@@ -1,0 +1,71 @@
+#include "sparenode/authentication/sensitive_password.hpp"
+
+#include <sodium.h>
+
+#include <utility>
+
+namespace sparenode::authentication
+{
+
+void erase_sensitive_bytes(const std::span<char> bytes) noexcept
+{
+    if (!bytes.empty())
+    {
+        sodium_memzero(bytes.data(), bytes.size());
+    }
+}
+
+SensitivePassword::SensitivePassword(const std::string_view password)
+    : bytes_(password.begin(), password.end())
+{
+}
+
+SensitivePassword::SensitivePassword(std::vector<char> password) noexcept
+    : bytes_(std::move(password))
+{
+}
+
+SensitivePassword::~SensitivePassword()
+{
+    erase();
+}
+
+SensitivePassword::SensitivePassword(SensitivePassword &&other) noexcept
+    : bytes_(std::move(other.bytes_))
+{
+}
+
+SensitivePassword &SensitivePassword::operator=(SensitivePassword &&other) noexcept
+{
+    if (this != &other)
+    {
+        erase();
+        bytes_ = std::move(other.bytes_);
+    }
+    return *this;
+}
+
+std::span<const char> SensitivePassword::bytes() const noexcept
+{
+    return bytes_;
+}
+
+bool SensitivePassword::equals(const SensitivePassword &other) const noexcept
+{
+    if (bytes_.size() != other.bytes_.size())
+    {
+        return false;
+    }
+    if (bytes_.empty())
+    {
+        return true;
+    }
+    return sodium_memcmp(bytes_.data(), other.bytes_.data(), bytes_.size()) == 0;
+}
+
+void SensitivePassword::erase() noexcept
+{
+    erase_sensitive_bytes(bytes_);
+}
+
+} // namespace sparenode::authentication
