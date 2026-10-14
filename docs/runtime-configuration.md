@@ -26,10 +26,11 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - an immutable MIME type registry loaded once from the optional external mapping file;
 - an ordered collection of `runtime::LocationConfig` values.
 
-Each location contains its validated HTTP API path, a canonical `SharedRoot`, and independent
-`allow_read`, `allow_write`, and `allow_delete` permissions. Filesystem and HTTP code can
-therefore enforce permissions without interpreting parser directives or validating the
-location path again.
+Each location contains its validated HTTP API path, a filesystem-owned canonical
+`SharedRoot`, and filesystem-owned independent `allow_read`, `allow_write`, and
+`allow_delete` permissions. Filesystem and HTTP code can therefore enforce
+permissions without interpreting parser directives or validating the location
+path again.
 
 The aggregate runtime types remain convenient for tests and a future settings UI to
 construct programmatically. The persistent-file startup path still uses the validator
