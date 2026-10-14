@@ -37,6 +37,15 @@ struct BlockingState
     bool destroyed{};
 };
 
+/// @brief Waits for one worker state transition without assuming scheduler timing.
+void require_state_flag(const std::shared_ptr<BlockingState> &state,
+                        const bool BlockingState::*flag)
+{
+    std::unique_lock lock(state->mutex);
+    REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2},
+                                    [&state, flag] { return state.get()->*flag; }));
+}
+
 class BlockingTemporaryFile final : public sparenode::storage::TemporaryFile
 {
   public:
@@ -135,17 +144,16 @@ TEST_CASE("Timed out storage I/O retains cleanup ownership until the native call
                                                              std::chrono::milliseconds{50}});
     REQUIRE_FALSE(written.has_value());
     CHECK(written.error().code == TemporaryFileErrorCode::deadline_exceeded);
+
+    require_state_flag(state, &BlockingState::started);
     writer.value().reset();
 
     {
         std::lock_guard lock(state->mutex);
-        CHECK(state->started);
         CHECK_FALSE(state->destroyed);
         state->released = true;
     }
     state->changed.notify_all();
 
-    std::unique_lock lock(state->mutex);
-    REQUIRE(state->changed.wait_for(lock, std::chrono::seconds{2},
-                                    [&state] { return state->destroyed; }));
+    require_state_flag(state, &BlockingState::destroyed);
 }
