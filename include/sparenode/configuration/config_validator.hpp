@@ -8,7 +8,7 @@
 #include "sparenode/configuration/directives/parsed_location_directive.hpp"
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
 #include "sparenode/configuration/parsed_config.hpp"
-#include "sparenode/filesystem/shared_root.hpp"
+#include "sparenode/configuration/settings.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
@@ -37,7 +37,7 @@ enum class ConfigValidationErrorCode : std::uint8_t
     conflicting_location_path,    ///< Two location paths overlap or are duplicates.
     duplicate_location_directive, ///< A singleton location directive appears more than once.
     missing_location_root,        ///< A location contains no required filesystem `path`.
-    invalid_location_root,        ///< A filesystem `path` is not accepted by `SharedRoot`.
+    invalid_location_root,        ///< A filesystem `path` is empty.
 };
 
 /// @brief Describes one deterministic semantic configuration failure.
@@ -54,7 +54,6 @@ struct ConfigValidationError
     std::optional<directives::ServerDirectiveKind> server_directive;     ///< Related server field.
     std::optional<directives::LocationDirectiveKind> location_directive; ///< Related field.
     std::optional<std::string> location_path; ///< Public path when a block is involved.
-    std::optional<filesystem::SharedRootError> shared_root_error; ///< Detailed filesystem failure.
 };
 
 /// @brief Owns parsed syntax that has passed every version-one semantic rule.
@@ -72,26 +71,24 @@ class ValidatedConfiguration final
     /// @return Owned parser model carrying the validator's success guarantee.
     [[nodiscard]] ParsedConfiguration release_parsed() && noexcept;
 
-    /// @brief Returns canonical roots validated for locations in parser source order.
-    /// @return Roots aligned one-to-one with parsed().server.locations.
-    [[nodiscard]] const std::vector<filesystem::SharedRoot> &location_roots() const noexcept;
+    /// @brief Returns implementation-independent settings produced by semantic validation.
+    /// @return Primitive settings safe for environment-dependent bootstrap construction.
+    [[nodiscard]] const AppSettings &settings() const noexcept;
 
-    /// @brief Transfers canonical location roots to the runtime configuration stage.
-    /// @return Roots aligned one-to-one with the released parsed location collection.
-    [[nodiscard]] std::vector<filesystem::SharedRoot> release_location_roots() && noexcept;
+    /// @brief Transfers implementation-independent settings to bootstrap.
+    /// @return Owned validated settings without parser implementation dependencies.
+    [[nodiscard]] AppSettings release_settings() && noexcept;
 
   private:
     friend class ConfigValidator;
 
     /// @brief Stores parser output after all semantic checks have succeeded.
     /// @param[in] parsed_configuration Complete validated parser model.
-    /// @param[in] location_roots Canonical roots corresponding to parsed locations.
-    ValidatedConfiguration(ParsedConfiguration parsed_configuration,
-                           std::vector<filesystem::SharedRoot> location_roots);
+    /// @param[in] settings Validated primitive settings corresponding to parser input.
+    ValidatedConfiguration(ParsedConfiguration parsed_configuration, AppSettings settings);
 
     ParsedConfiguration parsed_; ///< Syntax tree protected by the validation boundary.
-    std::vector<filesystem::SharedRoot>
-        location_roots_; ///< Canonical roots aligned with parsed locations.
+    AppSettings settings_;       ///< Validated primitive output consumed by bootstrap.
 };
 
 /// @brief Applies version-one semantic and filesystem rules to parsed configuration.

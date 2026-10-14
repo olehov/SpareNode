@@ -1,10 +1,5 @@
-#include <algorithm>
-#include <filesystem>
 #include <iostream>
-#include <iterator>
 #include <memory>
-#include <optional>
-#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -14,10 +9,8 @@
 #include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/application/command_line.hpp"
 #include "sparenode/application/running_application.hpp"
-#include "sparenode/authentication/file_authentication.hpp"
+#include "sparenode/bootstrap/runtime_bootstrap.hpp"
 #include "sparenode/configuration/config_loader.hpp"
-#include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 #include "sparenode/http/session/http_connection_handler.hpp"
@@ -45,35 +38,6 @@ parse_startup_options(const int argc, const char *const *argv)
     return sparenode::application::parse_command_line(arguments);
 }
 
-/// @brief Creates mandatory owner authentication and reports only non-sensitive failures.
-/// @param[in] credential_path Resolved owner credential file selected by configuration.
-/// @param[in] locations Filesystem locations that must not expose the credential file.
-/// @return Ready authentication service, or no value after reporting a startup failure.
-[[nodiscard]] std::optional<sparenode::authentication::AuthenticationService>
-create_authentication_or_report(
-    const std::filesystem::path &credential_path,
-    const std::span<const sparenode::configuration::runtime::LocationConfig> locations)
-{
-    // Strip configuration and HTTP metadata at the authentication boundary.
-    std::vector<sparenode::filesystem::SharedRoot> shared_roots;
-    shared_roots.reserve(locations.size());
-    std::ranges::transform(locations, std::back_inserter(shared_roots),
-                           [](const auto &location) { return location.root(); });
-    auto result = sparenode::authentication::create_file_authentication_service(credential_path,
-                                                                                shared_roots);
-    if (result)
-    {
-        return std::move(result).value();
-    }
-
-    const std::string diagnostic =
-        std::string("error: ") + sparenode::authentication::to_string(result.error());
-    sparenode::logging::write_console_diagnostic(std::cerr, diagnostic,
-                                                 sparenode::logging::LogSeverity::error);
-    std::cerr << "\nSpareNode was not started.\n";
-    return std::nullopt;
-}
-
 } // namespace
 
 int main(const int argc, const char *const argv[])
@@ -97,19 +61,21 @@ int main(const int argc, const char *const argv[])
         std::cerr << "\nSpareNode was not started.\n";
         return 2;
     }
-    const auto authentication =
-        create_authentication_or_report(config_result->servers().front().credentials_file(),
-                                        config_result->servers().front().locations());
-    if (!authentication.has_value())
+    auto runtime_result = sparenode::bootstrap::RuntimeBootstrap::build(config_result.value());
+    if (!runtime_result)
     {
+        sparenode::logging::write_console_diagnostic(
+            std::cerr, sparenode::bootstrap::format_runtime_bootstrap_error(runtime_result.error()),
+            sparenode::logging::LogSeverity::error);
+        std::cerr << "\nSpareNode was not started.\n";
         return 3;
     }
     const auto console_sink = std::make_shared<sparenode::logging::ConsoleLogSink>(std::clog);
-    const auto minimum_severity = config_result->servers().front().minimum_log_severity();
+    const auto minimum_severity = runtime_result->config().servers().front().minimum_log_severity();
     const sparenode::logging::Logger logger(console_sink, minimum_severity);
 
     auto router_result =
-        sparenode::http::make_filesystem_api_router(config_result->servers().front());
+        sparenode::http::make_filesystem_api_router(runtime_result->config().servers().front());
     if (!router_result)
     {
         const std::string diagnostic =
@@ -122,17 +88,17 @@ int main(const int argc, const char *const argv[])
     const auto router =
         std::make_shared<const sparenode::http::HttpRouter>(std::move(router_result).value());
     const sparenode::http::HttpConnectionHandlerConfig handler_config{
-        .timeouts = config_result->servers().front().http_timeouts(),
+        .timeouts = runtime_result->config().servers().front().http_timeouts(),
         .deadline_provider = {},
-        .transport_policy = config_result->servers().front().transport_policy()};
+        .transport_policy = runtime_result->config().servers().front().transport_policy()};
     auto handler = sparenode::http::make_http_connection_handler(router, handler_config);
     auto admission = sparenode::http::make_http_connection_admission(handler_config);
     sparenode::application::RunningApplicationObservers observers{
         sparenode::logging::make_connection_failure_log_observer(logger),
         sparenode::logging::make_connection_server_failure_log_observer(logger)};
     auto application_result = sparenode::application::RunningApplication::start(
-        std::move(config_result).value(), std::move(handler), std::move(observers),
-        std::move(admission));
+        std::move(runtime_result).value().release_config(), std::move(handler),
+        std::move(observers), std::move(admission));
     if (!application_result)
     {
         const std::string diagnostic =

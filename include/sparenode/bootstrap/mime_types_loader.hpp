@@ -8,7 +8,7 @@
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 
-namespace sparenode::configuration
+namespace sparenode::bootstrap
 {
 
 /// @brief Identifies why a configured `mime.types` file could not be loaded.
@@ -59,4 +59,4 @@ class MimeTypesLoader final
 /// @brief Returns stable text for one MIME loading failure.
 [[nodiscard]] const char *to_string(MimeTypesLoadErrorCode code) noexcept;
 
-} // namespace sparenode::configuration
+} // namespace sparenode::bootstrap

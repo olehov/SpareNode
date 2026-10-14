@@ -9,8 +9,6 @@
 #include "sparenode/configuration/config_lexer.hpp"
 #include "sparenode/configuration/config_parser.hpp"
 #include "sparenode/configuration/config_validator.hpp"
-#include "sparenode/configuration/mime_types_loader.hpp"
-#include "sparenode/configuration/runtime/app_config.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
@@ -31,7 +29,7 @@ struct ConfigFileError
 
 /// @brief Preserves the exact stage-specific failure produced by configuration loading.
 using ConfigLoadFailure = std::variant<ConfigFileError, ConfigLexerError, ConfigParserError,
-                                       std::vector<ConfigValidationError>, MimeTypesLoadError>;
+                                       std::vector<ConfigValidationError>>;
 
 /// @brief Associates a structured configuration failure with its selected source file.
 struct ConfigLoadError
@@ -40,14 +38,21 @@ struct ConfigLoadError
     ConfigLoadFailure failure;         ///< Original file, lexer, parser, or validator failure.
 };
 
+/// @brief Associates validated settings with the source used for relative bootstrap paths.
+struct LoadedConfiguration
+{
+    std::filesystem::path source_path;    ///< Main configuration file selected at startup.
+    ValidatedConfiguration configuration; ///< Pure validated syntax and primitive settings.
+};
+
 /// @brief Loads the complete persistent configuration pipeline without starting resources.
 class ConfigLoader final
 {
   public:
-    /// @brief Reads, tokenizes, parses, validates, and maps one `spnode.conf` file.
+    /// @brief Reads, tokenizes, parses, and validates one `spnode.conf` file.
     /// @param[in] source_path Configuration file selected at application startup.
-    /// @return Parser-independent runtime settings, or the original stage failure.
-    [[nodiscard]] static Result<runtime::AppConfig, ConfigLoadError>
+    /// @return Validated primitive settings, or the original stage failure.
+    [[nodiscard]] static Result<LoadedConfiguration, ConfigLoadError>
     load(const std::filesystem::path &source_path);
 };
 

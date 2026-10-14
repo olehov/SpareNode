@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "sparenode/configuration/runtime/server_config.hpp"
+#include "sparenode/application/runtime/server_config.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 
@@ -28,7 +28,7 @@ struct FilesystemApiError
 /// @param[in] server Validated server whose locations define the endpoints.
 /// @return Router containing configured filesystem endpoints, or a startup failure.
 [[nodiscard]] Result<HttpRouter, FilesystemApiError>
-make_filesystem_api_router(const configuration::runtime::ServerConfig &server);
+make_filesystem_api_router(const application::runtime::ServerConfig &server);
 
 /// @brief Returns stable text for one filesystem API construction failure.
 /// @param[in] code Failure category to describe.

@@ -21,8 +21,8 @@ constexpr std::size_t pending_connection_limit = 128;
 } // namespace
 
 Result<RunningApplication, ApplicationStartError>
-RunningApplication::start(configuration::runtime::AppConfig config,
-                          network::ConnectionHandler handler, RunningApplicationObservers observers,
+RunningApplication::start(runtime::AppConfig config, network::ConnectionHandler handler,
+                          RunningApplicationObservers observers,
                           std::optional<network::ConnectionAdmissionOptions> admission)
 {
     if (config.servers().empty())
@@ -62,13 +62,13 @@ RunningApplication::start(configuration::runtime::AppConfig config,
     }
 }
 
-RunningApplication::RunningApplication(configuration::runtime::AppConfig config,
+RunningApplication::RunningApplication(runtime::AppConfig config,
                                        std::vector<network::ConnectionServer> servers) noexcept
     : config_(std::move(config)), servers_(std::move(servers))
 {
 }
 
-const configuration::runtime::AppConfig &RunningApplication::config() const noexcept
+const runtime::AppConfig &RunningApplication::config() const noexcept
 {
     return config_;
 }

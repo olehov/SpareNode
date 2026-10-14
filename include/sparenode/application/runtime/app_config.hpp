@@ -3,9 +3,9 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/runtime/server_config.hpp"
+#include "sparenode/application/runtime/server_config.hpp"
 
-namespace sparenode::configuration::runtime
+namespace sparenode::application::runtime
 {
 
 /// @brief Owns immutable parser-independent settings used by a SpareNode process.
@@ -35,4 +35,4 @@ class AppConfig final
     std::vector<ServerConfig> servers_; ///< Validated servers in configuration order.
 };
 
-} // namespace sparenode::configuration::runtime
+} // namespace sparenode::application::runtime
