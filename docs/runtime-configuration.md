@@ -4,16 +4,18 @@ The runtime configuration is SpareNode's boundary between persistent configurati
 syntax and application behavior. The normal configuration pipeline is:
 
 ```text
-ConfigLexer -> ConfigParser -> ConfigValidator -> RuntimeConfigMapper -> AppConfig
+ConfigLexer -> ConfigParser -> ConfigValidator -> AppSettings -> RuntimeBootstrap -> AppConfig
 ```
 
-`RuntimeConfigMapper` accepts only `ValidatedConfiguration`. Consequently, the normal
-startup pipeline cannot map unchecked parser output, and runtime consumers never need
-tokens, directive kinds, source locations, or original configuration text.
+`ConfigValidator` produces configuration-owned primitive settings. `RuntimeBootstrap`
+accepts only a loaded validated configuration, resolves environment-dependent paths,
+and constructs concrete services before any listener starts. Runtime consumers never
+need tokens, directive kinds, source locations, or original configuration text.
 
 ## Model
 
-`runtime::AppConfig` owns an ordered collection of `runtime::ServerConfig` values.
+`application::runtime::AppConfig` owns an ordered collection of
+`application::runtime::ServerConfig` values.
 Version one maps exactly one server, while the collection keeps the runtime API stable
 if a later grammar permits multiple server blocks. Each server configuration contains:
 
@@ -24,7 +26,7 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
 - an immutable `HttpTransportPolicy` defining the direct-peer and HTTPS trust boundary;
 - an immutable MIME type registry loaded once from the optional external mapping file;
-- an ordered collection of `runtime::LocationConfig` values.
+- an ordered collection of `application::runtime::LocationConfig` values.
 
 Each location contains its validated HTTP API path, a filesystem-owned canonical
 `SharedRoot`, and filesystem-owned independent `allow_read`, `allow_write`, and
@@ -34,7 +36,7 @@ path again.
 
 The aggregate runtime types remain convenient for tests and a future settings UI to
 construct programmatically. The persistent-file startup path still uses the validator
-and mapper to preserve the file format's semantic guarantees.
+and bootstrap to preserve the file format's semantic and environment guarantees.
 
 ## Version-one defaults
 
