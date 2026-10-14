@@ -26,6 +26,8 @@ enum class RuntimeBootstrapErrorCode : std::uint8_t
 };
 
 /// @brief Preserves structured bootstrap detail without exposing configuration secrets.
+// The analyzer loses the default member initializer while tracing std::expected::error() copies.
+// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
 struct RuntimeBootstrapError
 {
     RuntimeBootstrapErrorCode code{

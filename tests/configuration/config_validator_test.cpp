@@ -248,6 +248,27 @@ TEST_CASE("Configuration validator enforces authentication transport boundaries"
         CHECK(ipv6.has_value());
     }
 
+    SECTION("numeric IPv6 boundaries are accepted")
+    {
+        const std::string address = GENERATE("::", "::1", "1::", "::ffff:127.0.0.1");
+        auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), "bind \"" + address +
+                                                     "\";\n"
+                                                     "transport_mode \"trusted_lan_http\";\n")));
+        CHECK(result.has_value());
+    }
+
+    SECTION("malformed numeric address boundaries are rejected")
+    {
+        const std::string address =
+            GENERATE(":::", "1.2.3.4::", "1:1.2.3.4::", "1:2:3:4:5:6:7:8:9", "01.2.3.4");
+        const auto errors = require_validation_errors(
+            make_configuration(directory.path(), "bind \"" + address +
+                                                     "\";\n"
+                                                     "transport_mode \"trusted_lan_http\";\n"));
+        CHECK(contains_error(errors, ConfigValidationErrorCode::invalid_bind_address));
+    }
+
     SECTION("loopback mode rejects network-facing listeners")
     {
         const auto errors =
@@ -279,6 +300,13 @@ TEST_CASE("Configuration validator enforces authentication transport boundaries"
             make_configuration(directory.path(), "transport_mode \"trusted_proxy_https\";\n"
                                                  "trusted_proxy \"proxy.internal\";\n"));
         CHECK(contains_error(invalid, ConfigValidationErrorCode::invalid_trusted_proxy));
+
+        const auto misplaced_ipv4_tail = require_validation_errors(
+            make_configuration(directory.path(), "bind \"192.0.2.10\";\n"
+                                                 "transport_mode \"trusted_proxy_https\";\n"
+                                                 "trusted_proxy \"1.2.3.4::\";\n"));
+        CHECK(
+            contains_error(misplaced_ipv4_tail, ConfigValidationErrorCode::invalid_trusted_proxy));
 
         const auto wildcard = require_validation_errors(make_configuration(
             directory.path(), "bind \"::\";\ntransport_mode \"trusted_proxy_https\";\n"

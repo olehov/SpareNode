@@ -133,7 +133,6 @@ TEST_CASE("Runtime bootstrap retains source locations for external failures",
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-bootstrap-errors");
     const auto missing_root = directory.path() / "missing";
-    provision_credentials(directory.path() / "credentials.conf");
 
     SECTION("missing shared root")
     {
@@ -168,5 +167,45 @@ TEST_CASE("Runtime bootstrap retains source locations for external failures",
         CHECK(sparenode::bootstrap::format_runtime_bootstrap_error(runtime.error())
                   .find("missing.types:1:1: error: unable to open MIME types file") !=
               std::string::npos);
+    }
+
+    SECTION("missing default credentials retain the server source location")
+    {
+        const auto shared = directory.path() / "shared";
+        REQUIRE(std::filesystem::create_directory(shared));
+        const auto config_path =
+            write_file(directory.path() / "spnode.conf", configuration_source(shared));
+        auto runtime =
+            sparenode::bootstrap::RuntimeBootstrap::build(load_configuration(config_path));
+
+        REQUIRE_FALSE(runtime.has_value());
+        CHECK(runtime.error().code ==
+              sparenode::bootstrap::RuntimeBootstrapErrorCode::authentication_failed);
+        CHECK(runtime.error().source_path == directory.path() / "credentials.conf");
+        CHECK(runtime.error().location == sparenode::configuration::SourceLocation{});
+        CHECK(runtime.error().authentication_error ==
+              sparenode::authentication::FileAuthenticationErrorCode::credential_open_failed);
+    }
+
+    SECTION("credentials inside a shared root fail without exposing their contents")
+    {
+        constexpr std::string_view credential_contents = "credential-secret-that-must-not-appear";
+        const auto shared = directory.path() / "shared";
+        REQUIRE(std::filesystem::create_directory(shared));
+        const auto credential_path = write_file(shared / "owner.conf", credential_contents);
+        const auto config_path =
+            write_file(directory.path() / "spnode.conf",
+                       configuration_source(shared, "credentials_file \"shared/owner.conf\";\n"));
+        auto runtime =
+            sparenode::bootstrap::RuntimeBootstrap::build(load_configuration(config_path));
+
+        REQUIRE_FALSE(runtime.has_value());
+        CHECK(runtime.error().code ==
+              sparenode::bootstrap::RuntimeBootstrapErrorCode::authentication_failed);
+        CHECK(runtime.error().source_path == credential_path);
+        CHECK(runtime.error().authentication_error ==
+              sparenode::authentication::FileAuthenticationErrorCode::credential_is_shared);
+        CHECK(sparenode::bootstrap::format_runtime_bootstrap_error(runtime.error())
+                  .find(credential_contents) == std::string::npos);
     }
 }

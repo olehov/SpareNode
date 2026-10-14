@@ -43,7 +43,8 @@ parse_ipv4(const std::string_view value) noexcept
         const auto end = value.find('.', begin);
         const auto component_end = end == std::string_view::npos ? value.size() : end;
         const auto component = value.substr(begin, component_end - begin);
-        if (component.empty() || component.size() > 3)
+        if (component.empty() || component.size() > 3 ||
+            (component.size() > 1 && component.front() == '0'))
         {
             return std::nullopt;
         }
@@ -111,7 +112,7 @@ parse_ipv4(const std::string_view value) noexcept
 
 /// @brief Appends IPv6 words from one side of an optional compression marker.
 [[nodiscard]] bool append_ipv6_words(const std::string_view sequence,
-                                     std::vector<std::uint16_t> &words)
+                                     std::vector<std::uint16_t> &words, const bool allow_ipv4_tail)
 {
     if (sequence.empty())
     {
@@ -125,7 +126,7 @@ parse_ipv4(const std::string_view value) noexcept
         const auto component = sequence.substr(begin, component_end - begin);
         if (component.contains('.'))
         {
-            if (end != std::string_view::npos)
+            if (!allow_ipv4_tail || end != std::string_view::npos)
             {
                 return false;
             }
@@ -175,7 +176,8 @@ parse_ipv4(const std::string_view value) noexcept
     const bool compressed = compression != std::string_view::npos;
     const auto left_text = compressed ? value.substr(0, compression) : value;
     const auto right_text = compressed ? value.substr(compression + 2) : std::string_view{};
-    if (!append_ipv6_words(left_text, left) || !append_ipv6_words(right_text, right))
+    if (!append_ipv6_words(left_text, left, !compressed) ||
+        !append_ipv6_words(right_text, right, true))
     {
         return std::nullopt;
     }

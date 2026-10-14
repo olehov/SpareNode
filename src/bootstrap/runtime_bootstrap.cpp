@@ -198,19 +198,13 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
             auto locations = build_locations(configured, loaded, authentication_roots);
             if (!locations)
             {
-                const auto &failure = locations.error();
-                return unexpected(RuntimeBootstrapError{
-                    failure.code, failure.source_path, failure.location, failure.shared_root_error,
-                    failure.mime_types_error, failure.authentication_error});
+                return unexpected(locations.error());
             }
 
             auto mime_types = load_mime_types(configured, loaded);
             if (!mime_types)
             {
-                const auto &failure = mime_types.error();
-                return unexpected(RuntimeBootstrapError{
-                    failure.code, failure.source_path, failure.location, failure.shared_root_error,
-                    failure.mime_types_error, failure.authentication_error});
+                return unexpected(mime_types.error());
             }
 
             auto credentials = resolve_credentials(configured, loaded);
