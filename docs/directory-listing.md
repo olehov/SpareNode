@@ -91,7 +91,9 @@ do not include native error text or paths.
 An upload uses its wildcard suffix as the URL-encoded relative destination path. The request body
 may use `Content-Length` or chunked transfer coding; both forms pass through the same bounded
 decoder and temporary-file sink. The route receives only a completed artifact and publishes it
-through the confined upload finalizer. Empty request bodies create empty files.
+through the confined upload finalizer. The sink and its bounded I/O worker belong to the storage
+module; the filesystem finalizer owns destination confinement. Empty request bodies create empty
+files.
 
 The location must explicitly set `write = true`; otherwise the route returns `403 Forbidden`.
 Successful publication returns `201 Created` with `{"status":"created"}`. Existing destinations

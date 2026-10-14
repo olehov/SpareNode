@@ -9,7 +9,8 @@ complete request through `HttpRouter`, and streams the resulting
 `BufferedRequest` freezes validated metadata storage and feeds fresh body bytes to
 one persistent `HttpBodyDecoder` for fixed-length and chunked framing. Both modes
 write decoded payload through the same `RequestBodyIngestor` into a uniquely created
-temporary file; chunk syntax is never stored or reparsed. Empty bodies create no file.
+temporary file supplied by the storage module; chunk syntax is never stored or reparsed.
+Empty bodies create no file.
 The route receives the exact decoded size and shared ownership of the completed
 artifact. Upload finalization copies that artifact into a staging file within the
 share; the artifact's final owner removes its original temporary file.
@@ -123,15 +124,16 @@ is attempted after a receive timeout. Cancellation remains a distinct failure an
 wins if already observable at the same wait boundary as timeout.
 
 The same stop token and refreshed absolute receive deadline reach temporary-body
-writes and finalization. Native writes are capped at 16 KiB. Each active request
-reuses one I/O worker and one 16 KiB payload buffer through its body and flush.
+writes and finalization. Native writes are capped at 16 KiB. `TemporaryFileWriter`
+in the storage module reuses one I/O worker and one 16 KiB payload buffer through
+the request body and flush.
 The HTTP worker stops waiting at cancellation or deadline even if the native call
 does not return. At most 32 native file operations may run process-wide; idle
 workers waiting for more network bytes do not occupy those slots. Healthy
 requests wait for a free slot under their cancellation and deadline policy;
 requests fail with a structured resource error if all slots belong to stalled,
 detached operations. A stalled operation retains its temporary file until the
-filesystem call returns, so cleanup can be delayed beyond the request deadline.
+storage call returns, so cleanup can be delayed beyond the request deadline.
 
 These are request-receive deadlines. They start when the worker begins the session,
 not at TCP accept, and do not interrupt route execution or response writes. Native

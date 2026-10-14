@@ -1,6 +1,6 @@
 # Upload finalization
 
-`filesystem::finalize_upload` publishes a completed `TemporaryFile` under a
+`filesystem::finalize_upload` publishes a completed `storage::TemporaryFile` under a
 validated relative path in a configured `SharedRoot`. The filesystem API uses
 this operation for raw `PUT` request bodies on locations with `write = true`.
 
@@ -15,7 +15,7 @@ different volumes. The `.sparenode-upload-` prefix is reserved: pending stages
 are omitted from directory listings and rejected by direct file reads.
 
 Successful publication leaves the final file in the share. Destroying the
-`TemporaryFile` then removes its original temporary path. On cancellation,
+storage artifact then removes its original temporary path. On cancellation,
 deadline expiry, copy or flush failure, or a destination-name conflict, the
 final name is not created and the finalizer attempts to remove its staging
 file. A failed cleanup can leave an `.sparenode-upload-*.tmp` sibling, which an
