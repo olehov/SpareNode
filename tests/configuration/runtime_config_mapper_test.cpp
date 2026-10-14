@@ -8,8 +8,8 @@
 #include "sparenode/configuration/config_lexer.hpp"
 #include "sparenode/configuration/config_parser.hpp"
 #include "sparenode/configuration/config_validator.hpp"
-#include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/configuration/runtime_config_mapper.hpp"
+#include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "support/optional.hpp"
@@ -75,7 +75,7 @@ TEST_CASE("Runtime configuration mapper applies every version one default",
     CHECK(server.locations().front().api_path() == "/api/Documents");
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
     CHECK(server.locations().front().permissions() ==
-          sparenode::configuration::runtime::LocationPermissions{true, false, false});
+          sparenode::filesystem::LocationPermissions{true, false, false});
 }
 
 TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
@@ -109,7 +109,7 @@ TEST_CASE("Runtime configuration mapper preserves explicit validated settings",
     CHECK(sparenode::test::require_optional(server.transport_policy().trusted_proxy) == "::1");
     REQUIRE(server.locations().size() == 1);
     CHECK(server.locations().front().permissions() ==
-          sparenode::configuration::runtime::LocationPermissions{false, true, true});
+          sparenode::filesystem::LocationPermissions{false, true, true});
 }
 
 TEST_CASE("Runtime configuration mapper transfers the validated MIME registry",

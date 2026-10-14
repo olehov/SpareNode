@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "sparenode/configuration/config_loader.hpp"
-#include "sparenode/configuration/runtime/location_permissions.hpp"
+#include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "support/temporary_directory.hpp"
 #include "support/windows_junction.hpp"
@@ -102,7 +102,7 @@ TEST_CASE("Configuration loader maps a valid file through every configuration st
     REQUIRE(server.locations().size() == 1);
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
     CHECK(server.locations().front().permissions() ==
-          sparenode::configuration::runtime::LocationPermissions{false, true, true});
+          sparenode::filesystem::LocationPermissions{false, true, true});
 }
 
 TEST_CASE("Configuration loader resolves the separate credential file beside the main config",

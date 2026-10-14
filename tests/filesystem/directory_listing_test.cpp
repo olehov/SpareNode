@@ -12,20 +12,20 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 
 namespace
 {
 
 /// @brief Creates a validated root for one isolated test directory.
-[[nodiscard]] sparenode::configuration::SharedRoot
+[[nodiscard]] sparenode::filesystem::SharedRoot
 make_root(const sparenode::test::TemporaryDirectory &directory)
 {
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     return std::move(root).value();
 }
@@ -156,7 +156,7 @@ TEST_CASE("Directory listing hides external links and identifies internal links"
     create_link(shared / "inside.txt", shared / "internal-link", false);
     create_link(outside / "secret.txt", shared / "external-link", false);
     create_link(outside, shared / "external-directory-link", true);
-    auto root = sparenode::configuration::SharedRoot::create(shared);
+    auto root = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root);
 
     const auto listing = sparenode::filesystem::list_directory(root.value(), {});
@@ -191,7 +191,7 @@ TEST_CASE("Directory entry metadata rejects a target replaced after safe-path va
     REQUIRE(std::ofstream(shared / "victim.txt") << "inside");
     REQUIRE(std::ofstream(outside / "secret.txt") << "external-secret");
 
-    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    auto root_result = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root_result);
     const auto root = std::move(root_result).value();
     const auto validated = sparenode::filesystem::SafePath::resolve(root, "victim.txt");
@@ -218,7 +218,7 @@ TEST_CASE("Directory entry metadata stays bound to its opened parent",
     const auto moved = shared / "moved";
     std::filesystem::create_directories(listed);
 
-    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    auto root_result = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root_result);
     const auto root = std::move(root_result).value();
     const auto directory =

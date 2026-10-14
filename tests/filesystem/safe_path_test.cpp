@@ -6,8 +6,8 @@
 #include <string_view>
 #include <utility>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 
 namespace
@@ -16,10 +16,10 @@ namespace
 /// @brief Creates a validated shared root for a test-owned directory.
 /// @param[in] path Existing directory to validate.
 /// @return Validated shared root.
-[[nodiscard]] sparenode::configuration::SharedRoot
+[[nodiscard]] sparenode::filesystem::SharedRoot
 require_shared_root(const std::filesystem::path &path)
 {
-    auto result = sparenode::configuration::SharedRoot::create(path);
+    auto result = sparenode::filesystem::SharedRoot::create(path);
     REQUIRE(result);
     return std::move(result).value();
 }

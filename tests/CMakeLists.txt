@@ -26,16 +26,6 @@ add_executable(sparenode_tests
     configuration/config_parser_test.cpp
     configuration/config_validator_test.cpp
     configuration/runtime_config_mapper_test.cpp
-    configuration/shared_root_test.cpp
-    filesystem/directory_creator_test.cpp
-    filesystem/directory_listing_test.cpp
-    filesystem/file_read_stream_test.cpp
-    filesystem/filesystem_entry_remover_test.cpp
-    filesystem/filesystem_security_test.cpp
-    filesystem/safe_path_test.cpp
-    filesystem/safe_path_symlink_test.cpp
-    filesystem/temporary_file_test.cpp
-    filesystem/upload_finalizer_test.cpp
     http/api/filesystem_api_test.cpp
     http/session/http_connection_handler_test.cpp
     http/session/http_transport_policy_test.cpp
@@ -55,12 +45,6 @@ target_link_libraries(sparenode_tests PRIVATE
     sparenode_network_logging
     Threads::Threads
 )
-
-if(WIN32)
-    target_sources(sparenode_tests PRIVATE
-        filesystem/windows_reparse_point_test.cpp
-    )
-endif()
 
 option(SPARENODE_REQUIRE_SYMLINK_TESTS "Fail instead of skipping when symlink privilege is missing" OFF)
 if(SPARENODE_REQUIRE_SYMLINK_TESTS)
@@ -97,6 +81,45 @@ sparenode_enable_cppcheck(sparenode_foundation_tests)
 sparenode_enable_static_analysis(sparenode_foundation_tests)
 
 catch_discover_tests(sparenode_foundation_tests)
+
+add_executable(sparenode_filesystem_tests
+    filesystem/directory_creator_test.cpp
+    filesystem/directory_listing_test.cpp
+    filesystem/file_read_stream_test.cpp
+    filesystem/filesystem_entry_remover_test.cpp
+    filesystem/filesystem_security_test.cpp
+    filesystem/safe_path_test.cpp
+    filesystem/safe_path_symlink_test.cpp
+    filesystem/shared_root_test.cpp
+    filesystem/temporary_file_test.cpp
+    filesystem/upload_finalizer_test.cpp
+)
+
+if(WIN32)
+    target_sources(sparenode_filesystem_tests PRIVATE
+        filesystem/windows_reparse_point_test.cpp
+    )
+endif()
+
+if(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    target_compile_definitions(sparenode_filesystem_tests PRIVATE SPARENODE_REQUIRE_SYMLINK_TESTS)
+endif()
+
+target_link_libraries(sparenode_filesystem_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_filesystem
+    Threads::Threads
+)
+
+target_include_directories(sparenode_filesystem_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_tests)
+sparenode_enable_cppcheck(sparenode_filesystem_tests)
+sparenode_enable_static_analysis(sparenode_filesystem_tests)
+
+catch_discover_tests(sparenode_filesystem_tests)
 
 add_executable(sparenode_logging_tests
     logging/logger_test.cpp
@@ -162,7 +185,7 @@ catch_discover_tests(sparenode_network_logging_tests)
 
 add_test(
     NAME sparenode_filesystem_security_suite
-    COMMAND $<TARGET_FILE:sparenode_tests> "[filesystem][security]" --reporter console
+    COMMAND $<TARGET_FILE:sparenode_filesystem_tests> "[filesystem][security]" --reporter console
 )
 set_tests_properties(sparenode_filesystem_security_suite PROPERTIES
     LABELS "filesystem;security"

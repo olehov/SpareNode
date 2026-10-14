@@ -390,7 +390,7 @@ TEST_CASE("Configuration validator reports location directive and filesystem fai
         REQUIRE(errors.size() == 1);
         REQUIRE(errors.front().shared_root_error.has_value());
         CHECK(sparenode::test::require_optional(errors.front().shared_root_error).code ==
-              sparenode::configuration::SharedRootErrorCode::not_found);
+              sparenode::filesystem::SharedRootErrorCode::not_found);
     }
 
     SECTION("regular file")
@@ -404,7 +404,7 @@ TEST_CASE("Configuration validator reports location directive and filesystem fai
         REQUIRE(errors.size() == 1);
         REQUIRE(errors.front().shared_root_error.has_value());
         CHECK(sparenode::test::require_optional(errors.front().shared_root_error).code ==
-              sparenode::configuration::SharedRootErrorCode::not_directory);
+              sparenode::filesystem::SharedRootErrorCode::not_directory);
     }
 }
 

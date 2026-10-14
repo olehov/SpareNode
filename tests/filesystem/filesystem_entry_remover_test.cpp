@@ -7,9 +7,9 @@
 #include <system_error>
 #include <thread>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 #include "sparenode/filesystem/filesystem_entry_remover.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 #ifdef _WIN32
 #include "support/windows_junction.hpp"
@@ -18,10 +18,10 @@
 namespace
 {
 
-[[nodiscard]] sparenode::configuration::SharedRoot
+[[nodiscard]] sparenode::filesystem::SharedRoot
 make_root(const sparenode::test::TemporaryDirectory &directory)
 {
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     return std::move(root).value();
 }
@@ -116,7 +116,7 @@ TEST_CASE("Filesystem entry removal cannot follow a parent relocated outside the
     const auto moved_parent = fixture.path() / "moved-parent";
     REQUIRE(std::filesystem::create_directories(parent_path));
     REQUIRE(std::ofstream(parent_path / "retained.txt") << "content");
-    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    auto root_result = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root_result);
     const auto root = std::move(root_result).value();
 #ifdef _WIN32
@@ -192,7 +192,7 @@ TEST_CASE("Rejected mutation directories release their pending oplocks",
     const auto moved_outside = fixture.path() / "moved-outside";
     REQUIRE(std::filesystem::create_directory(shared));
     REQUIRE(std::filesystem::create_directory(outside));
-    auto root_result = sparenode::configuration::SharedRoot::create(shared);
+    auto root_result = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root_result);
     const auto root = std::move(root_result).value();
 
