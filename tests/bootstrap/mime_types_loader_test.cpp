@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-#include "sparenode/configuration/mime_types_loader.hpp"
+#include "sparenode/bootstrap/mime_types_loader.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -30,9 +30,9 @@ TEST_CASE("MIME types loader accepts comments CRLF and multiple extensions",
           "[configuration][mime-types]")
 {
     const auto result =
-        sparenode::configuration::MimeTypesLoader::parse("# Browser-safe mappings\r\n"
-                                                         "image/jpeg JPEG jpg # both spellings\r\n"
-                                                         "text/plain txt log\r\n");
+        sparenode::bootstrap::MimeTypesLoader::parse("# Browser-safe mappings\r\n"
+                                                     "image/jpeg JPEG jpg # both spellings\r\n"
+                                                     "text/plain txt log\r\n");
 
     REQUIRE(result.has_value());
     CHECK(result->size() == 4);
@@ -66,11 +66,11 @@ TEST_CASE("MIME registry forces browser-executable content to plain text",
 TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
           "[configuration][mime-types]")
 {
-    using Code = sparenode::configuration::MimeTypesLoadErrorCode;
+    using Code = sparenode::bootstrap::MimeTypesLoadErrorCode;
 
     SECTION("missing extension")
     {
-        const auto result = sparenode::configuration::MimeTypesLoader::parse("text/plain\n");
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse("text/plain\n");
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::invalid_line);
         CHECK(result.error().line == 1);
@@ -78,15 +78,14 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
 
     SECTION("invalid media type")
     {
-        const auto result = sparenode::configuration::MimeTypesLoader::parse("text txt\n");
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse("text txt\n");
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::invalid_media_type);
     }
 
     SECTION("invalid extension")
     {
-        const auto result =
-            sparenode::configuration::MimeTypesLoader::parse("text/plain bad.ext\n");
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse("text/plain bad.ext\n");
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::invalid_extension);
     }
@@ -95,11 +94,11 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
     {
         const std::string accepted_extension(
             sparenode::http::MimeTypeRegistry::maximum_extension_bytes, 'a');
-        const auto accepted = sparenode::configuration::MimeTypesLoader::parse(
-            "text/plain " + accepted_extension + "\n");
+        const auto accepted =
+            sparenode::bootstrap::MimeTypesLoader::parse("text/plain " + accepted_extension + "\n");
         REQUIRE(accepted.has_value());
 
-        const auto rejected = sparenode::configuration::MimeTypesLoader::parse(
+        const auto rejected = sparenode::bootstrap::MimeTypesLoader::parse(
             "text/plain " + accepted_extension + "a\n");
         REQUIRE_FALSE(rejected.has_value());
         CHECK(rejected.error().code == Code::invalid_extension);
@@ -111,18 +110,18 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
             "a/" +
             std::string(sparenode::http::MimeTypeRegistry::maximum_media_type_bytes - 2, 'b');
         const auto accepted =
-            sparenode::configuration::MimeTypesLoader::parse(accepted_media_type + " ext\n");
+            sparenode::bootstrap::MimeTypesLoader::parse(accepted_media_type + " ext\n");
         REQUIRE(accepted.has_value());
 
         const auto rejected =
-            sparenode::configuration::MimeTypesLoader::parse(accepted_media_type + "b ext\n");
+            sparenode::bootstrap::MimeTypesLoader::parse(accepted_media_type + "b ext\n");
         REQUIRE_FALSE(rejected.has_value());
         CHECK(rejected.error().code == Code::invalid_media_type);
     }
 
     SECTION("case-insensitive duplicate")
     {
-        const auto result = sparenode::configuration::MimeTypesLoader::parse(
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse(
             "text/plain txt\napplication/octet-stream TXT\n");
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::duplicate_extension);
@@ -131,9 +130,9 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
 
     SECTION("line length bound")
     {
-        const std::string source(sparenode::configuration::MimeTypesLoader::maximum_line_bytes + 1,
+        const std::string source(sparenode::bootstrap::MimeTypesLoader::maximum_line_bytes + 1,
                                  'a');
-        const auto result = sparenode::configuration::MimeTypesLoader::parse(source);
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse(source);
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::line_too_long);
     }
@@ -146,7 +145,7 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
         {
             source += "text/plain x" + std::to_string(index) + "\n";
         }
-        const auto result = sparenode::configuration::MimeTypesLoader::parse(source);
+        const auto result = sparenode::bootstrap::MimeTypesLoader::parse(source);
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error().code == Code::too_many_entries);
     }
@@ -155,18 +154,17 @@ TEST_CASE("MIME types loader rejects malformed ambiguous and oversized input",
 TEST_CASE("MIME types loader bounds file input and reports file failures",
           "[configuration][mime-types]")
 {
-    using Code = sparenode::configuration::MimeTypesLoadErrorCode;
+    using Code = sparenode::bootstrap::MimeTypesLoadErrorCode;
     const sparenode::test::TemporaryDirectory directory("sparenode-mime-types");
 
     const auto missing =
-        sparenode::configuration::MimeTypesLoader::load(directory.path() / "missing.types");
+        sparenode::bootstrap::MimeTypesLoader::load(directory.path() / "missing.types");
     REQUIRE_FALSE(missing.has_value());
     CHECK(missing.error().code == Code::open_failed);
 
-    const std::string oversized(sparenode::configuration::MimeTypesLoader::maximum_file_bytes + 1,
-                                '#');
+    const std::string oversized(sparenode::bootstrap::MimeTypesLoader::maximum_file_bytes + 1, '#');
     const auto oversized_result =
-        sparenode::configuration::MimeTypesLoader::load(write_mime_types(directory, oversized));
+        sparenode::bootstrap::MimeTypesLoader::load(write_mime_types(directory, oversized));
     REQUIRE_FALSE(oversized_result.has_value());
     CHECK(oversized_result.error().code == Code::file_too_large);
 }

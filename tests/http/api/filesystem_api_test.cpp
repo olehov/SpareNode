@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/configuration/runtime/server_config.hpp"
+#include "sparenode/application/runtime/location_config.hpp"
+#include "sparenode/application/runtime/server_config.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
@@ -88,14 +88,14 @@ namespace
 }
 
 /// @brief Creates one server backed by the supplied temporary location.
-[[nodiscard]] sparenode::configuration::runtime::ServerConfig
+[[nodiscard]] sparenode::application::runtime::ServerConfig
 make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true,
             sparenode::http::MimeTypeRegistry mime_types = {}, const bool allow_write = false,
             const bool allow_delete = false)
 {
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    std::vector<sparenode::application::runtime::LocationConfig> locations;
     locations.emplace_back(
         "/api/Documents", std::move(root).value(),
         sparenode::filesystem::LocationPermissions{allow_read, allow_write, allow_delete});
@@ -549,12 +549,12 @@ TEST_CASE("Filesystem API registers multiple configured locations with segment b
     REQUIRE(documents_root);
     REQUIRE(media_root);
 
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    std::vector<sparenode::application::runtime::LocationConfig> locations;
     locations.emplace_back("/api/docs", std::move(documents_root).value(),
                            sparenode::filesystem::LocationPermissions{});
     locations.emplace_back("/api/media", std::move(media_root).value(),
                            sparenode::filesystem::LocationPermissions{});
-    const sparenode::configuration::runtime::ServerConfig server(
+    const sparenode::application::runtime::ServerConfig server(
         {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations));
     auto router = sparenode::http::make_filesystem_api_router(server);
     REQUIRE(router);
@@ -727,7 +727,7 @@ TEST_CASE("Filesystem API confines inline symbolic-link targets to the configure
 TEST_CASE("Filesystem API rejects runtime configuration without a location",
           "[http][filesystem-api][startup]")
 {
-    const sparenode::configuration::runtime::ServerConfig server(
+    const sparenode::application::runtime::ServerConfig server(
         {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, {});
     const auto router = sparenode::http::make_filesystem_api_router(server);
     REQUIRE_FALSE(router);

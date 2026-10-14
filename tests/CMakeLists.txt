@@ -20,12 +20,6 @@ add_executable(sparenode_tests
     authentication/password_verifier_test.cpp
     application/command_line_test.cpp
     application/running_application_test.cpp
-    configuration/config_lexer_test.cpp
-    configuration/config_loader_test.cpp
-    configuration/mime_types_loader_test.cpp
-    configuration/config_parser_test.cpp
-    configuration/config_validator_test.cpp
-    configuration/runtime_config_mapper_test.cpp
     http/api/filesystem_api_test.cpp
     http/session/http_connection_handler_test.cpp
     http/session/http_transport_policy_test.cpp
@@ -66,6 +60,48 @@ sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
+
+add_executable(sparenode_configuration_tests
+    configuration/config_lexer_test.cpp
+    configuration/config_loader_test.cpp
+    configuration/config_parser_test.cpp
+    configuration/config_validator_test.cpp
+)
+
+target_link_libraries(sparenode_configuration_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_configuration
+)
+
+target_include_directories(sparenode_configuration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_configuration_tests)
+sparenode_enable_cppcheck(sparenode_configuration_tests)
+sparenode_enable_static_analysis(sparenode_configuration_tests)
+
+catch_discover_tests(sparenode_configuration_tests)
+
+add_executable(sparenode_bootstrap_tests
+    bootstrap/mime_types_loader_test.cpp
+    bootstrap/runtime_bootstrap_test.cpp
+)
+
+target_link_libraries(sparenode_bootstrap_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_bootstrap
+)
+
+target_include_directories(sparenode_bootstrap_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_bootstrap_tests)
+sparenode_enable_cppcheck(sparenode_bootstrap_tests)
+sparenode_enable_static_analysis(sparenode_bootstrap_tests)
+
+catch_discover_tests(sparenode_bootstrap_tests)
 
 add_executable(sparenode_foundation_tests
     foundation/result_test.cpp
