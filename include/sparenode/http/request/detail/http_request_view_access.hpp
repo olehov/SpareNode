@@ -39,8 +39,8 @@ struct HttpRequestViewAccess
     /// @return Request retaining metadata views and shared temporary-file ownership.
     [[nodiscard]] static HttpRequestView
     create_file_backed(HttpRequestHead head, const std::uint64_t body_size,
-                       std::shared_ptr<filesystem::TemporaryFile> artifact,
-                       const filesystem::TemporaryFileIoOptions &options = {})
+                       std::shared_ptr<const storage::TemporaryFile> artifact,
+                       const storage::TemporaryFileIoOptions &options = {})
     {
         HttpRequestView request(head.method, head.target, std::move(head.fields), {}, body_size);
         request.temporary_body_ = std::move(artifact);

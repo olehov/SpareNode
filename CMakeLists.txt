@@ -100,6 +100,20 @@ sparenode_enable_compiler_warnings(sparenode_network)
 sparenode_enable_cppcheck(sparenode_network)
 sparenode_enable_static_analysis(sparenode_network)
 
+add_library(sparenode_storage STATIC
+    src/storage/temporary_file.cpp
+    src/storage/temporary_file_writer.cpp
+)
+
+target_link_libraries(sparenode_storage
+    PUBLIC sparenode_foundation
+    PRIVATE Threads::Threads
+)
+
+sparenode_enable_compiler_warnings(sparenode_storage)
+sparenode_enable_cppcheck(sparenode_storage)
+sparenode_enable_static_analysis(sparenode_storage)
+
 add_library(sparenode_filesystem STATIC
     src/filesystem/detail/path_request_decoder.cpp
     src/filesystem/directory_creator.cpp
@@ -107,7 +121,6 @@ add_library(sparenode_filesystem STATIC
     src/filesystem/filesystem_entry_remover.cpp
     src/filesystem/safe_path.cpp
     src/filesystem/shared_root.cpp
-    src/filesystem/temporary_file.cpp
     src/filesystem/upload_finalizer.cpp
 )
 
@@ -134,6 +147,7 @@ endif()
 
 target_link_libraries(sparenode_filesystem PUBLIC
     sparenode_foundation
+    sparenode_storage
 )
 
 if(WIN32)
@@ -208,6 +222,7 @@ target_link_libraries(sparenode_core PUBLIC
     sparenode_filesystem
     sparenode_logging
     sparenode_network
+    sparenode_storage
 )
 
 if(WIN32)

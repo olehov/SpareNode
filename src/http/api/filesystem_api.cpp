@@ -20,12 +20,12 @@
 #include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/filesystem_entry_remover.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
-#include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/http/response/http_response.hpp"
+#include "sparenode/storage/temporary_file.hpp"
 
 namespace sparenode::http
 {
@@ -42,10 +42,10 @@ using filesystem::FileReadError;
 using filesystem::FileReadErrorCode;
 using filesystem::FilesystemEntryRemovalError;
 using filesystem::FilesystemEntryRemovalErrorCode;
-using filesystem::TemporaryFileError;
-using filesystem::TemporaryFileErrorCode;
 using filesystem::UploadFinalizationError;
 using filesystem::UploadFinalizationErrorCode;
+using storage::TemporaryFileError;
+using storage::TemporaryFileErrorCode;
 
 /// @brief Appends one string using JSON escaping without changing valid UTF-8 bytes.
 void append_json_string(std::string &output, const std::string_view value)
@@ -486,8 +486,8 @@ handle_upload(const LocationConfig &location, const HttpRequestView &request,
         }
 
         auto retained_artifact = request.temporary_body();
-        std::optional<filesystem::TemporaryFile> materialized_artifact;
-        const filesystem::TemporaryFile *source = retained_artifact.get();
+        std::optional<storage::TemporaryFile> materialized_artifact;
+        const storage::TemporaryFile *source = retained_artifact.get();
         if (source == nullptr)
         {
             if (request.body_size() != request.body().size())
@@ -495,7 +495,7 @@ handle_upload(const LocationConfig &location, const HttpRequestView &request,
                 return make_json_response(HttpStatusCode::bad_request,
                                           "{\"error\":\"invalid_upload\"}");
             }
-            auto created = filesystem::TemporaryFile::create();
+            auto created = storage::TemporaryFile::create();
             if (!created)
             {
                 return make_public_error_response(public_error(created.error()));
@@ -656,7 +656,8 @@ make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
                 router, HttpMethod::post, location.api_path(),
                 [location](const HttpRequestView &request, const HttpRouteParameters &)
                 { return handle_directory_creation(location, request, {}); },
-                [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+                [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+                {
                     return handle_directory_creation(location, request,
                                                      parameters.wildcard_suffix());
                 });

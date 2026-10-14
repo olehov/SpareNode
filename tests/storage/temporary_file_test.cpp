@@ -7,7 +7,7 @@
 #include <stop_token>
 #include <string>
 
-#include "sparenode/filesystem/temporary_file.hpp"
+#include "sparenode/storage/temporary_file.hpp"
 
 namespace
 {
@@ -27,11 +27,11 @@ namespace
 } // namespace
 
 TEST_CASE("Temporary file writes complete content and removes the owned path",
-          "[filesystem][temporary-file]")
+          "[storage][temporary-file]")
 {
     std::filesystem::path path;
     {
-        auto created = sparenode::filesystem::TemporaryFile::create();
+        auto created = sparenode::storage::TemporaryFile::create();
         REQUIRE(created.has_value());
         auto file = std::move(created).value();
         path = file.path();
@@ -44,17 +44,16 @@ TEST_CASE("Temporary file writes complete content and removes the owned path",
         CHECK(read_file(path) == "first-second");
         const auto late_write = file.write(bytes("ignored"));
         REQUIRE_FALSE(late_write.has_value());
-        CHECK(late_write.error().code ==
-              sparenode::filesystem::TemporaryFileErrorCode::invalid_state);
+        CHECK(late_write.error().code == sparenode::storage::TemporaryFileErrorCode::invalid_state);
     }
     CHECK_FALSE(std::filesystem::exists(path));
 }
 
-TEST_CASE("Temporary file removes an incomplete artifact", "[filesystem][temporary-file]")
+TEST_CASE("Temporary file removes an incomplete artifact", "[storage][temporary-file]")
 {
     std::filesystem::path path;
     {
-        auto created = sparenode::filesystem::TemporaryFile::create();
+        auto created = sparenode::storage::TemporaryFile::create();
         REQUIRE(created.has_value());
         auto file = std::move(created).value();
         path = file.path();
@@ -65,15 +64,14 @@ TEST_CASE("Temporary file removes an incomplete artifact", "[filesystem][tempora
 }
 
 TEST_CASE("Temporary file release transfers path cleanup responsibility",
-          "[filesystem][temporary-file]")
+          "[storage][temporary-file]")
 {
-    auto created = sparenode::filesystem::TemporaryFile::create();
+    auto created = sparenode::storage::TemporaryFile::create();
     REQUIRE(created.has_value());
     auto file = std::move(created).value();
     const auto early_release = file.release();
     REQUIRE_FALSE(early_release.has_value());
-    CHECK(early_release.error().code ==
-          sparenode::filesystem::TemporaryFileErrorCode::invalid_state);
+    CHECK(early_release.error().code == sparenode::storage::TemporaryFileErrorCode::invalid_state);
     REQUIRE(file.write(bytes("published")).has_value());
     REQUIRE(file.complete().has_value());
     auto released = file.release();
@@ -87,16 +85,16 @@ TEST_CASE("Temporary file release transfers path cleanup responsibility",
 }
 
 TEST_CASE("Temporary file rejects expired writes and cancelled completion without publishing",
-          "[filesystem][temporary-file][timeout][cancel]")
+          "[storage][temporary-file][timeout][cancel]")
 {
-    auto created = sparenode::filesystem::TemporaryFile::create();
+    auto created = sparenode::storage::TemporaryFile::create();
     REQUIRE(created.has_value());
     auto file = std::move(created).value();
     const auto expired =
         file.write(bytes("not written"),
                    {.deadline = std::chrono::steady_clock::now() - std::chrono::seconds{1}});
     REQUIRE_FALSE(expired.has_value());
-    CHECK(expired.error().code == sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded);
+    CHECK(expired.error().code == sparenode::storage::TemporaryFileErrorCode::deadline_exceeded);
     CHECK(file.size() == 0);
 
     REQUIRE(file.write(bytes("partial")).has_value());
@@ -104,7 +102,7 @@ TEST_CASE("Temporary file rejects expired writes and cancelled completion withou
     stop.request_stop();
     const auto completed = file.complete({.stop_token = stop.get_token()});
     REQUIRE_FALSE(completed.has_value());
-    CHECK(completed.error().code == sparenode::filesystem::TemporaryFileErrorCode::cancelled);
+    CHECK(completed.error().code == sparenode::storage::TemporaryFileErrorCode::cancelled);
     CHECK_FALSE(file.completed());
     CHECK_FALSE(file.release().has_value());
 }

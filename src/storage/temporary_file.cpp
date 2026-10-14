@@ -1,5 +1,5 @@
-#include "sparenode/filesystem/temporary_file.hpp"
-#include "detail/temporary_name.hpp"
+#include "sparenode/storage/temporary_file.hpp"
+#include "sparenode/storage/detail/temporary_name.hpp"
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@
 #include <unistd.h>
 #endif
 
-namespace sparenode::filesystem
+namespace sparenode::storage
 {
 namespace
 {
@@ -340,4 +340,4 @@ const char *to_string(const TemporaryFileErrorCode code) noexcept
     return "unknown temporary file error";
 }
 
-} // namespace sparenode::filesystem
+} // namespace sparenode::storage

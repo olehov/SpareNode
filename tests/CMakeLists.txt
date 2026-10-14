@@ -82,6 +82,23 @@ sparenode_enable_static_analysis(sparenode_foundation_tests)
 
 catch_discover_tests(sparenode_foundation_tests)
 
+add_executable(sparenode_storage_tests
+    storage/temporary_file_test.cpp
+    storage/temporary_file_writer_test.cpp
+)
+
+target_link_libraries(sparenode_storage_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_storage
+    Threads::Threads
+)
+
+sparenode_enable_compiler_warnings(sparenode_storage_tests)
+sparenode_enable_cppcheck(sparenode_storage_tests)
+sparenode_enable_static_analysis(sparenode_storage_tests)
+
+catch_discover_tests(sparenode_storage_tests)
+
 add_executable(sparenode_filesystem_tests
     filesystem/directory_creator_test.cpp
     filesystem/directory_listing_test.cpp
@@ -91,7 +108,6 @@ add_executable(sparenode_filesystem_tests
     filesystem/safe_path_test.cpp
     filesystem/safe_path_symlink_test.cpp
     filesystem/shared_root_test.cpp
-    filesystem/temporary_file_test.cpp
     filesystem/upload_finalizer_test.cpp
 )
 

@@ -10,7 +10,7 @@
 
 #include "sparenode/foundation/result.hpp"
 
-namespace sparenode::filesystem
+namespace sparenode::storage
 {
 
 /// @brief Identifies one failure while owning or writing a private temporary file.
@@ -130,4 +130,4 @@ class TemporaryFile
 /// @brief Returns stable text for one temporary-file failure category.
 [[nodiscard]] const char *to_string(TemporaryFileErrorCode code) noexcept;
 
-} // namespace sparenode::filesystem
+} // namespace sparenode::storage

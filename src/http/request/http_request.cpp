@@ -47,12 +47,12 @@ std::uint64_t HttpRequestView::body_size() const noexcept
     return body_size_;
 }
 
-std::shared_ptr<filesystem::TemporaryFile> HttpRequestView::temporary_body() const noexcept
+std::shared_ptr<const storage::TemporaryFile> HttpRequestView::temporary_body() const noexcept
 {
     return temporary_body_;
 }
 
-filesystem::TemporaryFileIoOptions HttpRequestView::temporary_file_options() const noexcept
+storage::TemporaryFileIoOptions HttpRequestView::temporary_file_options() const noexcept
 {
     return temporary_file_options_;
 }

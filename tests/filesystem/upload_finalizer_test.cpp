@@ -15,8 +15,8 @@
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
-#include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
+#include "sparenode/storage/temporary_file.hpp"
 #include "support/temporary_directory.hpp"
 
 #ifdef _WIN32
@@ -36,9 +36,9 @@ namespace
 }
 
 /// @brief Creates a complete artifact using the same lifecycle as request ingestion.
-[[nodiscard]] sparenode::filesystem::TemporaryFile complete_source(const std::string_view text)
+[[nodiscard]] sparenode::storage::TemporaryFile complete_source(const std::string_view text)
 {
-    auto created = sparenode::filesystem::TemporaryFile::create();
+    auto created = sparenode::storage::TemporaryFile::create();
     REQUIRE(created.has_value());
     auto file = std::move(created).value();
     REQUIRE(file.write(bytes(text)).has_value());
@@ -85,11 +85,11 @@ struct UploadFixture
 };
 
 /// @brief Requests cancellation after the source is validated and staging is created.
-class CancelAfterStageSource final : public sparenode::filesystem::TemporaryFile
+class CancelAfterStageSource final : public sparenode::storage::TemporaryFile
 {
   public:
     /// @brief Keeps the source alive while inspecting the destination stage.
-    CancelAfterStageSource(sparenode::filesystem::TemporaryFile source, std::stop_source &stop,
+    CancelAfterStageSource(sparenode::storage::TemporaryFile source, std::stop_source &stop,
                            std::filesystem::path stage_directory)
         : source_(std::move(source)), stop_(stop), stage_directory_(std::move(stage_directory))
     {
@@ -135,20 +135,20 @@ class CancelAfterStageSource final : public sparenode::filesystem::TemporaryFile
     }
 
   private:
-    sparenode::filesystem::TemporaryFile source_; ///< Owns cleanup of the actual artifact.
-    std::stop_source &stop_;                      ///< Requests cancellation after staging.
-    std::filesystem::path stage_directory_;       ///< Directory inspected before cancellation.
-    mutable std::size_t size_queries_{};          ///< Distinguishes validation from copying.
-    mutable bool stage_seen_{};                   ///< Proves the stage existed when stopped.
+    sparenode::storage::TemporaryFile source_; ///< Owns cleanup of the actual artifact.
+    std::stop_source &stop_;                   ///< Requests cancellation after staging.
+    std::filesystem::path stage_directory_;    ///< Directory inspected before cancellation.
+    mutable std::size_t size_queries_{};       ///< Distinguishes validation from copying.
+    mutable bool stage_seen_{};                ///< Proves the stage existed when stopped.
 };
 
 #ifndef _WIN32
 /// @brief Replaces the stage name while retaining its original open inode.
-class ReplaceStageSource final : public sparenode::filesystem::TemporaryFile
+class ReplaceStageSource final : public sparenode::storage::TemporaryFile
 {
   public:
     /// @brief Keeps the source alive while replacing its stage basename.
-    ReplaceStageSource(sparenode::filesystem::TemporaryFile source,
+    ReplaceStageSource(sparenode::storage::TemporaryFile source,
                        std::filesystem::path stage_directory)
         : source_(std::move(source)), stage_directory_(std::move(stage_directory))
     {
@@ -200,10 +200,10 @@ class ReplaceStageSource final : public sparenode::filesystem::TemporaryFile
     }
 
   private:
-    sparenode::filesystem::TemporaryFile source_; ///< Owns the completed source artifact.
-    std::filesystem::path stage_directory_;       ///< Parent of the replaceable stage name.
-    mutable std::size_t size_queries_{};          ///< Replaces only after stage creation.
-    mutable bool replaced_{};                     ///< Reports a completed name substitution.
+    sparenode::storage::TemporaryFile source_; ///< Owns the completed source artifact.
+    std::filesystem::path stage_directory_;    ///< Parent of the replaceable stage name.
+    mutable std::size_t size_queries_{};       ///< Replaces only after stage creation.
+    mutable bool replaced_{};                  ///< Reports a completed name substitution.
 };
 #endif
 
@@ -260,7 +260,7 @@ TEST_CASE("Incomplete, cancelled, and expired uploads never receive a final name
           "[filesystem][upload][cancel][timeout]")
 {
     UploadFixture fixture;
-    auto created = sparenode::filesystem::TemporaryFile::create();
+    auto created = sparenode::storage::TemporaryFile::create();
     REQUIRE(created.has_value());
     auto partial = std::move(created).value();
     REQUIRE(partial.write(bytes("partial")).has_value());

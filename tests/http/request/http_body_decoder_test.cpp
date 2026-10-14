@@ -240,7 +240,7 @@ TEST_CASE("Buffered request resolves body policy only after complete headers",
     const auto body_options = [&]
     {
         ++body_policy_calls;
-        return sparenode::filesystem::TemporaryFileIoOptions{};
+        return sparenode::storage::TemporaryFileIoOptions{};
     };
     REQUIRE(request
                 .feed_with_body_options(
