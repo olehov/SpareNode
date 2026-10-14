@@ -1,12 +1,12 @@
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 
 #include <utility>
 
 #ifdef _WIN32
-#include "../filesystem/detail/windows_path_inspector.hpp"
+#include "detail/windows_path_inspector.hpp"
 #endif
 
-namespace sparenode::configuration
+namespace sparenode::filesystem
 {
 
 SharedRoot::SharedRoot(std::filesystem::path canonical_path) : path_(std::move(canonical_path))
@@ -79,4 +79,4 @@ const char *to_string(const SharedRootErrorCode code) noexcept
     return "unknown shared-root error";
 }
 
-} // namespace sparenode::configuration
+} // namespace sparenode::filesystem

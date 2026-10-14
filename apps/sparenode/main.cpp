@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -15,6 +17,7 @@
 #include "sparenode/authentication/file_authentication.hpp"
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 #include "sparenode/http/session/http_connection_handler.hpp"
@@ -51,8 +54,13 @@ create_authentication_or_report(
     const std::filesystem::path &credential_path,
     const std::span<const sparenode::configuration::runtime::LocationConfig> locations)
 {
-    auto result =
-        sparenode::authentication::create_file_authentication_service(credential_path, locations);
+    // Strip configuration and HTTP metadata at the authentication boundary.
+    std::vector<sparenode::filesystem::SharedRoot> shared_roots;
+    shared_roots.reserve(locations.size());
+    std::ranges::transform(locations, std::back_inserter(shared_roots),
+                           [](const auto &location) { return location.root(); });
+    auto result = sparenode::authentication::create_file_authentication_service(credential_path,
+                                                                                shared_roots);
     if (result)
     {
         return std::move(result).value();

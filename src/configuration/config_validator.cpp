@@ -204,7 +204,7 @@ class ValidationState final
 
     /// @brief Transfers canonical roots collected for successfully validated locations.
     /// @return Roots in the same order as the parsed location blocks.
-    [[nodiscard]] std::vector<SharedRoot> release_location_roots() &&
+    [[nodiscard]] std::vector<filesystem::SharedRoot> release_location_roots() &&
     {
         return std::move(location_roots_);
     }
@@ -517,7 +517,7 @@ class ValidationState final
         }
 
         const auto &path_text = std::get<std::string>(path_directive->value.scalar);
-        auto root_result = SharedRoot::create(path_from_utf8(path_text));
+        auto root_result = filesystem::SharedRoot::create(path_from_utf8(path_text));
         if (!root_result)
         {
             ConfigValidationError error{ConfigValidationErrorCode::invalid_location_root,
@@ -570,7 +570,7 @@ class ValidationState final
 
     const ParsedConfiguration &configuration_;
     std::vector<ConfigValidationError> errors_;
-    std::vector<SharedRoot> location_roots_;
+    std::vector<filesystem::SharedRoot> location_roots_;
     bool multithreading_enabled_{false};
     std::uint64_t worker_threads_{};
     const ParsedServerDirective *worker_threads_directive_{};
@@ -590,7 +590,7 @@ ConfigValidationError::ConfigValidationError(const ConfigValidationErrorCode err
 }
 
 ValidatedConfiguration::ValidatedConfiguration(ParsedConfiguration parsed_configuration,
-                                               std::vector<SharedRoot> location_roots)
+                                               std::vector<filesystem::SharedRoot> location_roots)
     : parsed_(std::move(parsed_configuration)), location_roots_(std::move(location_roots))
 {
 }
@@ -605,12 +605,12 @@ ParsedConfiguration ValidatedConfiguration::release_parsed() && noexcept
     return std::move(parsed_);
 }
 
-const std::vector<SharedRoot> &ValidatedConfiguration::location_roots() const noexcept
+const std::vector<filesystem::SharedRoot> &ValidatedConfiguration::location_roots() const noexcept
 {
     return location_roots_;
 }
 
-std::vector<SharedRoot> ValidatedConfiguration::release_location_roots() && noexcept
+std::vector<filesystem::SharedRoot> ValidatedConfiguration::release_location_roots() && noexcept
 {
     return std::move(location_roots_);
 }

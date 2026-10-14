@@ -5,7 +5,7 @@
 #include <span>
 
 #include "sparenode/authentication/authentication_service.hpp"
-#include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 
 namespace sparenode::authentication
 {
@@ -29,12 +29,11 @@ enum class FileAuthenticationErrorCode : std::uint8_t
 
 /// @brief Builds the complete MVP authentication stack from a separate credential file.
 /// @param[in] credential_path File selected by validated runtime configuration.
-/// @param[in] locations Filesystem roots that must not contain the credential file.
+/// @param[in] shared_roots Canonical filesystem roots that must not contain the credential file.
 /// @return Ready source-independent service, or a non-sensitive startup failure.
 [[nodiscard]] Result<AuthenticationService, FileAuthenticationErrorCode>
-create_file_authentication_service(
-    const std::filesystem::path &credential_path,
-    std::span<const configuration::runtime::LocationConfig> locations);
+create_file_authentication_service(const std::filesystem::path &credential_path,
+                                   std::span<const filesystem::SharedRoot> shared_roots);
 
 /// @brief Returns a non-sensitive startup diagnostic for one file-auth failure.
 /// @param[in] code Failure category to describe.

@@ -12,8 +12,7 @@ namespace sparenode::filesystem
 
 /// @brief Validates a new directory path and creates it relative to a confined parent.
 Result<std::filesystem::path, DirectoryCreationError>
-create_directory(const configuration::SharedRoot &shared_root,
-                 const std::string_view requested_path)
+create_directory(const SharedRoot &shared_root, const std::string_view requested_path)
 {
     try
     {

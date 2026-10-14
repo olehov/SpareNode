@@ -8,7 +8,7 @@
 #include "sparenode/configuration/directives/parsed_location_directive.hpp"
 #include "sparenode/configuration/directives/parsed_server_directive.hpp"
 #include "sparenode/configuration/parsed_config.hpp"
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
@@ -53,8 +53,8 @@ struct ConfigValidationError
     SourceLocation location;          ///< Token or closing brace associated with the failure.
     std::optional<directives::ServerDirectiveKind> server_directive;     ///< Related server field.
     std::optional<directives::LocationDirectiveKind> location_directive; ///< Related field.
-    std::optional<std::string> location_path;         ///< Public path when a block is involved.
-    std::optional<SharedRootError> shared_root_error; ///< Detailed filesystem failure.
+    std::optional<std::string> location_path; ///< Public path when a block is involved.
+    std::optional<filesystem::SharedRootError> shared_root_error; ///< Detailed filesystem failure.
 };
 
 /// @brief Owns parsed syntax that has passed every version-one semantic rule.
@@ -74,11 +74,11 @@ class ValidatedConfiguration final
 
     /// @brief Returns canonical roots validated for locations in parser source order.
     /// @return Roots aligned one-to-one with parsed().server.locations.
-    [[nodiscard]] const std::vector<SharedRoot> &location_roots() const noexcept;
+    [[nodiscard]] const std::vector<filesystem::SharedRoot> &location_roots() const noexcept;
 
     /// @brief Transfers canonical location roots to the runtime configuration stage.
     /// @return Roots aligned one-to-one with the released parsed location collection.
-    [[nodiscard]] std::vector<SharedRoot> release_location_roots() && noexcept;
+    [[nodiscard]] std::vector<filesystem::SharedRoot> release_location_roots() && noexcept;
 
   private:
     friend class ConfigValidator;
@@ -87,10 +87,11 @@ class ValidatedConfiguration final
     /// @param[in] parsed_configuration Complete validated parser model.
     /// @param[in] location_roots Canonical roots corresponding to parsed locations.
     ValidatedConfiguration(ParsedConfiguration parsed_configuration,
-                           std::vector<SharedRoot> location_roots);
+                           std::vector<filesystem::SharedRoot> location_roots);
 
-    ParsedConfiguration parsed_;             ///< Syntax tree protected by the validation boundary.
-    std::vector<SharedRoot> location_roots_; ///< Canonical roots aligned with parsed locations.
+    ParsedConfiguration parsed_; ///< Syntax tree protected by the validation boundary.
+    std::vector<filesystem::SharedRoot>
+        location_roots_; ///< Canonical roots aligned with parsed locations.
 };
 
 /// @brief Applies version-one semantic and filesystem rules to parsed configuration.

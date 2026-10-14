@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
@@ -55,8 +55,8 @@ class SafePath final
     /// @note An empty requested path resolves to the shared root itself.
     /// @note Requests larger than maximum_requested_path_bytes are rejected before parsing.
     /// @note Slash and backslash are interpreted as separators on every platform.
-    [[nodiscard]] static Result<SafePath, SafePathError>
-    resolve(const configuration::SharedRoot &shared_root, std::string_view requested_path);
+    [[nodiscard]] static Result<SafePath, SafePathError> resolve(const SharedRoot &shared_root,
+                                                                 std::string_view requested_path);
 
     /// @brief Returns the absolute lexically normalized filesystem path.
     /// @return A stable path reference valid for the lifetime of this object.

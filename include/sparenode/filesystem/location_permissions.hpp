@@ -1,6 +1,6 @@
 #pragma once
 
-namespace sparenode::configuration::runtime
+namespace sparenode::filesystem
 {
 
 /// @brief Stores immutable filesystem operations allowed for one location.
@@ -50,4 +50,4 @@ class LocationPermissions final
     bool allow_delete_; ///< Immutable delete permission.
 };
 
-} // namespace sparenode::configuration::runtime
+} // namespace sparenode::filesystem

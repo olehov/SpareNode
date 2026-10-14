@@ -154,9 +154,9 @@ runtime::AppConfig RuntimeConfigMapper::map(const ValidatedConfiguration &config
             apply_location_directive(directive, permissions);
         }
         locations.emplace_back(parsed_location.api_path, roots[index],
-                               runtime::LocationPermissions{permissions.allow_read,
-                                                            permissions.allow_write,
-                                                            permissions.allow_delete});
+                               filesystem::LocationPermissions{permissions.allow_read,
+                                                               permissions.allow_write,
+                                                               permissions.allow_delete});
     }
     std::vector<runtime::ServerConfig> servers;
     servers.emplace_back(std::move(server.endpoint), server.multithreading_enabled,

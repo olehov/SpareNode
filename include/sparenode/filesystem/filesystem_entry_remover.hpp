@@ -5,8 +5,8 @@
 #include <string_view>
 #include <system_error>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
@@ -42,8 +42,7 @@ struct FilesystemEntryRemovalError
 /// @param[in] requested_path URL-encoded relative path naming the entry to delete.
 /// @return Success or a structured failure without exposing native paths.
 [[nodiscard]] Result<void, FilesystemEntryRemovalError>
-remove_filesystem_entry(const configuration::SharedRoot &shared_root,
-                        std::string_view requested_path);
+remove_filesystem_entry(const SharedRoot &shared_root, std::string_view requested_path);
 
 /// @brief Returns stable text for one filesystem-deletion failure category.
 /// @param[in] code Portable failure category.

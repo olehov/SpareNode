@@ -9,8 +9,8 @@
 #include <system_error>
 #include <vector>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
@@ -62,7 +62,7 @@ inline constexpr std::size_t maximum_directory_listing_entries = 512;
 /// @param[in] requested_path URL-encoded relative directory path, or empty for the root.
 /// @return Name-sorted metadata or a structured safe failure.
 [[nodiscard]] Result<std::vector<DirectoryListingEntry>, DirectoryListingError>
-list_directory(const configuration::SharedRoot &shared_root, std::string_view requested_path);
+list_directory(const SharedRoot &shared_root, std::string_view requested_path);
 
 /// @brief Returns stable text for one directory listing failure category.
 /// @param[in] code Failure category to describe.

@@ -71,9 +71,8 @@ FileReadStream &FileReadStream::operator=(FileReadStream &&) noexcept = default;
 FileReadStream::~FileReadStream() = default;
 
 /// @brief Opens a regular Windows file and verifies its post-open containment.
-Result<FileReadStream, FileReadError>
-FileReadStream::open(const configuration::SharedRoot &shared_root,
-                     const std::string_view requested_path)
+Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &shared_root,
+                                                           const std::string_view requested_path)
 {
     try
     {
@@ -161,8 +160,9 @@ Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byt
     {
         return std::size_t{0};
     }
-    const auto requested = static_cast<DWORD>((std::min)(
-        destination.size(), static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
+    const auto requested = static_cast<DWORD>(
+        (std::min)(destination.size(),
+                   static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
     DWORD count = 0;
     if (ReadFile(implementation_->handle.get(), destination.data(), requested, &count, nullptr) ==
         FALSE)

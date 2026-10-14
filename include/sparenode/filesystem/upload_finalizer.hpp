@@ -6,8 +6,8 @@
 #include <string_view>
 #include <system_error>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/foundation/result.hpp"
 
@@ -51,7 +51,7 @@ struct UploadFinalizationError
 /// @param[in] options Cancellation and deadline observed between bounded native operations.
 /// @return Published path or a structured failure; no partial destination is ever published.
 [[nodiscard]] Result<std::filesystem::path, UploadFinalizationError>
-finalize_upload(const configuration::SharedRoot &shared_root, std::string_view requested_path,
+finalize_upload(const SharedRoot &shared_root, std::string_view requested_path,
                 const TemporaryFile &source, const TemporaryFileIoOptions &options = {});
 
 /// @brief Returns stable text for an upload finalization failure category.

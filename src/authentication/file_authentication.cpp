@@ -52,16 +52,16 @@ resolve_credential_path(const std::filesystem::path &credential_path)
 /// Filesystem identity-comparison failures return `credential_read_failed` and fail startup closed.
 [[nodiscard]] Result<bool, FileAuthenticationErrorCode>
 credential_is_shared(const std::filesystem::path &resolved_credential_path,
-                     const std::span<const configuration::runtime::LocationConfig> locations)
+                     const std::span<const filesystem::SharedRoot> shared_roots)
 {
     std::error_code path_error;
-    for (const auto &location : locations)
+    for (const auto &shared_root : shared_roots)
     {
         auto current = resolved_credential_path.parent_path();
         while (!current.empty())
         {
             path_error.clear();
-            if (std::filesystem::equivalent(current, location.root().path(), path_error))
+            if (std::filesystem::equivalent(current, shared_root.path(), path_error))
             {
                 return true;
             }
@@ -112,9 +112,9 @@ map_provisioning_error(const CredentialProvisioningErrorCode code) noexcept
 
 } // namespace
 
-Result<AuthenticationService, FileAuthenticationErrorCode> create_file_authentication_service(
-    const std::filesystem::path &credential_path,
-    const std::span<const configuration::runtime::LocationConfig> locations)
+Result<AuthenticationService, FileAuthenticationErrorCode>
+create_file_authentication_service(const std::filesystem::path &credential_path,
+                                   const std::span<const filesystem::SharedRoot> shared_roots)
 {
     auto verifier = PasswordVerifier::create();
     if (!verifier)
@@ -127,7 +127,7 @@ Result<AuthenticationService, FileAuthenticationErrorCode> create_file_authentic
     {
         return unexpected(resolved_path.error());
     }
-    const auto shared = credential_is_shared(resolved_path.value(), locations);
+    const auto shared = credential_is_shared(resolved_path.value(), shared_roots);
     if (!shared)
     {
         return unexpected(shared.error());
