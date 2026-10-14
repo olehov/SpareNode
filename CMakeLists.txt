@@ -100,6 +100,50 @@ sparenode_enable_compiler_warnings(sparenode_network)
 sparenode_enable_cppcheck(sparenode_network)
 sparenode_enable_static_analysis(sparenode_network)
 
+add_library(sparenode_filesystem STATIC
+    src/filesystem/detail/path_request_decoder.cpp
+    src/filesystem/directory_creator.cpp
+    src/filesystem/directory_listing.cpp
+    src/filesystem/filesystem_entry_remover.cpp
+    src/filesystem/safe_path.cpp
+    src/filesystem/shared_root.cpp
+    src/filesystem/temporary_file.cpp
+    src/filesystem/upload_finalizer.cpp
+)
+
+if(WIN32)
+    target_sources(sparenode_filesystem PRIVATE
+        src/filesystem/detail/windows_handle.cpp
+        src/filesystem/detail/windows_handle_path.cpp
+        src/filesystem/detail/windows_file_read_stream.cpp
+        src/filesystem/detail/windows_directory_creator.cpp
+        src/filesystem/detail/windows_directory_entry_reader.cpp
+        src/filesystem/detail/windows_filesystem_entry_remover.cpp
+        src/filesystem/detail/windows_path_inspector.cpp
+        src/filesystem/detail/windows_upload_finalizer.cpp
+    )
+else()
+    target_sources(sparenode_filesystem PRIVATE
+        src/filesystem/detail/linux_file_read_stream.cpp
+        src/filesystem/detail/linux_directory_creator.cpp
+        src/filesystem/detail/linux_directory_entry_reader.cpp
+        src/filesystem/detail/linux_filesystem_entry_remover.cpp
+        src/filesystem/detail/linux_upload_finalizer.cpp
+    )
+endif()
+
+target_link_libraries(sparenode_filesystem PUBLIC
+    sparenode_foundation
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_filesystem PRIVATE ntdll)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_filesystem)
+sparenode_enable_cppcheck(sparenode_filesystem)
+sparenode_enable_static_analysis(sparenode_filesystem)
+
 add_library(sparenode_network_logging STATIC
     src/adapters/network_logging.cpp
 )
@@ -128,14 +172,6 @@ add_library(sparenode_core STATIC
     src/configuration/config_parser.cpp
     src/configuration/config_validator.cpp
     src/configuration/runtime_config_mapper.cpp
-    src/configuration/shared_root.cpp
-    src/filesystem/detail/path_request_decoder.cpp
-    src/filesystem/directory_creator.cpp
-    src/filesystem/directory_listing.cpp
-    src/filesystem/filesystem_entry_remover.cpp
-    src/filesystem/safe_path.cpp
-    src/filesystem/temporary_file.cpp
-    src/filesystem/upload_finalizer.cpp
     src/http/api/filesystem_api.cpp
     src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
@@ -154,27 +190,6 @@ add_library(sparenode_core STATIC
     src/http/response/http_response_writer.cpp
 )
 
-if(WIN32)
-    target_sources(sparenode_core PRIVATE
-        src/filesystem/detail/windows_handle.cpp
-        src/filesystem/detail/windows_handle_path.cpp
-        src/filesystem/detail/windows_file_read_stream.cpp
-        src/filesystem/detail/windows_directory_creator.cpp
-        src/filesystem/detail/windows_directory_entry_reader.cpp
-        src/filesystem/detail/windows_filesystem_entry_remover.cpp
-        src/filesystem/detail/windows_path_inspector.cpp
-        src/filesystem/detail/windows_upload_finalizer.cpp
-    )
-else()
-    target_sources(sparenode_core PRIVATE
-        src/filesystem/detail/linux_file_read_stream.cpp
-        src/filesystem/detail/linux_directory_creator.cpp
-        src/filesystem/detail/linux_directory_entry_reader.cpp
-        src/filesystem/detail/linux_filesystem_entry_remover.cpp
-        src/filesystem/detail/linux_upload_finalizer.cpp
-    )
-endif()
-
 target_compile_features(sparenode_core PUBLIC
     cxx_std_23
 )
@@ -190,12 +205,13 @@ target_link_libraries(sparenode_core PRIVATE
 
 target_link_libraries(sparenode_core PUBLIC
     sparenode_foundation
+    sparenode_filesystem
     sparenode_logging
     sparenode_network
 )
 
 if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE advapi32 ntdll)
+    target_link_libraries(sparenode_core PRIVATE advapi32)
 endif()
 
 sparenode_enable_compiler_warnings(sparenode_core)

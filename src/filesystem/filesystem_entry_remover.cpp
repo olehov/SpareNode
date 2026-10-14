@@ -14,9 +14,8 @@ namespace
 {
 
 /// @brief Reconstructs the validated lexical path so the final link itself can be deleted.
-[[nodiscard]] std::filesystem::path
-lexical_destination(const configuration::SharedRoot &shared_root,
-                    const std::string_view requested_path)
+[[nodiscard]] std::filesystem::path lexical_destination(const SharedRoot &shared_root,
+                                                        const std::string_view requested_path)
 {
     const auto decoded = detail::decode_path_request(requested_path);
     if (!decoded)
@@ -34,8 +33,7 @@ lexical_destination(const configuration::SharedRoot &shared_root,
 
 /// @brief Validates and removes one entry relative to its confined parent.
 Result<void, FilesystemEntryRemovalError>
-remove_filesystem_entry(const configuration::SharedRoot &shared_root,
-                        const std::string_view requested_path)
+remove_filesystem_entry(const SharedRoot &shared_root, const std::string_view requested_path)
 {
     try
     {

@@ -6,7 +6,7 @@
 
 #include "sparenode/foundation/result.hpp"
 
-namespace sparenode::configuration
+namespace sparenode::filesystem
 {
 
 /// @brief Identifies why a shared-root path could not be accepted.
@@ -57,4 +57,4 @@ class SharedRoot final
 /// @return Static English text suitable for diagnostics.
 [[nodiscard]] const char *to_string(SharedRootErrorCode code) noexcept;
 
-} // namespace sparenode::configuration
+} // namespace sparenode::filesystem

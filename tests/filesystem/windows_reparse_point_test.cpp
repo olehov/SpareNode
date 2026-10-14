@@ -9,8 +9,8 @@
 #include <string_view>
 #include <utility>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 #include "support/windows_junction.hpp"
 
@@ -47,7 +47,7 @@ struct JunctionFixture
     /// @return Safe-path result for the request.
     [[nodiscard]] auto resolve(const std::string_view request) const
     {
-        auto root = sparenode::configuration::SharedRoot::create(shared);
+        auto root = sparenode::filesystem::SharedRoot::create(shared);
         REQUIRE(root);
         return sparenode::filesystem::SafePath::resolve(root.value(), request);
     }
@@ -157,7 +157,7 @@ TEST_CASE("Safe path rejects a shared root replaced by a Windows junction",
           "[filesystem][safe-path][windows][junction][security]")
 {
     const JunctionFixture fixture;
-    auto root = sparenode::configuration::SharedRoot::create(fixture.shared);
+    auto root = sparenode::filesystem::SharedRoot::create(fixture.shared);
     REQUIRE(root);
     std::filesystem::remove(fixture.shared);
     fixture.create_junction(fixture.outside, fixture.shared);

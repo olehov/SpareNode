@@ -11,12 +11,18 @@ The initial dependency boundaries are:
 | `sparenode_foundation` | `Result`, `Unexpected`, and `unexpected()` | None |
 | `sparenode_logging` | Log records, severity, logger, and sinks | `sparenode_foundation` |
 | `sparenode_network` | Sockets, connections, dispatch, and server lifecycle | `sparenode_foundation` |
+| `sparenode_filesystem` | Canonical roots, path containment, filesystem operations, and location permissions | `sparenode_foundation` |
 | `sparenode_network_logging` | Network error formatting and logging observers | `sparenode_logging`, `sparenode_network` |
 
 Foundation depends only on the C++ standard library. Logging core must not
 include network headers, and network must not include logging headers. The
 network logging adapter is selected by the `sparenode` composition executable;
 neither domain library selects it for callers.
+
+Filesystem owns `SharedRoot` and `LocationPermissions`. Configuration validates
+and constructs these types but filesystem code does not include configuration
+headers. Authentication placement checks consume canonical shared roots rather
+than runtime location configuration.
 
 Module-focused test executables link only the target under test and its declared
 dependencies. This makes an accidental reverse dependency fail during linking

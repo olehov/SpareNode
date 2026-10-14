@@ -8,7 +8,7 @@
 
 #include "sparenode/application/running_application.hpp"
 #include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
@@ -20,13 +20,12 @@ TEST_CASE("Running application starts from runtime settings and retains location
           "[application][startup]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-application");
-    auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root_result = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
 
     std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root_result).value(),
-        sparenode::configuration::runtime::LocationPermissions{true, false, false});
+    locations.emplace_back("/api/Documents", std::move(root_result).value(),
+                           sparenode::filesystem::LocationPermissions{true, false, false});
     std::vector<sparenode::configuration::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
                          sparenode::logging::LogSeverity::info, std::move(locations));
@@ -61,12 +60,11 @@ TEST_CASE("Running application installs connection failure observers on its disp
           "[application][startup][logging]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-application-observer");
-    auto root_result = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root_result = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
     std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root_result).value(),
-        sparenode::configuration::runtime::LocationPermissions{true, false, false});
+    locations.emplace_back("/api/Documents", std::move(root_result).value(),
+                           sparenode::filesystem::LocationPermissions{true, false, false});
     std::vector<sparenode::configuration::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
                          sparenode::logging::LogSeverity::info, std::move(locations));

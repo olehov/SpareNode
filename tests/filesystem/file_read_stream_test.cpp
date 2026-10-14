@@ -13,17 +13,17 @@
 #include <sys/stat.h>
 #endif
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 
 namespace
 {
 
-[[nodiscard]] sparenode::configuration::SharedRoot
+[[nodiscard]] sparenode::filesystem::SharedRoot
 make_root(const sparenode::test::TemporaryDirectory &directory)
 {
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     return std::move(root).value();
 }
@@ -145,7 +145,7 @@ TEST_CASE("File read stream rejects a symbolic link outside the shared root",
     INFO(link_error.message());
     REQUIRE_FALSE(link_error);
 
-    auto root = sparenode::configuration::SharedRoot::create(shared);
+    auto root = sparenode::filesystem::SharedRoot::create(shared);
     REQUIRE(root);
     const auto escaped = sparenode::filesystem::FileReadStream::open(root.value(), "escape.bin");
     REQUIRE_FALSE(escaped);

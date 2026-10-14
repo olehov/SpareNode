@@ -20,9 +20,9 @@
 #include <vector>
 
 #include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/configuration/runtime/location_permissions.hpp"
 #include "sparenode/configuration/runtime/server_config.hpp"
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/location_permissions.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
@@ -93,12 +93,12 @@ make_server(const sparenode::test::TemporaryDirectory &directory, const bool all
             sparenode::http::MimeTypeRegistry mime_types = {}, const bool allow_write = false,
             const bool allow_delete = false)
 {
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back("/api/Documents", std::move(root).value(),
-                           sparenode::configuration::runtime::LocationPermissions{
-                               allow_read, allow_write, allow_delete});
+    locations.emplace_back(
+        "/api/Documents", std::move(root).value(),
+        sparenode::filesystem::LocationPermissions{allow_read, allow_write, allow_delete});
     return {{"127.0.0.1", 0},
             false,
             1,
@@ -544,16 +544,16 @@ TEST_CASE("Filesystem API registers multiple configured locations with segment b
     const sparenode::test::TemporaryDirectory media("sparenode-files-media");
     REQUIRE(std::ofstream(documents.path() / "document.txt").good());
     REQUIRE(std::ofstream(media.path() / "photo.jpg").good());
-    auto documents_root = sparenode::configuration::SharedRoot::create(documents.path());
-    auto media_root = sparenode::configuration::SharedRoot::create(media.path());
+    auto documents_root = sparenode::filesystem::SharedRoot::create(documents.path());
+    auto media_root = sparenode::filesystem::SharedRoot::create(media.path());
     REQUIRE(documents_root);
     REQUIRE(media_root);
 
     std::vector<sparenode::configuration::runtime::LocationConfig> locations;
     locations.emplace_back("/api/docs", std::move(documents_root).value(),
-                           sparenode::configuration::runtime::LocationPermissions{});
+                           sparenode::filesystem::LocationPermissions{});
     locations.emplace_back("/api/media", std::move(media_root).value(),
-                           sparenode::configuration::runtime::LocationPermissions{});
+                           sparenode::filesystem::LocationPermissions{});
     const sparenode::configuration::runtime::ServerConfig server(
         {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations));
     auto router = sparenode::http::make_filesystem_api_router(server);

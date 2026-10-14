@@ -67,9 +67,8 @@ FileReadStream &FileReadStream::operator=(FileReadStream &&) noexcept = default;
 FileReadStream::~FileReadStream() = default;
 
 /// @brief Opens a regular POSIX file and verifies its post-open containment.
-Result<FileReadStream, FileReadError>
-FileReadStream::open(const configuration::SharedRoot &shared_root,
-                     const std::string_view requested_path)
+Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &shared_root,
+                                                           const std::string_view requested_path)
 {
     try
     {
@@ -110,9 +109,7 @@ FileReadStream::open(const configuration::SharedRoot &shared_root,
                                             SafePathErrorCode::outside_shared_root});
         }
 
-        struct stat information
-        {
-        };
+        struct stat information{};
         if (::fstat(file->get(), &information) != 0)
         {
             return unexpected(system_failure(last_posix_error()));

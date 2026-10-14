@@ -12,9 +12,7 @@
 #include "sparenode/authentication/file_authentication.hpp"
 #include "sparenode/authentication/file_credential_provider.hpp"
 #include "sparenode/authentication/password_verifier.hpp"
-#include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/configuration/runtime/location_permissions.hpp"
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -198,15 +196,13 @@ TEST_CASE("File authentication rejects credentials inside a shared location",
         output << credential_source("admin", encoded.value());
         REQUIRE(output.good());
     }
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root.has_value());
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root).value(),
-        sparenode::configuration::runtime::LocationPermissions{true, false, false});
+    std::vector<sparenode::filesystem::SharedRoot> shared_roots;
+    shared_roots.push_back(std::move(root).value());
 
-    const auto result =
-        sparenode::authentication::create_file_authentication_service(credential_path, locations);
+    const auto result = sparenode::authentication::create_file_authentication_service(
+        credential_path, shared_roots);
 
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() ==

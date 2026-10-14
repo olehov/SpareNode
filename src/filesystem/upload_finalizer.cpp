@@ -31,7 +31,7 @@ interruption(const TemporaryFileIoOptions &options) noexcept
 
 /// @brief Validates the destination and holds its confined parent during publication.
 Result<std::filesystem::path, UploadFinalizationError>
-finalize_upload(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
+finalize_upload(const SharedRoot &shared_root, const std::string_view requested_path,
                 const TemporaryFile &source, const TemporaryFileIoOptions &options)
 {
     if (!source.completed() || source.path().empty())

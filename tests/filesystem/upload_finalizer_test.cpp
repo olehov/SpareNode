@@ -12,9 +12,9 @@
 #include <system_error>
 #include <utility>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
 #include "sparenode/filesystem/file_read_stream.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/filesystem/upload_finalizer.hpp"
 #include "support/temporary_directory.hpp"
@@ -68,7 +68,7 @@ struct UploadFixture
 {
     sparenode::test::TemporaryDirectory temporary{"sparenode-upload-finalizer"}; ///< Test tree.
     std::filesystem::path share{temporary.path() / "share"}; ///< Root directory.
-    sparenode::configuration::SharedRoot root;               ///< Validated security boundary.
+    sparenode::filesystem::SharedRoot root;                  ///< Validated security boundary.
 
     /// @brief Creates the share before validation.
     UploadFixture()
@@ -76,7 +76,7 @@ struct UploadFixture
               [this]
               {
                   std::filesystem::create_directory(share);
-                  auto created = sparenode::configuration::SharedRoot::create(share);
+                  auto created = sparenode::filesystem::SharedRoot::create(share);
                   REQUIRE(created.has_value());
                   return std::move(created).value();
               }())

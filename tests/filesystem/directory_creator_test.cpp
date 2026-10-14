@@ -4,8 +4,8 @@
 #include <fstream>
 #include <system_error>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/directory_creator.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 #ifdef _WIN32
 #include "support/windows_junction.hpp"
@@ -15,10 +15,10 @@ namespace
 {
 
 /// @brief Creates one validated root for directory-creation tests.
-[[nodiscard]] sparenode::configuration::SharedRoot
+[[nodiscard]] sparenode::filesystem::SharedRoot
 make_root(const sparenode::test::TemporaryDirectory &directory)
 {
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     return std::move(root).value();
 }
