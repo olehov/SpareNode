@@ -31,7 +31,7 @@ class BufferedRequest final
     /// @param[in] limits Request metadata, decoded payload, and framing budgets.
     /// @param[in] file_factory Optional source of temporary body storage.
     explicit BufferedRequest(const HttpRequestParserLimits &limits,
-                             TemporaryBodyFileFactory file_factory = {})
+                             storage::TemporaryFileFactory file_factory = {})
         : limits_(limits), file_factory_(std::move(file_factory))
     {
     }
@@ -41,7 +41,7 @@ class BufferedRequest final
     /// @param[in] options Cancellation and deadline observed by body filesystem operations.
     /// @return Success or a structured terminal parse/body error.
     [[nodiscard]] Result<void, BufferedRequestError>
-    feed(std::span<const std::byte> input, const filesystem::TemporaryFileIoOptions &options = {});
+    feed(std::span<const std::byte> input, const storage::TemporaryFileIoOptions &options = {});
 
     /// @brief Resolves the body policy only after a complete request head is available.
     /// @param[in] input Fresh receive bytes, possibly containing the head and first body bytes.
@@ -49,13 +49,13 @@ class BufferedRequest final
     /// @return Success or a structured parse/body error.
     [[nodiscard]] Result<void, BufferedRequestError> feed_with_body_options(
         std::span<const std::byte> input,
-        const std::function<filesystem::TemporaryFileIoOptions()> &options_provider);
+        const std::function<storage::TemporaryFileIoOptions()> &options_provider);
 
     /// @brief Validates peer EOF and completes temporary-file cleanup on failure.
     /// @param[in] options Cancellation and deadline observed during finalization.
     /// @return Success only when the complete request boundary already arrived.
     [[nodiscard]] Result<void, BufferedRequestError>
-    finish(const filesystem::TemporaryFileIoOptions &options = {});
+    finish(const storage::TemporaryFileIoOptions &options = {});
 
     /// @brief Reports the transition to body ingestion for inactivity accounting.
     /// @return True once a valid complete request head is retained.
@@ -78,8 +78,7 @@ class BufferedRequest final
     /// @brief Builds a request borrowing this adapter's stable storage after completion.
     /// @param[in] options Cancellation and deadline retained for later body publication.
     /// @return Complete request; callers must first check complete().
-    [[nodiscard]] HttpRequestView
-    request(const filesystem::TemporaryFileIoOptions &options = {}) const
+    [[nodiscard]] HttpRequestView request(const storage::TemporaryFileIoOptions &options = {}) const
     {
         if (!head_.has_value() || !ingestor_.has_value() || !ingestor_->complete())
         {
@@ -100,11 +99,11 @@ class BufferedRequest final
     /// @param[in] options Cancellation and deadline observed by body filesystem operations.
     /// @return Success or terminal body syntax/limit failure.
     [[nodiscard]] Result<void, BufferedRequestError>
-    feed_body(std::span<const std::byte> input, const filesystem::TemporaryFileIoOptions &options);
+    feed_body(std::span<const std::byte> input, const storage::TemporaryFileIoOptions &options);
 
     bool expectation_checked_{};                  ///< Prevents repeated interim responses.
     HttpRequestParserLimits limits_;              ///< Session parser and decoder limits.
-    TemporaryBodyFileFactory file_factory_;       ///< Optional controlled body-file factory.
+    storage::TemporaryFileFactory file_factory_;  ///< Optional controlled body-file factory.
     std::vector<std::byte> metadata_;             ///< Frozen metadata backing all header views.
     std::optional<HttpRequestHead> head_;         ///< Validated borrowed request metadata.
     std::optional<RequestBodyIngestor> ingestor_; ///< Framing and temporary-file body sink.

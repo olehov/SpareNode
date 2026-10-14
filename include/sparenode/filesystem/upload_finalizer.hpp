@@ -8,8 +8,8 @@
 
 #include "sparenode/filesystem/safe_path.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
-#include "sparenode/filesystem/temporary_file.hpp"
 #include "sparenode/foundation/result.hpp"
+#include "sparenode/storage/temporary_file.hpp"
 
 namespace sparenode::filesystem
 {
@@ -44,7 +44,7 @@ struct UploadFinalizationError
 ///
 /// The destination is validated from the untrusted relative path. Publication never replaces
 /// an existing entry; all failed attempts remove their private sibling on a best-effort basis.
-/// The source remains owned by its `TemporaryFile` and is removed when that owner is destroyed.
+/// The source remains owned by its storage artifact and is removed when that owner is destroyed.
 /// @param[in] shared_root Validated root that must contain the destination parent.
 /// @param[in] requested_path URL-encoded relative destination path.
 /// @param[in] source Completed request-body artifact retained by the caller.
@@ -52,7 +52,8 @@ struct UploadFinalizationError
 /// @return Published path or a structured failure; no partial destination is ever published.
 [[nodiscard]] Result<std::filesystem::path, UploadFinalizationError>
 finalize_upload(const SharedRoot &shared_root, std::string_view requested_path,
-                const TemporaryFile &source, const TemporaryFileIoOptions &options = {});
+                const storage::TemporaryFile &source,
+                const storage::TemporaryFileIoOptions &options = {});
 
 /// @brief Returns stable text for an upload finalization failure category.
 /// @param[in] code Portable failure category.

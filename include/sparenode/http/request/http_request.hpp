@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "sparenode/filesystem/temporary_file.hpp"
+#include "sparenode/storage/temporary_file.hpp"
 
 namespace sparenode::http
 {
@@ -75,11 +75,11 @@ class HttpRequestView
 
     /// @brief Shares the completed temporary body artifact when session ingestion used disk.
     /// @return Artifact owner, or null for memory-backed and zero-length bodies.
-    [[nodiscard]] std::shared_ptr<filesystem::TemporaryFile> temporary_body() const noexcept;
+    [[nodiscard]] std::shared_ptr<const storage::TemporaryFile> temporary_body() const noexcept;
 
     /// @brief Returns the cancellation and deadline policy retained for body publication.
     /// @return File-operation options active when session body ingestion completed.
-    [[nodiscard]] filesystem::TemporaryFileIoOptions temporary_file_options() const noexcept;
+    [[nodiscard]] storage::TemporaryFileIoOptions temporary_file_options() const noexcept;
 
     /// @brief Finds the first header using an ASCII case-insensitive name comparison.
     /// @param[in] name Header field name to locate.
@@ -112,9 +112,9 @@ class HttpRequestView
     std::string_view target_;             ///< Normalized path/query or server-wide asterisk.
     std::vector<HttpHeaderView> headers_; ///< Bounded headers in source order.
     std::span<const std::byte> body_;     ///< Exact request body boundary.
-    std::shared_ptr<const std::vector<std::byte>> body_storage_;  ///< Optional decoded-body owner.
-    std::shared_ptr<filesystem::TemporaryFile> temporary_body_;   ///< Optional file-backed payload.
-    filesystem::TemporaryFileIoOptions temporary_file_options_{}; ///< Publication I/O policy.
+    std::shared_ptr<const std::vector<std::byte>> body_storage_;   ///< Optional decoded-body owner.
+    std::shared_ptr<const storage::TemporaryFile> temporary_body_; ///< File-backed payload.
+    storage::TemporaryFileIoOptions temporary_file_options_{};     ///< Publication I/O policy.
     std::uint64_t body_size_{};             ///< Decoded memory or temporary-file payload bytes.
     HttpRequestTransportContext transport_; ///< Validated peer, scheme, and proxy context.
 };

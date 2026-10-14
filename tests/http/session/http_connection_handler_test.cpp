@@ -39,7 +39,7 @@ struct FilePolicyState
 };
 
 /// @brief Fails an injected body write as an expired filesystem deadline.
-class DeadlineFailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
+class DeadlineFailingTemporaryFile final : public sparenode::storage::TemporaryFile
 {
   public:
     explicit DeadlineFailingTemporaryFile(std::shared_ptr<FilePolicyState> state)
@@ -52,21 +52,21 @@ class DeadlineFailingTemporaryFile final : public sparenode::filesystem::Tempora
         state_->destroyed.set_value();
     }
 
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
     write(std::span<const std::byte>,
-          const sparenode::filesystem::TemporaryFileIoOptions &options) override
+          const sparenode::storage::TemporaryFileIoOptions &options) override
     {
         state_->deadline_received.store(options.deadline.has_value(), std::memory_order_release);
         if (options.deadline)
         {
             state_->observed_deadline.set_value(options.deadline.value());
         }
-        return sparenode::unexpected(sparenode::filesystem::TemporaryFileError{
-            sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded, 0});
+        return sparenode::unexpected(sparenode::storage::TemporaryFileError{
+            sparenode::storage::TemporaryFileErrorCode::deadline_exceeded, 0});
     }
 
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &) override
     {
         return {};
     }
@@ -621,10 +621,10 @@ TEST_CASE("HTTP session propagates its receive deadline through temporary body w
     std::optional<sparenode::network::NetworkDeadline> expected_body_deadline;
     const sparenode::http::HttpConnectionHandlerConfig config{
         .temporary_body_file_factory =
-            [state]() -> sparenode::Result<std::shared_ptr<sparenode::filesystem::TemporaryFile>,
-                                           sparenode::filesystem::TemporaryFileError>
+            [state]() -> sparenode::Result<std::shared_ptr<sparenode::storage::TemporaryFile>,
+                                           sparenode::storage::TemporaryFileError>
         {
-            return std::static_pointer_cast<sparenode::filesystem::TemporaryFile>(
+            return std::static_pointer_cast<sparenode::storage::TemporaryFile>(
                 std::make_shared<DeadlineFailingTemporaryFile>(state));
         },
         .timeouts = {.headers = std::chrono::seconds{30},

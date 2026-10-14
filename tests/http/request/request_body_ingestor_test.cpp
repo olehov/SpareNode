@@ -21,38 +21,36 @@ namespace
 constexpr std::size_t file_worker_capacity = 32;
 
 /// @brief Produces one controlled native-I/O failure for ingestion mapping tests.
-class FailingTemporaryFile final : public sparenode::filesystem::TemporaryFile
+class FailingTemporaryFile final : public sparenode::storage::TemporaryFile
 {
   public:
-    explicit FailingTemporaryFile(const sparenode::filesystem::TemporaryFileErrorCode code)
+    explicit FailingTemporaryFile(const sparenode::storage::TemporaryFileErrorCode code)
         : code_(code)
     {
     }
 
     /// @brief Injects a write failure only for the requested failure category.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    write(std::span<const std::byte>,
-          const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    write(std::span<const std::byte>, const sparenode::storage::TemporaryFileIoOptions &) override
     {
-        if (code_ == sparenode::filesystem::TemporaryFileErrorCode::write_failed)
+        if (code_ == sparenode::storage::TemporaryFileErrorCode::write_failed)
         {
             return sparenode::unexpected(
-                sparenode::filesystem::TemporaryFileError{code_, native_error});
+                sparenode::storage::TemporaryFileError{code_, native_error});
         }
         return {};
     }
 
     /// @brief Injects the selected completion failure after decoding finishes.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &) override
     {
-        return sparenode::unexpected(
-            sparenode::filesystem::TemporaryFileError{code_, native_error});
+        return sparenode::unexpected(sparenode::storage::TemporaryFileError{code_, native_error});
     }
 
   private:
     static constexpr int native_error = 1234;
-    sparenode::filesystem::TemporaryFileErrorCode code_;
+    sparenode::storage::TemporaryFileErrorCode code_;
 };
 
 /// @brief Shares synchronization and destruction state with blocked-write tests.
@@ -65,7 +63,7 @@ struct BlockedWriteState
 };
 
 /// @brief Emulates a blocked sink that honors the supplied stop token and deadline.
-class BlockingTemporaryFile final : public sparenode::filesystem::TemporaryFile
+class BlockingTemporaryFile final : public sparenode::storage::TemporaryFile
 {
   public:
     explicit BlockingTemporaryFile(std::shared_ptr<BlockedWriteState> state)
@@ -79,9 +77,9 @@ class BlockingTemporaryFile final : public sparenode::filesystem::TemporaryFile
     }
 
     /// @brief Waits until cancellation or deadline to emulate cooperative storage.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
     write(std::span<const std::byte>,
-          const sparenode::filesystem::TemporaryFileIoOptions &options) override
+          const sparenode::storage::TemporaryFileIoOptions &options) override
     {
         state_->started.set_value();
         std::unique_lock lock(state_->mutex);
@@ -94,16 +92,16 @@ class BlockingTemporaryFile final : public sparenode::filesystem::TemporaryFile
         {
             static_cast<void>(state_->wake.wait(lock, options.stop_token, [] { return false; }));
         }
-        return sparenode::unexpected(sparenode::filesystem::TemporaryFileError{
+        return sparenode::unexpected(sparenode::storage::TemporaryFileError{
             options.stop_token.stop_requested()
-                ? sparenode::filesystem::TemporaryFileErrorCode::cancelled
-                : sparenode::filesystem::TemporaryFileErrorCode::deadline_exceeded,
+                ? sparenode::storage::TemporaryFileErrorCode::cancelled
+                : sparenode::storage::TemporaryFileErrorCode::deadline_exceeded,
             0});
     }
 
     /// @brief Completes an otherwise valid injected file.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &) override
     {
         return {};
     }
@@ -124,7 +122,7 @@ struct StalledWriteState
 };
 
 /// @brief Models a filesystem driver that cannot cancel an in-progress write.
-class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
+class StalledTemporaryFile final : public sparenode::storage::TemporaryFile
 {
   public:
     explicit StalledTemporaryFile(std::shared_ptr<StalledWriteState> state)
@@ -138,9 +136,8 @@ class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
     }
 
     /// @brief Ignores policy while the test holds an uninterruptible write.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    write(std::span<const std::byte>,
-          const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    write(std::span<const std::byte>, const sparenode::storage::TemporaryFileIoOptions &) override
     {
         state_->started.set_value();
         std::unique_lock lock(state_->mutex);
@@ -149,8 +146,8 @@ class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
     }
 
     /// @brief Accepts completion after the stalled payload is released.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &) override
     {
         return {};
     }
@@ -160,7 +157,7 @@ class StalledTemporaryFile final : public sparenode::filesystem::TemporaryFile
 };
 
 /// @brief Models a filesystem driver that cannot cancel an in-progress flush.
-class StalledCompletionFile final : public sparenode::filesystem::TemporaryFile
+class StalledCompletionFile final : public sparenode::storage::TemporaryFile
 {
   public:
     explicit StalledCompletionFile(std::shared_ptr<StalledWriteState> state)
@@ -174,16 +171,15 @@ class StalledCompletionFile final : public sparenode::filesystem::TemporaryFile
     }
 
     /// @brief Accepts payload so the test reaches the completion phase.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    write(std::span<const std::byte>,
-          const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    write(std::span<const std::byte>, const sparenode::storage::TemporaryFileIoOptions &) override
     {
         return {};
     }
 
     /// @brief Ignores policy while the test holds an uninterruptible flush.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &) override
     {
         state_->started.set_value();
         std::unique_lock lock(state_->mutex);
@@ -196,13 +192,13 @@ class StalledCompletionFile final : public sparenode::filesystem::TemporaryFile
 };
 
 /// @brief Holds a real temporary file across a simulated uninterruptible write.
-class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFile
+class StalledNativeBackedFile final : public sparenode::storage::TemporaryFile
 {
   public:
     StalledNativeBackedFile(std::shared_ptr<StalledWriteState> state,
-                            sparenode::filesystem::TemporaryFile file)
+                            sparenode::storage::TemporaryFile file)
         : state_(std::move(state)),
-          file_(std::make_unique<sparenode::filesystem::TemporaryFile>(std::move(file)))
+          file_(std::make_unique<sparenode::storage::TemporaryFile>(std::move(file)))
     {
     }
 
@@ -213,9 +209,9 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
     }
 
     /// @brief Forwards a released stalled write to the real private file.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
     write(const std::span<const std::byte> bytes,
-          const sparenode::filesystem::TemporaryFileIoOptions &options) override
+          const sparenode::storage::TemporaryFileIoOptions &options) override
     {
         state_->started.set_value();
         std::unique_lock lock(state_->mutex);
@@ -225,8 +221,8 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
     }
 
     /// @brief Flushes the wrapped native file after its write returns.
-    [[nodiscard]] sparenode::Result<void, sparenode::filesystem::TemporaryFileError>
-    complete(const sparenode::filesystem::TemporaryFileIoOptions &options) override
+    [[nodiscard]] sparenode::Result<void, sparenode::storage::TemporaryFileError>
+    complete(const sparenode::storage::TemporaryFileIoOptions &options) override
     {
         return file_->complete(options);
     }
@@ -250,8 +246,7 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
     }
 
     /// @brief Transfers the wrapped artifact's cleanup responsibility.
-    [[nodiscard]] sparenode::Result<std::filesystem::path,
-                                    sparenode::filesystem::TemporaryFileError>
+    [[nodiscard]] sparenode::Result<std::filesystem::path, sparenode::storage::TemporaryFileError>
     release() override
     {
         return file_->release();
@@ -259,7 +254,7 @@ class StalledNativeBackedFile final : public sparenode::filesystem::TemporaryFil
 
   private:
     std::shared_ptr<StalledWriteState> state_;
-    std::unique_ptr<sparenode::filesystem::TemporaryFile> file_;
+    std::unique_ptr<sparenode::storage::TemporaryFile> file_;
 };
 
 /// @brief Releases a simulated stalled system call after the request-worker assertion.
@@ -394,15 +389,16 @@ TEST_CASE("Request body ingestor preserves premature EOF and cancellation failur
 TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
           "[http][body][error][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
-    using sparenode::filesystem::TemporaryFileErrorCode;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
+    using sparenode::storage::TemporaryFileErrorCode;
 
     SECTION("creation")
     {
         sparenode::http::RequestBodyIngestor ingestor(
             {.content_length = 1}, {},
-            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+            {
                 return sparenode::unexpected(
                     TemporaryFileError{TemporaryFileErrorCode::create_failed, 1234});
             });
@@ -437,7 +433,8 @@ TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
         {
             sparenode::http::RequestBodyIngestor ingestor(
                 {.content_length = 1}, {},
-                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+                {
                     return std::static_pointer_cast<TemporaryFile>(
                         std::make_shared<FailingTemporaryFile>(code));
                 });
@@ -454,20 +451,20 @@ TEST_CASE("Cancelled ingestion destroys and removes its partial native artifact"
           "[http][body][cancel][temporary-file]")
 {
     std::filesystem::path path;
-    std::weak_ptr<sparenode::filesystem::TemporaryFile> observer;
+    std::weak_ptr<sparenode::storage::TemporaryFile> observer;
     {
         sparenode::http::RequestBodyIngestor ingestor(
             {.content_length = 4}, {},
-            [&]() -> sparenode::Result<std::shared_ptr<sparenode::filesystem::TemporaryFile>,
-                                       sparenode::filesystem::TemporaryFileError>
+            [&]() -> sparenode::Result<std::shared_ptr<sparenode::storage::TemporaryFile>,
+                                       sparenode::storage::TemporaryFileError>
             {
-                auto created = sparenode::filesystem::TemporaryFile::create();
+                auto created = sparenode::storage::TemporaryFile::create();
                 if (!created)
                 {
                     return sparenode::unexpected(created.error());
                 }
-                auto artifact = std::make_shared<sparenode::filesystem::TemporaryFile>(
-                    std::move(created).value());
+                auto artifact =
+                    std::make_shared<sparenode::storage::TemporaryFile>(std::move(created).value());
                 path = artifact->path();
                 observer = artifact;
                 return artifact;
@@ -490,8 +487,8 @@ TEST_CASE("Cancelled ingestion destroys and removes its partial native artifact"
 TEST_CASE("Cancellation interrupts an injected blocked body write and releases its artifact",
           "[http][body][cancel][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     auto state = std::make_shared<BlockedWriteState>();
     auto started = state->started.get_future();
     auto destroyed = state->destroyed.get_future();
@@ -526,8 +523,8 @@ TEST_CASE("Cancellation interrupts an injected blocked body write and releases i
 TEST_CASE("Deadline interrupts an injected blocked body write and releases its artifact",
           "[http][body][timeout][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     auto state = std::make_shared<BlockedWriteState>();
     auto started = state->started.get_future();
     auto destroyed = state->destroyed.get_future();
@@ -541,7 +538,8 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
     std::stop_source stop;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
-                             [&] {
+                             [&]
+                             {
                                  return ingestor.feed(bytes("x"), {.stop_token = stop.get_token(),
                                                                    .deadline = deadline});
                              });
@@ -566,8 +564,8 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
 TEST_CASE("Cancellation releases the request worker while a native file write remains stalled",
           "[http][body][cancel][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     auto state = std::make_shared<StalledWriteState>();
     auto started = state->started.get_future();
     auto destroyed = state->destroyed.get_future();
@@ -610,14 +608,15 @@ TEST_CASE("Cancellation releases the request worker while a native file write re
 TEST_CASE("Deadline releases the request worker while a native file write remains stalled",
           "[http][body][timeout][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     auto state = std::make_shared<StalledWriteState>();
     auto started = state->started.get_future();
     auto destroyed = state->destroyed.get_future();
     sparenode::http::RequestBodyIngestor ingestor(
         {.content_length = 1}, {},
-        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+        {
             return std::static_pointer_cast<TemporaryFile>(
                 std::make_shared<StalledTemporaryFile>(state));
         });
@@ -642,8 +641,8 @@ TEST_CASE("Deadline releases the request worker while a native file write remain
 TEST_CASE("Deadline releases the request worker while native file completion remains stalled",
           "[http][body][timeout][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     auto state = std::make_shared<StalledWriteState>();
     auto started = state->started.get_future();
     auto destroyed = state->destroyed.get_future();
@@ -674,8 +673,8 @@ TEST_CASE("Deadline releases the request worker while native file completion rem
 
 TEST_CASE("A healthy upload waits for bounded file-worker capacity", "[http][body][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     using Ingestor = sparenode::http::RequestBodyIngestor;
     using FeedResult = sparenode::Result<sparenode::http::HttpBodyDecodeProgress,
                                          sparenode::http::RequestBodyIngestionError>;
@@ -764,8 +763,8 @@ TEST_CASE("Idle body ingestors do not occupy file-operation slots", "[http][body
 TEST_CASE("Orphaned file workers exhaust capacity until their files are released",
           "[http][body][temporary-file]")
 {
-    using sparenode::filesystem::TemporaryFile;
-    using sparenode::filesystem::TemporaryFileError;
+    using sparenode::storage::TemporaryFile;
+    using sparenode::storage::TemporaryFileError;
     using Ingestor = sparenode::http::RequestBodyIngestor;
     using FeedResult = sparenode::Result<sparenode::http::HttpBodyDecodeProgress,
                                          sparenode::http::RequestBodyIngestionError>;
@@ -848,12 +847,12 @@ TEST_CASE("Orphaned file workers exhaust capacity until their files are released
 TEST_CASE("An injected file decorator forwards completed artifact metadata",
           "[http][body][temporary-file]")
 {
-    auto created = sparenode::filesystem::TemporaryFile::create();
+    auto created = sparenode::storage::TemporaryFile::create();
     REQUIRE(created.has_value());
     auto state = std::make_shared<StalledWriteState>();
     resume_stalled_write(state);
     auto file = std::make_shared<StalledNativeBackedFile>(state, std::move(created).value());
-    std::shared_ptr<sparenode::filesystem::TemporaryFile> sink = file;
+    std::shared_ptr<sparenode::storage::TemporaryFile> sink = file;
     const auto path = sink->path();
     REQUIRE(sink->write(bytes("payload")).has_value());
     CHECK(sink->size() == 7);

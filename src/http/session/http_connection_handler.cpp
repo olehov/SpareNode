@@ -327,7 +327,7 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 }
 
 /// @brief Copies the active receive policy into one temporary-file operation.
-[[nodiscard]] filesystem::TemporaryFileIoOptions
+[[nodiscard]] storage::TemporaryFileIoOptions
 file_options(const network::NetworkIoOptions &options) noexcept
 {
     return {.stop_token = options.stop_token, .deadline = options.deadline};
@@ -394,7 +394,7 @@ transport_error_status(const HttpTransportErrorCode code) noexcept
 /// @brief Starts a fresh bounded file-publication budget after request ingestion completes.
 /// @param[in] context Active session and its validated body timeout.
 /// @return Existing cancellation token paired with a new body-sized absolute deadline.
-[[nodiscard]] filesystem::TemporaryFileIoOptions
+[[nodiscard]] storage::TemporaryFileIoOptions
 publication_file_options(const HttpSessionRunContext &context) noexcept
 {
     const auto now = std::chrono::steady_clock::now();

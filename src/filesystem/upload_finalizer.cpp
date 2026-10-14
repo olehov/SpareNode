@@ -14,7 +14,7 @@ namespace
 
 /// @brief Prevents any publication attempt after cancellation or expiry.
 [[nodiscard]] std::optional<UploadFinalizationError>
-interruption(const TemporaryFileIoOptions &options) noexcept
+interruption(const storage::TemporaryFileIoOptions &options) noexcept
 {
     if (options.stop_token.stop_requested())
     {
@@ -32,7 +32,8 @@ interruption(const TemporaryFileIoOptions &options) noexcept
 /// @brief Validates the destination and holds its confined parent during publication.
 Result<std::filesystem::path, UploadFinalizationError>
 finalize_upload(const SharedRoot &shared_root, const std::string_view requested_path,
-                const TemporaryFile &source, const TemporaryFileIoOptions &options)
+                const storage::TemporaryFile &source,
+                const storage::TemporaryFileIoOptions &options)
 {
     if (!source.completed() || source.path().empty())
     {

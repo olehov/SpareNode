@@ -21,7 +21,7 @@
 #include <windows.h>
 #include <winternl.h>
 
-#include "temporary_name.hpp"
+#include "sparenode/storage/detail/temporary_name.hpp"
 #include "upload_stage_name.hpp"
 #include "windows_handle.hpp"
 
@@ -61,7 +61,7 @@ struct StageCleanup
 
 /// @brief Gives cancellation priority over an expired deadline.
 [[nodiscard]] std::optional<UploadFinalizationError>
-interruption(const TemporaryFileIoOptions &options) noexcept
+interruption(const storage::TemporaryFileIoOptions &options) noexcept
 {
     if (options.stop_token.stop_requested())
     {
@@ -80,7 +80,7 @@ interruption(const TemporaryFileIoOptions &options) noexcept
     for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
     {
         const auto name = std::filesystem::path(std::string(upload_stage_prefix) +
-                                                temporary_name_suffix() + ".tmp")
+                                                storage::detail::temporary_name_suffix() + ".tmp")
                               .native();
         const auto name_bytes = name.size() * sizeof(wchar_t);
         if (name_bytes > (std::numeric_limits<USHORT>::max)())
@@ -117,7 +117,7 @@ interruption(const TemporaryFileIoOptions &options) noexcept
 /// @brief Copies only the validated source length to an unpublished sibling.
 [[nodiscard]] Result<void, UploadFinalizationError>
 copy_source(const HANDLE source, const HANDLE stage, const std::uint64_t expected_bytes,
-            const TemporaryFileIoOptions &options)
+            const storage::TemporaryFileIoOptions &options)
 {
     std::array<std::byte, copy_buffer_bytes> buffer{};
     std::uint64_t copied = 0;
@@ -223,9 +223,9 @@ publish_stage(const HANDLE stage, const HANDLE parent, const std::filesystem::pa
 
 /// @brief Copies to a handle-relative sibling and atomically renames without overwrite.
 Result<void, UploadFinalizationError>
-publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile &source,
+publish_confined_upload(const ConfinedDirectory &directory, const storage::TemporaryFile &source,
                         const std::filesystem::path &native_name,
-                        const TemporaryFileIoOptions &options)
+                        const storage::TemporaryFileIoOptions &options)
 {
     constexpr DWORD source_flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN;
     const auto source_handle =

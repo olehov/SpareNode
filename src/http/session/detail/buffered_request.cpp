@@ -61,7 +61,7 @@ RequestExpectation BufferedRequest::take_expectation()
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
 Result<void, BufferedRequestError>
 BufferedRequest::feed(const std::span<const std::byte> input,
-                      const filesystem::TemporaryFileIoOptions &options)
+                      const storage::TemporaryFileIoOptions &options)
 {
     return feed_with_body_options(input, [&options] { return options; });
 }
@@ -69,7 +69,7 @@ BufferedRequest::feed(const std::span<const std::byte> input,
 /// @brief Defers the file deadline provider until validated metadata reaches body ingestion.
 Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
     const std::span<const std::byte> input,
-    const std::function<filesystem::TemporaryFileIoOptions()> &options_provider)
+    const std::function<storage::TemporaryFileIoOptions()> &options_provider)
 {
     if (head_.has_value())
     {
@@ -97,7 +97,7 @@ Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
 /// @brief Persists only emitted payload; chunk metadata and trailers never enter body storage.
 Result<void, BufferedRequestError>
 BufferedRequest::feed_body(const std::span<const std::byte> input,
-                           const filesystem::TemporaryFileIoOptions &options)
+                           const storage::TemporaryFileIoOptions &options)
 {
     if (!ingestor_.has_value())
     {
@@ -114,7 +114,7 @@ BufferedRequest::feed_body(const std::span<const std::byte> input,
 
 /// @brief Validates EOF and finalizes the artifact under the active I/O policy.
 Result<void, BufferedRequestError>
-BufferedRequest::finish(const filesystem::TemporaryFileIoOptions &options)
+BufferedRequest::finish(const storage::TemporaryFileIoOptions &options)
 {
     if (!ingestor_)
     {

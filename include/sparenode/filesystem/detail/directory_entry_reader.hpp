@@ -110,9 +110,9 @@ read_confined_directory_entry(const ConfinedDirectory &directory,
 /// @param[in] options Cancellation and deadline policy for staging.
 /// @return Success or a structured staging/publication failure.
 [[nodiscard]] Result<void, UploadFinalizationError>
-publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile &source,
+publish_confined_upload(const ConfinedDirectory &directory, const storage::TemporaryFile &source,
                         const std::filesystem::path &native_name,
-                        const TemporaryFileIoOptions &options);
+                        const storage::TemporaryFileIoOptions &options);
 
 /// @brief Deletes one child entry without following its final link.
 /// @param[in] parent Mutation-safe context returned by open_confined_mutation_directory.

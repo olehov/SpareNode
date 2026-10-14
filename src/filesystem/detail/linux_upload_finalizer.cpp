@@ -17,7 +17,7 @@
 #include <utility>
 
 #include "posix_file_descriptor.hpp"
-#include "temporary_name.hpp"
+#include "sparenode/storage/detail/temporary_name.hpp"
 #include "upload_stage_name.hpp"
 
 namespace sparenode::filesystem::detail
@@ -50,7 +50,7 @@ struct StageCleanup
 
 /// @brief Selects cancellation before expiry at every bounded I/O boundary.
 [[nodiscard]] std::optional<UploadFinalizationError>
-interruption(const TemporaryFileIoOptions &options) noexcept
+interruption(const storage::TemporaryFileIoOptions &options) noexcept
 {
     if (options.stop_token.stop_requested())
     {
@@ -69,7 +69,8 @@ create_stage(const int parent)
 {
     for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
     {
-        auto name = std::string(upload_stage_prefix) + temporary_name_suffix() + ".tmp";
+        auto name =
+            std::string(upload_stage_prefix) + storage::detail::temporary_name_suffix() + ".tmp";
         const auto descriptor = ::openat(
             parent, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor >= 0)
@@ -89,7 +90,7 @@ create_stage(const int parent)
 /// @brief Copies exactly the completed source size to the unpublished sibling.
 [[nodiscard]] Result<void, UploadFinalizationError>
 copy_source(const FileDescriptor &source, const FileDescriptor &stage,
-            const TemporaryFile &artifact, const TemporaryFileIoOptions &options)
+            const storage::TemporaryFile &artifact, const storage::TemporaryFileIoOptions &options)
 {
     std::array<std::byte, copy_buffer_bytes> buffer{};
     std::uint64_t copied = 0;
@@ -175,9 +176,9 @@ publish_stage(const FileDescriptor &stage, const StageCleanup &cleanup,
 
 /// @brief Stages and publishes through one stable parent descriptor without replacement.
 Result<void, UploadFinalizationError>
-publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile &source,
+publish_confined_upload(const ConfinedDirectory &directory, const storage::TemporaryFile &source,
                         const std::filesystem::path &native_name,
-                        const TemporaryFileIoOptions &options)
+                        const storage::TemporaryFileIoOptions &options)
 {
     const FileDescriptor source_file(
         ::open(source.path().c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
@@ -185,9 +186,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const TemporaryFile 
     {
         return unexpected(failure(UploadFinalizationErrorCode::source_read_failed));
     }
-    struct stat source_stat
-    {
-    };
+    struct stat source_stat{};
     if (::fstat(source_file.get(), &source_stat) != 0 || !S_ISREG(source_stat.st_mode) ||
         source_stat.st_size < 0 || static_cast<std::uint64_t>(source_stat.st_size) != source.size())
     {
