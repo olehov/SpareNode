@@ -171,6 +171,21 @@ sparenode_enable_compiler_warnings(sparenode_network_logging)
 sparenode_enable_cppcheck(sparenode_network_logging)
 sparenode_enable_static_analysis(sparenode_network_logging)
 
+add_library(sparenode_configuration STATIC
+    src/configuration/config_lexer.cpp
+    src/configuration/config_loader.cpp
+    src/configuration/config_parser.cpp
+    src/configuration/config_validator.cpp
+)
+
+target_link_libraries(sparenode_configuration PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_configuration)
+sparenode_enable_cppcheck(sparenode_configuration)
+sparenode_enable_static_analysis(sparenode_configuration)
+
 add_library(sparenode_core STATIC
     src/authentication/authentication_service.cpp
     src/authentication/credential_file_provisioner.cpp
@@ -180,12 +195,6 @@ add_library(sparenode_core STATIC
     src/authentication/sensitive_password.cpp
     src/application/command_line.cpp
     src/application/running_application.cpp
-    src/configuration/config_lexer.cpp
-    src/configuration/config_loader.cpp
-    src/configuration/mime_types_loader.cpp
-    src/configuration/config_parser.cpp
-    src/configuration/config_validator.cpp
-    src/configuration/runtime_config_mapper.cpp
     src/http/api/filesystem_api.cpp
     src/http/mime_type_registry.cpp
     src/http/session/http_connection_handler.cpp
@@ -214,6 +223,7 @@ target_include_directories(sparenode_core PUBLIC
 
 target_link_libraries(sparenode_core PRIVATE
     sodium
+    sparenode_configuration
     Threads::Threads
 )
 
@@ -233,11 +243,26 @@ sparenode_enable_compiler_warnings(sparenode_core)
 sparenode_enable_cppcheck(sparenode_core)
 sparenode_enable_static_analysis(sparenode_core)
 
+add_library(sparenode_bootstrap STATIC
+    src/bootstrap/mime_types_loader.cpp
+    src/bootstrap/runtime_bootstrap.cpp
+)
+
+target_link_libraries(sparenode_bootstrap PUBLIC
+    sparenode_configuration
+    sparenode_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_bootstrap)
+sparenode_enable_cppcheck(sparenode_bootstrap)
+sparenode_enable_static_analysis(sparenode_bootstrap)
+
 add_executable(sparenode
     apps/sparenode/main.cpp
 )
 
 target_link_libraries(sparenode PRIVATE
+    sparenode_bootstrap
     sparenode_core
     sparenode_network_logging
 )

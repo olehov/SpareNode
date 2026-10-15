@@ -11,10 +11,7 @@
 #include <vector>
 
 #include "sparenode/configuration/config_loader.hpp"
-#include "sparenode/filesystem/location_permissions.hpp"
-#include "sparenode/logging/log_severity.hpp"
 #include "support/temporary_directory.hpp"
-#include "support/windows_junction.hpp"
 
 namespace
 {
@@ -80,32 +77,34 @@ has_validation_error(const sparenode::configuration::ConfigLoadError &error,
 
 } // namespace
 
-TEST_CASE("Configuration loader maps a valid file through every configuration stage",
-          "[configuration][loader]")
+TEST_CASE("Configuration loader produces validated primitive settings", "[configuration][loader]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-loader");
     const auto path = write_config(directory, valid_config(directory.path()));
 
-    const auto result = sparenode::configuration::ConfigLoader::load(path);
+    const auto result = sparenode::configuration::ConfigLoader::load(path.string());
 
     REQUIRE(result.has_value());
-    REQUIRE(result->servers().size() == 1);
-    const auto &server = result->servers().front();
-    CHECK(server.endpoint().address == "127.0.0.1");
-    CHECK(server.endpoint().port == 8181);
-    CHECK(server.effective_worker_count() == 3);
-    CHECK(server.minimum_log_severity() == sparenode::logging::LogSeverity::warning);
-    CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1200});
-    CHECK(server.http_timeouts().body == std::chrono::milliseconds{2400});
-    CHECK(server.http_timeouts().total == std::chrono::milliseconds{3600});
-    CHECK(server.credentials_file() == directory.path() / "credentials.conf");
-    REQUIRE(server.locations().size() == 1);
-    CHECK(std::filesystem::equivalent(server.locations().front().root().path(), directory.path()));
-    CHECK(server.locations().front().permissions() ==
-          sparenode::filesystem::LocationPermissions{false, true, true});
+    CHECK(result->source_path == path.string());
+    REQUIRE(result->configuration.settings().servers.size() == 1);
+    const auto &server = result->configuration.settings().servers.front();
+    CHECK(server.bind_address == "127.0.0.1");
+    CHECK(server.port == 8181);
+    CHECK(server.multithreading_enabled);
+    CHECK(server.worker_threads == 3);
+    CHECK(server.log_level == sparenode::configuration::ConfiguredLogLevel::warning);
+    CHECK(server.header_timeout_ms == 1200);
+    CHECK(server.body_timeout_ms == 2400);
+    CHECK(server.request_timeout_ms == 3600);
+    CHECK_FALSE(server.credentials_file.has_value());
+    REQUIRE(server.locations.size() == 1);
+    CHECK(server.locations.front().root.value == directory.path().generic_string());
+    CHECK_FALSE(server.locations.front().allow_read);
+    CHECK(server.locations.front().allow_write);
+    CHECK(server.locations.front().allow_delete);
 }
 
-TEST_CASE("Configuration loader resolves the separate credential file beside the main config",
+TEST_CASE("Configuration loader preserves external paths for bootstrap resolution",
           "[configuration][loader][authentication]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-credential-loader");
@@ -114,111 +113,14 @@ TEST_CASE("Configuration loader resolves the separate credential file beside the
     const auto config_path = write_config(
         directory, make_config("credentials_file \"secrets/owner.conf\";\n", location));
 
-    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+    const auto result = sparenode::configuration::ConfigLoader::load(config_path.string());
 
     REQUIRE(result.has_value());
-    REQUIRE(result->servers().size() == 1);
-    CHECK(result->servers().front().credentials_file() ==
-          directory.path() / "secrets" / "owner.conf");
-}
-
-TEST_CASE("Configuration loader resolves and loads MIME mappings beside the main file",
-          "[configuration][loader][mime-types]")
-{
-    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-loader");
-    {
-        std::ofstream mime_file(directory.path() / "custom.types", std::ios::binary);
-        REQUIRE(mime_file.is_open());
-        mime_file << "image/png png\ntext/plain txt\n";
-        REQUIRE(mime_file.good());
-    }
-    const auto location =
-        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
-    const auto config_path =
-        write_config(directory, make_config("mime_types_file \"custom.types\";\n", location));
-
-    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
-
-    REQUIRE(result.has_value());
-    REQUIRE(result->servers().size() == 1);
-    CHECK(result->servers().front().mime_types().content_type_for_path("image.PNG") == "image/png");
-}
-
-TEST_CASE("Configuration loader preserves filesystem resolution in MIME paths",
-          "[configuration][loader][mime-types][security]")
-{
-    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-symlink");
-    const auto target = directory.path() / "target";
-    const auto nested = target / "nested";
-    std::filesystem::create_directories(nested);
-    const auto link = directory.path() / "link";
-    std::error_code link_error;
-#ifdef _WIN32
-    link_error = sparenode::test::create_directory_junction(nested, link);
-#else
-    std::filesystem::create_directory_symlink(nested, link, link_error);
-#endif
-    if (link_error)
-    {
-        SKIP("Directory redirection creation is unavailable: " << link_error.message());
-    }
-
-// Windows normalizes `..` before traversing a reparse point, while POSIX resolves it after
-// following the directory symlink. Place the fixture where each platform resolves the raw path.
-#ifdef _WIN32
-    const auto &resolved_parent = directory.path();
-#else
-    const auto &resolved_parent = target;
-#endif
-    {
-        std::ofstream mime_file(resolved_parent / "custom.types", std::ios::binary);
-        REQUIRE(mime_file.is_open());
-        mime_file << "image/png png\n";
-        REQUIRE(mime_file.good());
-    }
-    REQUIRE(std::filesystem::exists(link / ".." / "custom.types"));
-    const auto location =
-        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
-    const std::vector<std::pair<std::string, std::string>> configured_paths{
-        {"relative", "link/../custom.types"},
-        {"absolute", (link / ".." / "custom.types").generic_string()},
-    };
-
-    for (const auto &[name, configured_path] : configured_paths)
-    {
-        DYNAMIC_SECTION(name)
-        {
-            const auto config_path = write_config(
-                directory, make_config("mime_types_file \"" + configured_path + "\";\n", location));
-            const auto result = sparenode::configuration::ConfigLoader::load(config_path);
-
-            REQUIRE(result.has_value());
-            CHECK(result->servers().front().mime_types().content_type_for_path("image.png") ==
-                  "image/png");
-        }
-    }
-}
-TEST_CASE("Configuration loader attributes MIME failures to the resolved MIME file",
-          "[configuration][loader][mime-types]")
-{
-    const sparenode::test::TemporaryDirectory directory("sparenode-config-mime-error");
-    const auto missing_path = directory.path() / "missing.types";
-    const auto location =
-        make_location("/api/Documents", "path \"" + directory.path().generic_string() + "\";");
-    const auto config_path =
-        write_config(directory, make_config("mime_types_file \"missing.types\";\n", location));
-
-    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
-
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().source_path == missing_path);
-    REQUIRE(std::holds_alternative<sparenode::configuration::MimeTypesLoadError>(
-        result.error().failure));
-    CHECK(std::get<sparenode::configuration::MimeTypesLoadError>(result.error().failure).code ==
-          sparenode::configuration::MimeTypesLoadErrorCode::open_failed);
-    CHECK(sparenode::configuration::format_config_load_error(result.error())
-              .find(missing_path.generic_string() +
-                    ":1:1: error: unable to open MIME types file") != std::string::npos);
+    REQUIRE(result->configuration.settings().servers.size() == 1);
+    const auto &credentials = result->configuration.settings().servers.front().credentials_file;
+    REQUIRE(credentials.has_value());
+    const auto credential = credentials.value_or(sparenode::configuration::ConfiguredPath{});
+    CHECK(credential.value == "secrets/owner.conf");
 }
 
 TEST_CASE("Configuration loader preserves file lexer parser and validation failures",
@@ -229,7 +131,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("missing file")
     {
         const auto path = directory.path() / "missing.conf";
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(std::holds_alternative<sparenode::configuration::ConfigFileError>(
             result.error().failure));
@@ -242,7 +144,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
         const auto path = write_config(
             directory,
             std::string(sparenode::configuration::ConfigLexer::max_input_size_bytes + 1, ' '));
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(std::holds_alternative<sparenode::configuration::ConfigLexerError>(
             result.error().failure));
@@ -253,7 +155,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("lexical failure")
     {
         const auto path = write_config(directory, "server { @ }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         CHECK(std::holds_alternative<sparenode::configuration::ConfigLexerError>(
             result.error().failure));
@@ -262,7 +164,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("parser failure")
     {
         const auto path = write_config(directory, "server { port 8080 }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         CHECK(std::holds_alternative<sparenode::configuration::ConfigParserError>(
             result.error().failure));
@@ -271,7 +173,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("validation failures")
     {
         const auto path = write_config(directory, "server { port 0; }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(
             std::holds_alternative<std::vector<sparenode::configuration::ConfigValidationError>>(
@@ -286,7 +188,7 @@ TEST_CASE("Configuration loader formats source-located diagnostics", "[configura
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-loader");
     const auto path = write_config(directory, "server { port 0; }");
-    const auto result = sparenode::configuration::ConfigLoader::load(path);
+    const auto result = sparenode::configuration::ConfigLoader::load(path.string());
     REQUIRE_FALSE(result.has_value());
 
     const auto diagnostic = sparenode::configuration::format_config_load_error(result.error());
@@ -305,9 +207,9 @@ TEST_CASE("Configuration loader formats both file I/O failure categories",
     const std::filesystem::path path = "config/spnode.conf";
 
     const auto open_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{path, ConfigFileError{ConfigFileErrorCode::open_failed}});
+        ConfigLoadError{path.string(), ConfigFileError{ConfigFileErrorCode::open_failed}});
     const auto read_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{path, ConfigFileError{ConfigFileErrorCode::read_failed}});
+        ConfigLoadError{path.string(), ConfigFileError{ConfigFileErrorCode::read_failed}});
 
     CHECK(open_diagnostic == "error: unable to open configuration file 'config/spnode.conf'");
     CHECK(read_diagnostic == "error: unable to read configuration file 'config/spnode.conf'");
@@ -324,14 +226,14 @@ TEST_CASE("Configuration loader escapes terminal control bytes in source paths",
     unsafe_path.push_back('\x1B');
     unsafe_path.push_back('\x7F');
     unsafe_path += ".conf";
-    const auto diagnostic = sparenode::configuration::format_config_load_error(ConfigLoadError{
-        std::filesystem::path(unsafe_path), ConfigFileError{ConfigFileErrorCode::open_failed}});
-    const auto located_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{std::filesystem::path(unsafe_path),
-                        sparenode::configuration::ConfigLexerError{
-                            sparenode::configuration::ConfigLexerErrorCode::invalid_utf8,
-                            sparenode::configuration::SourceLocation{0, 2, 3},
-                            {}}});
+    const auto diagnostic = sparenode::configuration::format_config_load_error(
+        ConfigLoadError{unsafe_path, ConfigFileError{ConfigFileErrorCode::open_failed}});
+    const auto located_diagnostic =
+        sparenode::configuration::format_config_load_error(ConfigLoadError{
+            unsafe_path, sparenode::configuration::ConfigLexerError{
+                             sparenode::configuration::ConfigLexerErrorCode::invalid_utf8,
+                             sparenode::configuration::SourceLocation{0, 2, 3},
+                             {}}});
 
     CHECK(diagnostic == "error: unable to open configuration file 'config/unsafe\\x1B\\x7F.conf'");
     CHECK(located_diagnostic ==
@@ -372,7 +274,7 @@ TEST_CASE("Configuration loader covers every lexer failure category",
         {
             const sparenode::test::TemporaryDirectory directory("sparenode-config-lexer-error");
             const auto result = sparenode::configuration::ConfigLoader::load(
-                write_config(directory, test_case.source));
+                write_config(directory, test_case.source).string());
             REQUIRE_FALSE(result.has_value());
             const auto *failure =
                 std::get_if<sparenode::configuration::ConfigLexerError>(&result.error().failure);
@@ -394,7 +296,7 @@ TEST_CASE("Configuration loader covers every direct parser failure category",
     {
         const sparenode::test::TemporaryDirectory directory("sparenode-config-parser-error");
         const auto result =
-            sparenode::configuration::ConfigLoader::load(write_config(directory, source));
+            sparenode::configuration::ConfigLoader::load(write_config(directory, source).string());
         REQUIRE_FALSE(result.has_value());
         const auto *failure =
             std::get_if<sparenode::configuration::ConfigParserError>(&result.error().failure);
@@ -442,16 +344,14 @@ TEST_CASE("Configuration loader covers every semantic validation failure categor
         {Code::missing_location_root,
          make_config("", make_location("/api/Documents", "read true;"))},
         {Code::invalid_location_root,
-         make_config("", make_location("/api/Documents",
-                                       "path \"" + (directory.path() / "missing").generic_string() +
-                                           "\";"))}};
+         make_config("", make_location("/api/Documents", "path \"\";"))}};
 
     for (const auto &[expected, source] : cases)
     {
         DYNAMIC_SECTION(static_cast<std::uint32_t>(expected))
         {
-            const auto result =
-                sparenode::configuration::ConfigLoader::load(write_config(directory, source));
+            const auto result = sparenode::configuration::ConfigLoader::load(
+                write_config(directory, source).string());
             REQUIRE_FALSE(result.has_value());
             CHECK(has_validation_error(result.error(), expected));
         }

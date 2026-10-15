@@ -14,16 +14,22 @@ The initial dependency boundaries are:
 | `sparenode_storage` | Temporary artifacts, bounded isolated file I/O, and cleanup ownership | `sparenode_foundation` |
 | `sparenode_filesystem` | Canonical roots, path containment, filesystem operations, and location permissions | `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_network_logging` | Network error formatting and logging observers | `sparenode_logging`, `sparenode_network` |
+| `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
+| `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
 
 Foundation depends only on the C++ standard library. Logging core must not
 include network headers, and network must not include logging headers. The
 network logging adapter is selected by the `sparenode` composition executable;
 neither domain library selects it for callers.
 
-Filesystem owns `SharedRoot` and `LocationPermissions`. Configuration validates
-and constructs these types but filesystem code does not include configuration
-headers. Authentication placement checks consume canonical shared roots rather
-than runtime location configuration.
+Filesystem owns `SharedRoot` and `LocationPermissions`. Configuration retains only
+decoded path text, permission flags, and source locations. Bootstrap constructs the
+filesystem types and performs authentication placement checks before listener startup.
+
+Configuration public headers contain no HTTP, network, logging, filesystem, or
+authentication implementation types. MIME registry loading, credential-backed
+authentication, endpoint construction, log severity mapping, receive deadlines, and
+transport policy mapping belong to bootstrap.
 
 Storage owns `TemporaryFile`, its cancellation/deadline policy, cleanup contract,
 and the process-wide limit of 32 active or orphaned native file operations.

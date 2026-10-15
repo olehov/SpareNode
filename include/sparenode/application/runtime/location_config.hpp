@@ -6,7 +6,7 @@
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 
-namespace sparenode::configuration::runtime
+namespace sparenode::application::runtime
 {
 
 /// @brief Owns one immutable validated directory exposed by SpareNode.
@@ -50,4 +50,4 @@ class LocationConfig final
     filesystem::LocationPermissions permissions_; ///< Allowed operations inside the root.
 };
 
-} // namespace sparenode::configuration::runtime
+} // namespace sparenode::application::runtime

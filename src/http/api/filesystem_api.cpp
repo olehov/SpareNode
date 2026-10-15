@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/application/runtime/location_config.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
 #include "sparenode/filesystem/directory_creator.hpp"
 #include "sparenode/filesystem/directory_listing.hpp"
@@ -32,7 +32,7 @@ namespace sparenode::http
 namespace
 {
 
-using configuration::runtime::LocationConfig;
+using application::runtime::LocationConfig;
 using filesystem::DirectoryCreationError;
 using filesystem::DirectoryCreationErrorCode;
 using filesystem::DirectoryListingEntry;
@@ -618,7 +618,7 @@ registration_failure(const HttpRouteRegistrationError error) noexcept
 
 /// @brief Registers filesystem endpoints for every validated runtime location.
 Result<HttpRouter, FilesystemApiError>
-make_filesystem_api_router(const configuration::runtime::ServerConfig &server)
+make_filesystem_api_router(const application::runtime::ServerConfig &server)
 {
     try
     {

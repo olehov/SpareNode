@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "sparenode/application/running_application.hpp"
-#include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/application/runtime/location_config.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
@@ -23,13 +23,13 @@ TEST_CASE("Running application starts from runtime settings and retains location
     auto root_result = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
 
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    std::vector<sparenode::application::runtime::LocationConfig> locations;
     locations.emplace_back("/api/Documents", std::move(root_result).value(),
                            sparenode::filesystem::LocationPermissions{true, false, false});
-    std::vector<sparenode::configuration::runtime::ServerConfig> servers;
+    std::vector<sparenode::application::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
                          sparenode::logging::LogSeverity::info, std::move(locations));
-    sparenode::configuration::runtime::AppConfig config(std::move(servers));
+    sparenode::application::runtime::AppConfig config(std::move(servers));
 
     auto handler = [](sparenode::network::TcpConnection, const std::stop_token &)
         -> sparenode::Result<void, sparenode::network::NetworkError> { return {}; };
@@ -62,10 +62,10 @@ TEST_CASE("Running application installs connection failure observers on its disp
     const sparenode::test::TemporaryDirectory directory("sparenode-application-observer");
     auto root_result = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root_result.has_value());
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
+    std::vector<sparenode::application::runtime::LocationConfig> locations;
     locations.emplace_back("/api/Documents", std::move(root_result).value(),
                            sparenode::filesystem::LocationPermissions{true, false, false});
-    std::vector<sparenode::configuration::runtime::ServerConfig> servers;
+    std::vector<sparenode::application::runtime::ServerConfig> servers;
     servers.emplace_back(sparenode::network::TcpEndpoint{"127.0.0.1", 0}, false, 1,
                          sparenode::logging::LogSeverity::info, std::move(locations));
 
@@ -84,7 +84,7 @@ TEST_CASE("Running application installs connection failure observers on its disp
         observed_signal.release();
     };
     auto result = sparenode::application::RunningApplication::start(
-        sparenode::configuration::runtime::AppConfig(std::move(servers)), std::move(handler),
+        sparenode::application::runtime::AppConfig(std::move(servers)), std::move(handler),
         {std::move(observer), {}});
     REQUIRE(result.has_value());
     const auto endpoint = result->servers().front().local_endpoint();

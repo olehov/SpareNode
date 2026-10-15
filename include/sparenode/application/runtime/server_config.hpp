@@ -5,14 +5,14 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/runtime/location_config.hpp"
+#include "sparenode/application/runtime/location_config.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/http/session/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 
-namespace sparenode::configuration::runtime
+namespace sparenode::application::runtime
 {
 
 /// @brief Owns immutable validated settings consumed when a connection server starts.
@@ -126,4 +126,4 @@ class ServerConfig final
     std::filesystem::path credentials_file_;     ///< Separate owner credential source.
 };
 
-} // namespace sparenode::configuration::runtime
+} // namespace sparenode::application::runtime

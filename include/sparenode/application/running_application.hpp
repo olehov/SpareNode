@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "sparenode/configuration/runtime/app_config.hpp"
+#include "sparenode/application/runtime/app_config.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/network/connection_server.hpp"
 
@@ -50,7 +50,7 @@ class RunningApplication final
     /// @param[in] admission Optional bounded prefix gate copied into each server.
     /// @return Fully running RAII owner, or a structured startup failure.
     [[nodiscard]] static Result<RunningApplication, ApplicationStartError>
-    start(configuration::runtime::AppConfig config, network::ConnectionHandler handler,
+    start(runtime::AppConfig config, network::ConnectionHandler handler,
           RunningApplicationObservers observers = {},
           std::optional<network::ConnectionAdmissionOptions> admission = std::nullopt);
 
@@ -67,7 +67,7 @@ class RunningApplication final
 
     /// @brief Returns the immutable runtime settings retained by the application.
     /// @return Validated configuration that produced the running servers.
-    [[nodiscard]] const configuration::runtime::AppConfig &config() const noexcept;
+    [[nodiscard]] const runtime::AppConfig &config() const noexcept;
 
     /// @brief Returns the RAII-owned running connection servers.
     /// @return Servers in the same order as their runtime configuration entries.
@@ -77,10 +77,10 @@ class RunningApplication final
     /// @brief Stores a successfully initialized application state.
     /// @param[in] config Validated settings retained for application consumers.
     /// @param[in] servers Running servers transferred into RAII ownership.
-    RunningApplication(configuration::runtime::AppConfig config,
+    RunningApplication(runtime::AppConfig config,
                        std::vector<network::ConnectionServer> servers) noexcept;
 
-    configuration::runtime::AppConfig config_;       ///< Retained validated runtime settings.
+    runtime::AppConfig config_;                      ///< Retained validated runtime settings.
     std::vector<network::ConnectionServer> servers_; ///< RAII-owned servers in config order.
 };
 

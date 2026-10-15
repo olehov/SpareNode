@@ -1,4 +1,4 @@
-#include "sparenode/configuration/mime_types_loader.hpp"
+#include "sparenode/bootstrap/mime_types_loader.hpp"
 
 #include <fstream>
 #include <ios>
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace sparenode::configuration
+namespace sparenode::bootstrap
 {
 namespace
 {
@@ -221,4 +221,4 @@ const char *to_string(const MimeTypesLoadErrorCode code) noexcept
     return "unknown MIME types loading error";
 }
 
-} // namespace sparenode::configuration
+} // namespace sparenode::bootstrap

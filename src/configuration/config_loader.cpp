@@ -1,15 +1,11 @@
 #include "sparenode/configuration/config_loader.hpp"
 
-#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <ios>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
-
-#include "sparenode/configuration/directives/parsed_server_directive.hpp"
-#include "sparenode/configuration/runtime_config_mapper.hpp"
 
 namespace sparenode::configuration
 {
@@ -131,80 +127,21 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
     return output.str();
 }
 
-/// @brief Formats one source-located MIME mapping failure.
-[[nodiscard]] std::string format_failure(const std::filesystem::path &path,
-                                         const MimeTypesLoadError &failure)
-{
-    std::ostringstream output;
-    append_escaped_path(output, path);
-    output << ':' << failure.line << ":1: error: " << to_string(failure.code);
-    return output.str();
-}
-
-/// @brief Resolves one optional server file path relative to the main configuration file.
-/// @param[in] configuration Validated configuration containing the optional directive.
-/// @param[in] kind File-path directive to locate.
-/// @param[in] config_path Main configuration source used as the relative-path base.
-/// @return Resolved path, or no value when the selected directive is absent.
-[[nodiscard]] std::optional<std::filesystem::path>
-configured_server_path(const ValidatedConfiguration &configuration,
-                       const directives::ServerDirectiveKind kind,
-                       const std::filesystem::path &config_path)
-{
-    const auto &directives = configuration.parsed().server.directives;
-    const auto directive =
-        std::ranges::find_if(directives, [kind](const auto &item) { return item.kind == kind; });
-    if (directive == directives.end())
-    {
-        return std::nullopt;
-    }
-    const auto &configured = std::get<std::string>(directive->value.scalar);
-    const std::u8string utf8(configured.begin(), configured.end());
-    std::filesystem::path path(utf8);
-    if (path.is_absolute())
-    {
-        return path;
-    }
-    return config_path.parent_path() / path;
-}
-
-/// @brief Resolves the optional MIME mapping path relative to the main configuration file.
-[[nodiscard]] std::optional<std::filesystem::path>
-mime_types_path(const ValidatedConfiguration &configuration,
-                const std::filesystem::path &config_path)
-{
-    return configured_server_path(configuration, directives::ServerDirectiveKind::mime_types_file,
-                                  config_path);
-}
-
-/// @brief Resolves the configured or default owner credential path.
-[[nodiscard]] std::filesystem::path
-credentials_file_path(const ValidatedConfiguration &configuration,
-                      const std::filesystem::path &config_path)
-{
-    if (auto configured = configured_server_path(
-            configuration, directives::ServerDirectiveKind::credentials_file, config_path))
-    {
-        return std::move(*configured);
-    }
-    return config_path.parent_path() / "credentials.conf";
-}
-
 } // namespace
 
-Result<runtime::AppConfig, ConfigLoadError>
-ConfigLoader::load(const std::filesystem::path &source_path)
+Result<LoadedConfiguration, ConfigLoadError> ConfigLoader::load(std::string source_path)
 {
-    auto source_result = read_config_source(source_path);
+    const std::filesystem::path source_file(source_path);
+    auto source_result = read_config_source(source_file);
     if (!source_result)
     {
-        return unexpected(ConfigLoadError{source_path, source_result.error()});
+        return unexpected(ConfigLoadError{std::move(source_path), source_result.error()});
     }
 
     auto lexer_result = ConfigLexer::create(source_result.value());
     if (!lexer_result)
     {
-        return unexpected(ConfigLoadError{source_path, lexer_result.error()});
+        return unexpected(ConfigLoadError{std::move(source_path), lexer_result.error()});
     }
 
     auto parser_result = ConfigParser::parse(std::move(lexer_result).value());
@@ -213,35 +150,26 @@ ConfigLoader::load(const std::filesystem::path &source_path)
         auto parser_error = std::move(parser_result.error());
         if (parser_error.lexer_error.has_value())
         {
-            return unexpected(ConfigLoadError{source_path, std::move(*parser_error.lexer_error)});
+            return unexpected(
+                ConfigLoadError{std::move(source_path), std::move(*parser_error.lexer_error)});
         }
-        return unexpected(ConfigLoadError{source_path, std::move(parser_error)});
+        return unexpected(ConfigLoadError{std::move(source_path), std::move(parser_error)});
     }
 
     auto validation_result = ConfigValidator::validate(std::move(parser_result).value());
     if (!validation_result)
     {
-        return unexpected(ConfigLoadError{source_path, std::move(validation_result.error())});
+        return unexpected(
+            ConfigLoadError{std::move(source_path), std::move(validation_result.error())});
     }
-    http::MimeTypeRegistry mime_types;
-    if (const auto path = mime_types_path(validation_result.value(), source_path))
-    {
-        auto mime_result = MimeTypesLoader::load(*path);
-        if (!mime_result)
-        {
-            return unexpected(ConfigLoadError{*path, mime_result.error()});
-        }
-        mime_types = std::move(mime_result).value();
-    }
-    auto credentials_path = credentials_file_path(validation_result.value(), source_path);
-    return RuntimeConfigMapper::map(validation_result.value(), std::move(mime_types),
-                                    std::move(credentials_path));
+    return LoadedConfiguration{std::move(source_path), std::move(validation_result).value()};
 }
 
 std::string format_config_load_error(const ConfigLoadError &error)
 {
-    return std::visit([&error](const auto &failure)
-                      { return format_failure(error.source_path, failure); }, error.failure);
+    const std::filesystem::path source_path(error.source_path);
+    return std::visit([&source_path](const auto &failure)
+                      { return format_failure(source_path, failure); }, error.failure);
 }
 
 const char *to_string(const ConfigFileErrorCode code) noexcept

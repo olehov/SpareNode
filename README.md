@@ -38,8 +38,8 @@ external interfaces. Shared HTTP primitives remain directly under
 `include/sparenode/http`; request, response, session, routing, and API headers
 live under their corresponding responsibility. The
 [module boundary guide](docs/module-boundaries.md) records the allowed CMake
-dependency direction between foundation, storage, filesystem, logging, network, and
-their adapters.
+dependency direction between foundation, storage, filesystem, configuration,
+bootstrap, logging, network, and their adapters.
 
 ## Requirements
 
