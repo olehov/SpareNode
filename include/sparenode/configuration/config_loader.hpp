@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <filesystem>
 #include <string>
 #include <variant>
 #include <vector>
@@ -34,14 +33,14 @@ using ConfigLoadFailure = std::variant<ConfigFileError, ConfigLexerError, Config
 /// @brief Associates a structured configuration failure with its selected source file.
 struct ConfigLoadError
 {
-    std::filesystem::path source_path; ///< File selected by the application user.
-    ConfigLoadFailure failure;         ///< Original file, lexer, parser, or validator failure.
+    std::string source_path;   ///< Native-encoded file path selected by the application user.
+    ConfigLoadFailure failure; ///< Original file, lexer, parser, or validator failure.
 };
 
 /// @brief Associates validated settings with the source used for relative bootstrap paths.
 struct LoadedConfiguration
 {
-    std::filesystem::path source_path;    ///< Main configuration file selected at startup.
+    std::string source_path;              ///< Native-encoded configuration source path.
     ValidatedConfiguration configuration; ///< Pure validated syntax and primitive settings.
 };
 
@@ -52,8 +51,7 @@ class ConfigLoader final
     /// @brief Reads, tokenizes, parses, and validates one `spnode.conf` file.
     /// @param[in] source_path Configuration file selected at application startup.
     /// @return Validated primitive settings, or the original stage failure.
-    [[nodiscard]] static Result<LoadedConfiguration, ConfigLoadError>
-    load(const std::filesystem::path &source_path);
+    [[nodiscard]] static Result<LoadedConfiguration, ConfigLoadError> load(std::string source_path);
 };
 
 /// @brief Formats all diagnostics retained by one configuration-load failure.

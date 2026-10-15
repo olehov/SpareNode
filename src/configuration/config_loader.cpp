@@ -1,5 +1,6 @@
 #include "sparenode/configuration/config_loader.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <sstream>
@@ -128,19 +129,19 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
 
 } // namespace
 
-Result<LoadedConfiguration, ConfigLoadError>
-ConfigLoader::load(const std::filesystem::path &source_path)
+Result<LoadedConfiguration, ConfigLoadError> ConfigLoader::load(std::string source_path)
 {
-    auto source_result = read_config_source(source_path);
+    const std::filesystem::path source_file(source_path);
+    auto source_result = read_config_source(source_file);
     if (!source_result)
     {
-        return unexpected(ConfigLoadError{source_path, source_result.error()});
+        return unexpected(ConfigLoadError{std::move(source_path), source_result.error()});
     }
 
     auto lexer_result = ConfigLexer::create(source_result.value());
     if (!lexer_result)
     {
-        return unexpected(ConfigLoadError{source_path, lexer_result.error()});
+        return unexpected(ConfigLoadError{std::move(source_path), lexer_result.error()});
     }
 
     auto parser_result = ConfigParser::parse(std::move(lexer_result).value());
@@ -149,23 +150,26 @@ ConfigLoader::load(const std::filesystem::path &source_path)
         auto parser_error = std::move(parser_result.error());
         if (parser_error.lexer_error.has_value())
         {
-            return unexpected(ConfigLoadError{source_path, std::move(*parser_error.lexer_error)});
+            return unexpected(
+                ConfigLoadError{std::move(source_path), std::move(*parser_error.lexer_error)});
         }
-        return unexpected(ConfigLoadError{source_path, std::move(parser_error)});
+        return unexpected(ConfigLoadError{std::move(source_path), std::move(parser_error)});
     }
 
     auto validation_result = ConfigValidator::validate(std::move(parser_result).value());
     if (!validation_result)
     {
-        return unexpected(ConfigLoadError{source_path, std::move(validation_result.error())});
+        return unexpected(
+            ConfigLoadError{std::move(source_path), std::move(validation_result.error())});
     }
-    return LoadedConfiguration{source_path, std::move(validation_result).value()};
+    return LoadedConfiguration{std::move(source_path), std::move(validation_result).value()};
 }
 
 std::string format_config_load_error(const ConfigLoadError &error)
 {
-    return std::visit([&error](const auto &failure)
-                      { return format_failure(error.source_path, failure); }, error.failure);
+    const std::filesystem::path source_path(error.source_path);
+    return std::visit([&source_path](const auto &failure)
+                      { return format_failure(source_path, failure); }, error.failure);
 }
 
 const char *to_string(const ConfigFileErrorCode code) noexcept

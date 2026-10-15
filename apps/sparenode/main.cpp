@@ -52,7 +52,8 @@ int main(const int argc, const char *const argv[])
         std::cerr << "\nusage: sparenode --config <path-to-spnode.conf>\n";
         return 2;
     }
-    auto config_result = sparenode::configuration::ConfigLoader::load(options->config_path);
+    auto config_result =
+        sparenode::configuration::ConfigLoader::load(options->config_path.string());
     if (!config_result)
     {
         sparenode::logging::write_console_diagnostic(

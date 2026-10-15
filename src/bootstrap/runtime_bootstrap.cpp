@@ -31,10 +31,11 @@ constexpr std::string_view hexadecimal_digits = "0123456789ABCDEF";
 
 /// @brief Resolves a configured path relative to the main configuration file.
 [[nodiscard]] std::filesystem::path resolve_path(const configuration::ConfiguredPath &configured,
-                                                 const std::filesystem::path &configuration_path)
+                                                 const std::string_view configuration_path)
 {
     auto path = path_from_utf8(configured.value);
-    return path.is_absolute() ? std::move(path) : configuration_path.parent_path() / path;
+    return path.is_absolute() ? std::move(path)
+                              : std::filesystem::path(configuration_path).parent_path() / path;
 }
 
 /// @brief Converts a configuration-owned severity into the logging domain.
@@ -81,7 +82,8 @@ build_locations(const configuration::ServerSettings &configured,
     locations.reserve(configured.locations.size());
     for (const auto &location : configured.locations)
     {
-        auto root = filesystem::SharedRoot::create(path_from_utf8(location.root.value));
+        const auto root_path = resolve_path(location.root, loaded.source_path);
+        auto root = filesystem::SharedRoot::create(root_path);
         if (!root)
         {
             return unexpected(
@@ -141,7 +143,8 @@ struct CredentialSource
         return {resolve_path(*configured.credentials_file, loaded.source_path),
                 configured.credentials_file->location};
     }
-    return {loaded.source_path.parent_path() / "credentials.conf", configured.location};
+    return {std::filesystem::path(loaded.source_path).parent_path() / "credentials.conf",
+            configured.location};
 }
 
 /// @brief Appends a path while escaping bytes that can alter terminal output.

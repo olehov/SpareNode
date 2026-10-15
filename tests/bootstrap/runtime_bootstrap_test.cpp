@@ -52,7 +52,7 @@ void provision_credentials(const std::filesystem::path &path)
 [[nodiscard]] sparenode::configuration::LoadedConfiguration
 load_configuration(const std::filesystem::path &path)
 {
-    auto loaded = sparenode::configuration::ConfigLoader::load(path);
+    auto loaded = sparenode::configuration::ConfigLoader::load(path.string());
     REQUIRE(loaded.has_value());
     return std::move(loaded).value();
 }
@@ -86,6 +86,25 @@ TEST_CASE("Runtime bootstrap constructs equivalent default runtime settings",
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), shared));
     CHECK(server.locations().front().permissions() ==
           sparenode::filesystem::LocationPermissions{true, false, false});
+}
+
+TEST_CASE("Runtime bootstrap resolves relative roots from the configuration directory",
+          "[bootstrap][configuration][paths]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-bootstrap-relative-root");
+    const auto shared = directory.path() / "shared";
+    REQUIRE(std::filesystem::create_directory(shared));
+    provision_credentials(directory.path() / "credentials.conf");
+    const auto config_path = write_file(directory.path() / "spnode.conf",
+                                        configuration_source(std::filesystem::path("shared")));
+
+    auto runtime = sparenode::bootstrap::RuntimeBootstrap::build(load_configuration(config_path));
+
+    REQUIRE(runtime.has_value());
+    REQUIRE(runtime->config().servers().size() == 1);
+    REQUIRE(runtime->config().servers().front().locations().size() == 1);
+    CHECK(std::filesystem::equivalent(
+        runtime->config().servers().front().locations().front().root().path(), shared));
 }
 
 TEST_CASE("Runtime bootstrap resolves external MIME and credential paths",

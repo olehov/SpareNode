@@ -82,10 +82,10 @@ TEST_CASE("Configuration loader produces validated primitive settings", "[config
     const sparenode::test::TemporaryDirectory directory("sparenode-config-loader");
     const auto path = write_config(directory, valid_config(directory.path()));
 
-    const auto result = sparenode::configuration::ConfigLoader::load(path);
+    const auto result = sparenode::configuration::ConfigLoader::load(path.string());
 
     REQUIRE(result.has_value());
-    CHECK(result->source_path == path);
+    CHECK(result->source_path == path.string());
     REQUIRE(result->configuration.settings().servers.size() == 1);
     const auto &server = result->configuration.settings().servers.front();
     CHECK(server.bind_address == "127.0.0.1");
@@ -113,7 +113,7 @@ TEST_CASE("Configuration loader preserves external paths for bootstrap resolutio
     const auto config_path = write_config(
         directory, make_config("credentials_file \"secrets/owner.conf\";\n", location));
 
-    const auto result = sparenode::configuration::ConfigLoader::load(config_path);
+    const auto result = sparenode::configuration::ConfigLoader::load(config_path.string());
 
     REQUIRE(result.has_value());
     REQUIRE(result->configuration.settings().servers.size() == 1);
@@ -131,7 +131,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("missing file")
     {
         const auto path = directory.path() / "missing.conf";
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(std::holds_alternative<sparenode::configuration::ConfigFileError>(
             result.error().failure));
@@ -144,7 +144,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
         const auto path = write_config(
             directory,
             std::string(sparenode::configuration::ConfigLexer::max_input_size_bytes + 1, ' '));
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(std::holds_alternative<sparenode::configuration::ConfigLexerError>(
             result.error().failure));
@@ -155,7 +155,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("lexical failure")
     {
         const auto path = write_config(directory, "server { @ }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         CHECK(std::holds_alternative<sparenode::configuration::ConfigLexerError>(
             result.error().failure));
@@ -164,7 +164,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("parser failure")
     {
         const auto path = write_config(directory, "server { port 8080 }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         CHECK(std::holds_alternative<sparenode::configuration::ConfigParserError>(
             result.error().failure));
@@ -173,7 +173,7 @@ TEST_CASE("Configuration loader preserves file lexer parser and validation failu
     SECTION("validation failures")
     {
         const auto path = write_config(directory, "server { port 0; }");
-        const auto result = sparenode::configuration::ConfigLoader::load(path);
+        const auto result = sparenode::configuration::ConfigLoader::load(path.string());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(
             std::holds_alternative<std::vector<sparenode::configuration::ConfigValidationError>>(
@@ -188,7 +188,7 @@ TEST_CASE("Configuration loader formats source-located diagnostics", "[configura
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-loader");
     const auto path = write_config(directory, "server { port 0; }");
-    const auto result = sparenode::configuration::ConfigLoader::load(path);
+    const auto result = sparenode::configuration::ConfigLoader::load(path.string());
     REQUIRE_FALSE(result.has_value());
 
     const auto diagnostic = sparenode::configuration::format_config_load_error(result.error());
@@ -207,9 +207,9 @@ TEST_CASE("Configuration loader formats both file I/O failure categories",
     const std::filesystem::path path = "config/spnode.conf";
 
     const auto open_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{path, ConfigFileError{ConfigFileErrorCode::open_failed}});
+        ConfigLoadError{path.string(), ConfigFileError{ConfigFileErrorCode::open_failed}});
     const auto read_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{path, ConfigFileError{ConfigFileErrorCode::read_failed}});
+        ConfigLoadError{path.string(), ConfigFileError{ConfigFileErrorCode::read_failed}});
 
     CHECK(open_diagnostic == "error: unable to open configuration file 'config/spnode.conf'");
     CHECK(read_diagnostic == "error: unable to read configuration file 'config/spnode.conf'");
@@ -226,14 +226,14 @@ TEST_CASE("Configuration loader escapes terminal control bytes in source paths",
     unsafe_path.push_back('\x1B');
     unsafe_path.push_back('\x7F');
     unsafe_path += ".conf";
-    const auto diagnostic = sparenode::configuration::format_config_load_error(ConfigLoadError{
-        std::filesystem::path(unsafe_path), ConfigFileError{ConfigFileErrorCode::open_failed}});
-    const auto located_diagnostic = sparenode::configuration::format_config_load_error(
-        ConfigLoadError{std::filesystem::path(unsafe_path),
-                        sparenode::configuration::ConfigLexerError{
-                            sparenode::configuration::ConfigLexerErrorCode::invalid_utf8,
-                            sparenode::configuration::SourceLocation{0, 2, 3},
-                            {}}});
+    const auto diagnostic = sparenode::configuration::format_config_load_error(
+        ConfigLoadError{unsafe_path, ConfigFileError{ConfigFileErrorCode::open_failed}});
+    const auto located_diagnostic =
+        sparenode::configuration::format_config_load_error(ConfigLoadError{
+            unsafe_path, sparenode::configuration::ConfigLexerError{
+                             sparenode::configuration::ConfigLexerErrorCode::invalid_utf8,
+                             sparenode::configuration::SourceLocation{0, 2, 3},
+                             {}}});
 
     CHECK(diagnostic == "error: unable to open configuration file 'config/unsafe\\x1B\\x7F.conf'");
     CHECK(located_diagnostic ==
@@ -274,7 +274,7 @@ TEST_CASE("Configuration loader covers every lexer failure category",
         {
             const sparenode::test::TemporaryDirectory directory("sparenode-config-lexer-error");
             const auto result = sparenode::configuration::ConfigLoader::load(
-                write_config(directory, test_case.source));
+                write_config(directory, test_case.source).string());
             REQUIRE_FALSE(result.has_value());
             const auto *failure =
                 std::get_if<sparenode::configuration::ConfigLexerError>(&result.error().failure);
@@ -296,7 +296,7 @@ TEST_CASE("Configuration loader covers every direct parser failure category",
     {
         const sparenode::test::TemporaryDirectory directory("sparenode-config-parser-error");
         const auto result =
-            sparenode::configuration::ConfigLoader::load(write_config(directory, source));
+            sparenode::configuration::ConfigLoader::load(write_config(directory, source).string());
         REQUIRE_FALSE(result.has_value());
         const auto *failure =
             std::get_if<sparenode::configuration::ConfigParserError>(&result.error().failure);
@@ -350,8 +350,8 @@ TEST_CASE("Configuration loader covers every semantic validation failure categor
     {
         DYNAMIC_SECTION(static_cast<std::uint32_t>(expected))
         {
-            const auto result =
-                sparenode::configuration::ConfigLoader::load(write_config(directory, source));
+            const auto result = sparenode::configuration::ConfigLoader::load(
+                write_config(directory, source).string());
             REQUIRE_FALSE(result.has_value());
             CHECK(has_validation_error(result.error(), expected));
         }
