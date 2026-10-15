@@ -182,7 +182,7 @@ TEST_CASE("Runtime bootstrap retains source locations for external failures",
         CHECK(runtime.error().code ==
               sparenode::bootstrap::RuntimeBootstrapErrorCode::authentication_failed);
         CHECK(runtime.error().source_path == directory.path() / "credentials.conf");
-        CHECK(runtime.error().location == sparenode::configuration::SourceLocation{});
+        CHECK(runtime.error().location == sparenode::configuration::SourceLocation{0, 1, 1});
         CHECK(runtime.error().authentication_error ==
               sparenode::authentication::FileAuthenticationErrorCode::credential_open_failed);
     }
