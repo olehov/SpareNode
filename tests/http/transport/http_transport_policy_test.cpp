@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "sparenode/http/request/http_request_parser.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
+#include "sparenode/http/transport/http_transport_policy.hpp"
 #include "support/optional.hpp"
 
 namespace

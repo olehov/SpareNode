@@ -13,7 +13,7 @@
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/routing/http_router.hpp"
-#include "sparenode/http/session/http_connection_handler.hpp"
+#include "sparenode/http/transport/http_connection_handler.hpp"
 #include "sparenode/logging/console_log_sink.hpp"
 #include "sparenode/logging/logger.hpp"
 #include "sparenode/version.hpp"
@@ -88,11 +88,13 @@ int main(const int argc, const char *const argv[])
     }
     const auto router =
         std::make_shared<const sparenode::http::HttpRouter>(std::move(router_result).value());
+    auto http_application = sparenode::http::make_http_application(router);
     const sparenode::http::HttpConnectionHandlerConfig handler_config{
         .timeouts = runtime_result->config().servers().front().http_timeouts(),
         .deadline_provider = {},
         .transport_policy = runtime_result->config().servers().front().transport_policy()};
-    auto handler = sparenode::http::make_http_connection_handler(router, handler_config);
+    auto handler =
+        sparenode::http::make_http_connection_handler(std::move(http_application), handler_config);
     auto admission = sparenode::http::make_http_connection_admission(handler_config);
     sparenode::application::RunningApplicationObservers observers{
         sparenode::logging::make_connection_failure_log_observer(logger),

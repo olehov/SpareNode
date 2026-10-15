@@ -10,7 +10,7 @@
 #include "sparenode/application/runtime/server_config.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
+#include "sparenode/http/transport/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 

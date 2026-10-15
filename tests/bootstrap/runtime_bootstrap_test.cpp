@@ -12,7 +12,7 @@
 #include "sparenode/bootstrap/runtime_bootstrap.hpp"
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
+#include "sparenode/http/transport/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "support/temporary_directory.hpp"

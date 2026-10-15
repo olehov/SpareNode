@@ -4,15 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <optional>
 #include <stop_token>
 
+#include "sparenode/http/http_application.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
-#include "sparenode/http/request/request_body_ingestor.hpp"
-#include "sparenode/http/routing/http_router.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
+#include "sparenode/http/transport/http_transport_policy.hpp"
+#include "sparenode/http/transport/request_body_ingestor.hpp"
 #include "sparenode/network/connection_dispatcher.hpp"
 #include "sparenode/network/network_io_options.hpp"
 
@@ -32,7 +31,7 @@ enum class HttpRequestReadPhase : std::uint8_t
 /// A missing deadline retains the configured limits. Implementations are invoked on a
 /// dispatcher worker and must be safe for concurrent calls.
 using HttpRequestDeadlineProvider = std::function<std::optional<network::NetworkDeadline>(
-    HttpRequestReadPhase phase, network::NetworkDeadline session_started)>;
+    HttpRequestReadPhase phase, network::NetworkDeadline connection_started)>;
 
 /// @brief Defines bounded metadata, streaming-body, and I/O policy for one HTTP connection.
 struct HttpConnectionHandlerConfig
@@ -56,25 +55,24 @@ struct HttpConnectionHandlerConfig
 /// is discarded within the configured byte and absolute time limits. Parser failures receive one
 /// bounded HTTP error response when the socket remains writable.
 /// @param[in] connection Open connection transferred exclusively to this call.
-/// @param[in] router Immutable route table shared by dispatcher workers.
+/// @param[in] application Transport-neutral application shared by dispatcher workers.
 /// @param[in] stop_token Worker cancellation token.
 /// @param[in] config Parser, storage, and deadline policy.
 /// @return Success after one response and EOF/drain budget, or orderly peer shutdown; otherwise the
-/// structured network failure that terminated the session.
+/// structured network failure that terminated the connection.
 [[nodiscard]] Result<void, network::NetworkError>
-handle_http_connection(network::TcpConnection connection, const HttpRouter &router,
+handle_http_connection(network::TcpConnection connection, const HttpApplication &application,
                        const std::stop_token &stop_token,
                        const HttpConnectionHandlerConfig &config = {});
 
-/// @brief Creates a copyable dispatcher callback that shares one immutable router.
-/// @param[in] router Route table retained for every concurrent session.
-/// @param[in] config Bounded session settings copied into the callback.
+/// @brief Creates a copyable dispatcher callback that shares one HTTP application.
+/// @param[in] application Transport-neutral callback retained for every connection.
+/// @param[in] config Bounded connection settings copied into the callback.
 /// @return Connection handler suitable for `RunningApplication::start()`.
 [[nodiscard]] network::ConnectionHandler
-make_http_connection_handler(std::shared_ptr<const HttpRouter> router,
-                             HttpConnectionHandlerConfig config = {});
+make_http_connection_handler(HttpApplication application, HttpConnectionHandlerConfig config = {});
 
-/// @brief Creates the bounded header-ingestion gate paired with a session config.
+/// @brief Creates the bounded header-ingestion gate paired with a connection config.
 /// @param[in] config Parser and receive deadlines used by request workers.
 /// @return Admission settings that release complete, oversized, or expired prefixes.
 [[nodiscard]] network::ConnectionAdmissionOptions

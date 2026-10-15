@@ -1,4 +1,4 @@
-#include "sparenode/http/session/http_connection_handler.hpp"
+#include "sparenode/http/transport/http_connection_handler.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,22 +11,22 @@
 #include <vector>
 
 #include "sparenode/http/request/detail/http_request_view_access.hpp"
-#include "sparenode/http/response/http_response_writer.hpp"
-#include "sparenode/http/session/detail/buffered_request.hpp"
-#include "sparenode/http/session/detail/request_deadlines.hpp"
+#include "sparenode/http/transport/detail/buffered_request.hpp"
+#include "sparenode/http/transport/detail/request_deadlines.hpp"
+#include "sparenode/http/transport/http_response_writer.hpp"
 
 namespace sparenode::http
 {
 namespace
 {
 
-/// @brief Identifies internal session failures represented by the network handler contract.
-enum class HttpSessionFailureCode : std::uint8_t
+/// @brief Identifies internal connection failures represented by the network handler contract.
+enum class HttpConnectionFailureCode : std::uint8_t
 {
-    unknown = 0,       ///< No specific internal session failure was identified.
+    unknown = 0,       ///< No specific internal connection failure was identified.
     invalid_config,    ///< An invalid storage boundary or receive budget was supplied.
     resource_failure,  ///< Bounded request storage could not be allocated.
-    response_failure,  ///< A session-generated response violated its invariant.
+    response_failure,  ///< A connection-generated response violated its invariant.
     internal_exception ///< An injected policy or route unexpectedly threw.
 };
 
@@ -34,7 +34,7 @@ enum class HttpSessionFailureCode : std::uint8_t
 constexpr int response_writer_error_detail_base = 100;
 
 /// @brief Converts one internal failure to the numeric network detail field.
-[[nodiscard]] constexpr int error_detail(const HttpSessionFailureCode code) noexcept
+[[nodiscard]] constexpr int error_detail(const HttpConnectionFailureCode code) noexcept
 {
     return static_cast<int>(code);
 }
@@ -133,7 +133,7 @@ request_error_status(const detail::BufferedRequestError &error) noexcept
     return HttpStatusCode::internal_server_error;
 }
 
-/// @brief Returns the canonical reason phrase for a session-generated status.
+/// @brief Returns the canonical reason phrase for a connection-generated status.
 /// @param[in] status Status selected by parsing or routing failure handling.
 /// @return Static ASCII reason phrase.
 [[nodiscard]] std::string_view reason_phrase(const HttpStatusCode status) noexcept
@@ -163,7 +163,7 @@ request_error_status(const detail::BufferedRequestError &error) noexcept
     }
 }
 
-/// @brief Creates one empty response for a session-owned failure boundary.
+/// @brief Creates one empty response for a connection-owned failure boundary.
 /// @param[in] status Standard failure status.
 /// @return Valid bounded response or a stable internal session error.
 [[nodiscard]] Result<HttpResponse, network::NetworkError>
@@ -174,7 +174,7 @@ make_error_response(const HttpStatusCode status)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::send, network::NetworkErrorDomain::state,
-            error_detail(HttpSessionFailureCode::response_failure)});
+            error_detail(HttpConnectionFailureCode::response_failure)});
     }
     return std::move(response).value();
 }
@@ -245,7 +245,7 @@ drain_after_response(network::TcpConnection &connection, const std::stop_token &
     return {};
 }
 
-/// @brief Sends one session-owned error response.
+/// @brief Sends one connection-owned error response.
 /// @param[in,out] connection Exclusive connection used for transmission.
 /// @param[in] status Error status sent with an empty body.
 /// @param[in] stop_token Cancellation token observed during writes.
@@ -268,9 +268,9 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 }
 
 /// @brief Sends one interim continue or an immediate final expectation rejection.
-/// @param[in,out] connection Session-owned transport.
+/// @param[in,out] connection Connection-owned transport.
 /// @param[in] expectation One-time decision from validated headers.
-/// @param[in] options Session cancellation and built-in body/total deadline.
+/// @param[in] options Connection cancellation and built-in body/total deadline.
 /// @param[in] config Final response close policy.
 /// @return True to continue request ingestion, false after a final response, or a write error.
 [[nodiscard]] Result<bool, network::NetworkError> respond_to_expectation(
@@ -302,7 +302,7 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
             {
                 return unexpected(network::NetworkError{
                     network::NetworkOperation::send, network::NetworkErrorDomain::state,
-                    error_detail(HttpSessionFailureCode::response_failure)});
+                    error_detail(HttpConnectionFailureCode::response_failure)});
             }
             remaining = remaining.subspan(sent.value());
         }
@@ -311,19 +311,19 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
 }
 
 /// @brief Resolves cancellation and deadline options for the next request read.
-/// @param[in] config Session configuration and optional provider.
+/// @param[in] config Connection configuration and optional provider.
 /// @param[in] phase Incomplete request section awaiting input.
-/// @param[in] session_started Monotonic session start supplied to custom policies.
+/// @param[in] connection_started Monotonic connection start supplied to custom policies.
 /// @param[in] stop_token Dispatcher cancellation token.
 /// @return Optional custom deadline; built-in limits are applied by the receive loop.
-[[nodiscard]] network::NetworkIoOptions read_options(const HttpConnectionHandlerConfig &config,
-                                                     const HttpRequestReadPhase phase,
-                                                     const network::NetworkDeadline session_started,
-                                                     const std::stop_token &stop_token)
+[[nodiscard]] network::NetworkIoOptions
+read_options(const HttpConnectionHandlerConfig &config, const HttpRequestReadPhase phase,
+             const network::NetworkDeadline connection_started, const std::stop_token &stop_token)
 {
     return {.stop_token = stop_token,
-            .deadline = config.deadline_provider ? config.deadline_provider(phase, session_started)
-                                                 : std::nullopt};
+            .deadline = config.deadline_provider
+                            ? config.deadline_provider(phase, connection_started)
+                            : std::nullopt};
 }
 
 /// @brief Copies the active receive policy into one temporary-file operation.
@@ -335,17 +335,17 @@ file_options(const network::NetworkIoOptions &options) noexcept
 
 /// @brief Dispatches one complete request and writes its response.
 /// @param[in,out] connection Exclusive connection used for transmission.
-/// @param[in] router Immutable route table used for dispatch.
-/// @param[in] request Complete request whose views borrow the session buffer.
+/// @param[in] application Transport-neutral callback used for dispatch.
+/// @param[in] request Complete request whose views borrow the connection buffer.
 /// @param[in] stop_token Cancellation token observed during writes.
 /// @param[in] config Bounded post-response drain policy.
 /// @return Success or a mapped routing/write failure.
 [[nodiscard]] Result<void, network::NetworkError>
-dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &router,
+dispatch_and_respond(network::TcpConnection &connection, const HttpApplication &application,
                      const HttpRequestView &request, const std::stop_token &stop_token,
                      const HttpConnectionHandlerConfig &config)
 {
-    auto response = router.dispatch(request);
+    auto response = application(request);
     if (!response || http_status_code_value(response->status_code()) <
                          http_status_code_value(HttpStatusCode::ok))
     {
@@ -362,24 +362,25 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpRouter &route
 }
 
 /// @brief Groups validated state shared by one request receive loop.
-struct HttpSessionRunContext
+struct HttpConnectionRunContext
 {
     /// @brief Retains references needed by the receive loop.
-    HttpSessionRunContext(const HttpRouter &router_value, const std::stop_token &stop_token_value,
-                          const HttpConnectionHandlerConfig &config_value,
-                          detail::RequestDeadlines &deadlines_value,
-                          const network::NetworkDeadline started_value,
-                          const network::TcpEndpoint &peer_value) noexcept
-        : router(router_value), stop_token(stop_token_value), config(config_value),
+    HttpConnectionRunContext(const HttpApplication &application_value,
+                             const std::stop_token &stop_token_value,
+                             const HttpConnectionHandlerConfig &config_value,
+                             detail::RequestDeadlines &deadlines_value,
+                             const network::NetworkDeadline started_value,
+                             const network::TcpEndpoint &peer_value) noexcept
+        : application(application_value), stop_token(stop_token_value), config(config_value),
           deadlines(deadlines_value), started(started_value), peer(peer_value)
     {
     }
 
-    const HttpRouter &router;                  ///< Immutable dispatch table.
+    const HttpApplication &application;        ///< Transport-neutral request callback.
     const std::stop_token &stop_token;         ///< Dispatcher cancellation source.
-    const HttpConnectionHandlerConfig &config; ///< Validated session policy.
+    const HttpConnectionHandlerConfig &config; ///< Validated connection policy.
     detail::RequestDeadlines &deadlines;       ///< Mutable receive deadline state.
-    network::NetworkDeadline started;          ///< Session start for injected policies.
+    network::NetworkDeadline started;          ///< Connection start for injected policies.
     const network::TcpEndpoint &peer;          ///< Direct peer retained for transport validation.
 };
 
@@ -392,10 +393,10 @@ transport_error_status(const HttpTransportErrorCode code) noexcept
 }
 
 /// @brief Starts a fresh bounded file-publication budget after request ingestion completes.
-/// @param[in] context Active session and its validated body timeout.
+/// @param[in] context Active connection and its validated body timeout.
 /// @return Existing cancellation token paired with a new body-sized absolute deadline.
 [[nodiscard]] storage::TemporaryFileIoOptions
-publication_file_options(const HttpSessionRunContext &context) noexcept
+publication_file_options(const HttpConnectionRunContext &context) noexcept
 {
     const auto now = std::chrono::steady_clock::now();
     const auto budget = std::chrono::duration_cast<network::NetworkDeadline::duration>(
@@ -406,8 +407,8 @@ publication_file_options(const HttpSessionRunContext &context) noexcept
 }
 
 /// @brief Combines the current phase deadline with the optional shorter provider deadline.
-[[nodiscard]] network::NetworkIoOptions bounded_read_options(const HttpSessionRunContext &context,
-                                                             const HttpRequestReadPhase phase)
+[[nodiscard]] network::NetworkIoOptions
+bounded_read_options(const HttpConnectionRunContext &context, const HttpRequestReadPhase phase)
 {
     auto options = read_options(context.config, phase, context.started, context.stop_token);
     const auto bounded_deadline = context.deadlines.next(phase == HttpRequestReadPhase::body);
@@ -421,7 +422,7 @@ publication_file_options(const HttpSessionRunContext &context) noexcept
 [[nodiscard]] Result<void, network::NetworkError>
 respond_to_request_failure(network::TcpConnection &connection,
                            const detail::BufferedRequestError &error,
-                           const HttpSessionRunContext &context)
+                           const HttpConnectionRunContext &context)
 {
     if (cancelled(error))
     {
@@ -437,9 +438,9 @@ respond_to_request_failure(network::TcpConnection &connection,
                                context.config);
 }
 
-/// @brief Runs one validated session while the public boundary contains exceptions.
+/// @brief Runs one validated connection while the public boundary contains exceptions.
 [[nodiscard]] Result<void, network::NetworkError>
-run_http_session(network::TcpConnection &connection, const HttpSessionRunContext &context)
+run_http_connection(network::TcpConnection &connection, const HttpConnectionRunContext &context)
 {
     detail::BufferedRequest request(context.config.parser_limits,
                                     context.config.temporary_body_file_factory);
@@ -471,7 +472,7 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
             }
             detail::HttpRequestViewAccess::set_transport(complete_request,
                                                          std::move(transport).value());
-            return dispatch_and_respond(connection, context.router, complete_request,
+            return dispatch_and_respond(connection, context.application, complete_request,
                                         context.stop_token, context.config);
         }
         const auto phase =
@@ -510,23 +511,23 @@ run_http_session(network::TcpConnection &connection, const HttpSessionRunContext
 } // namespace
 
 /// @brief Receives one bounded request, then routes it and sends its response.
-/// @return Success after response or peer EOF; otherwise a structured session failure.
+/// @return Success after response or peer EOF; otherwise a structured connection failure.
 /// @details Nonempty receives renew inactivity but never the total receive deadline.
 /// Timeout returns immediately without attempting an HTTP error response.
 Result<void, network::NetworkError>
-handle_http_connection(network::TcpConnection connection, const HttpRouter &router,
+handle_http_connection(network::TcpConnection connection, const HttpApplication &application,
                        const std::stop_token &stop_token, const HttpConnectionHandlerConfig &config)
 {
     const std::size_t metadata_limit = maximum_metadata_bytes(config.parser_limits);
-    const auto session_started = connection.accepted_at();
-    auto deadline_state = detail::RequestDeadlines::create(config.timeouts, session_started);
+    const auto connection_started = connection.accepted_at();
+    auto deadline_state = detail::RequestDeadlines::create(config.timeouts, connection_started);
     if (metadata_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
         config.max_drain_bytes == 0 || config.drain_timeout <= std::chrono::milliseconds::zero() ||
-        config.drain_timeout > HttpRequestTimeouts::maximum_config_timeout)
+        config.drain_timeout > HttpRequestTimeouts::maximum_config_timeout || !application)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::validation,
-            error_detail(HttpSessionFailureCode::invalid_config)});
+            error_detail(HttpConnectionFailureCode::invalid_config)});
     }
     auto &deadlines = deadline_state.value();
     deadlines.record_progress(connection.last_receive_progress());
@@ -535,7 +536,7 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::state,
-            error_detail(HttpSessionFailureCode::invalid_config)});
+            error_detail(HttpConnectionFailureCode::invalid_config)});
     }
     if (!http_transport_allows_peer(config.transport_policy, peer.value()))
     {
@@ -544,39 +545,31 @@ handle_http_connection(network::TcpConnection connection, const HttpRouter &rout
 
     try
     {
-        return run_http_session(
-            connection, {router, stop_token, config, deadlines, session_started, peer.value()});
+        return run_http_connection(connection, {application, stop_token, config, deadlines,
+                                                connection_started, peer.value()});
     }
     catch (const std::bad_alloc &)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::state,
-            error_detail(HttpSessionFailureCode::resource_failure)});
+            error_detail(HttpConnectionFailureCode::resource_failure)});
     }
     catch (...)
     {
         return unexpected(network::NetworkError{
             network::NetworkOperation::receive, network::NetworkErrorDomain::state,
-            error_detail(HttpSessionFailureCode::internal_exception)});
+            error_detail(HttpConnectionFailureCode::internal_exception)});
     }
 }
 
-/// @brief Binds immutable routing and timeout configuration into a connection handler.
-network::ConnectionHandler make_http_connection_handler(std::shared_ptr<const HttpRouter> router,
+/// @brief Binds an HTTP application and timeout configuration into a connection handler.
+network::ConnectionHandler make_http_connection_handler(HttpApplication application,
                                                         HttpConnectionHandlerConfig config)
 {
-    return [router = std::move(router), config = std::move(config)](
+    return [application = std::move(application), config = std::move(config)](
                network::TcpConnection connection,
                const std::stop_token &stop_token) -> Result<void, network::NetworkError>
-    {
-        if (router == nullptr)
-        {
-            return unexpected(network::NetworkError{
-                network::NetworkOperation::receive, network::NetworkErrorDomain::validation,
-                error_detail(HttpSessionFailureCode::invalid_config)});
-        }
-        return handle_http_connection(std::move(connection), *router, stop_token, config);
-    };
+    { return handle_http_connection(std::move(connection), application, stop_token, config); };
 }
 
 network::ConnectionAdmissionOptions
