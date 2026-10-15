@@ -160,9 +160,8 @@ Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byt
     {
         return std::size_t{0};
     }
-    const auto requested = static_cast<DWORD>(
-        (std::min)(destination.size(),
-                   static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
+    const auto requested = static_cast<DWORD>((std::min)(
+        destination.size(), static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
     DWORD count = 0;
     if (ReadFile(implementation_->handle.get(), destination.data(), requested, &count, nullptr) ==
         FALSE)

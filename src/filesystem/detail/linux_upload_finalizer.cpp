@@ -186,7 +186,9 @@ publish_confined_upload(const ConfinedDirectory &directory, const storage::Tempo
     {
         return unexpected(failure(UploadFinalizationErrorCode::source_read_failed));
     }
-    struct stat source_stat{};
+    struct stat source_stat
+    {
+    };
     if (::fstat(source_file.get(), &source_stat) != 0 || !S_ISREG(source_stat.st_mode) ||
         source_stat.st_size < 0 || static_cast<std::uint64_t>(source_stat.st_size) != source.size())
     {
