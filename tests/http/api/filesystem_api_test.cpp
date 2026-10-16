@@ -26,8 +26,8 @@
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
-#include "sparenode/http/response/http_response_writer.hpp"
-#include "sparenode/http/session/http_connection_handler.hpp"
+#include "sparenode/http/transport/http_connection_handler.hpp"
+#include "sparenode/http/transport/http_response_writer.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 #include "support/connected_tcp_pair.hpp"
@@ -50,6 +50,25 @@ namespace
     REQUIRE(parsed);
     REQUIRE(parsed->is_complete());
     return sparenode::test::require_optional(parsed->request());
+}
+
+/// @brief Adapts a borrowed router to the transport-neutral application contract.
+[[nodiscard]] sparenode::http::HttpApplication
+application_for(const sparenode::http::HttpRouter &router)
+{
+    return [&router](const sparenode::http::HttpRequestView &request)
+               -> sparenode::Result<sparenode::http::HttpResponse,
+                                    sparenode::http::HttpApplicationError>
+    {
+        auto response = router.dispatch(request);
+        if (!response)
+        {
+            return sparenode::unexpected(sparenode::http::HttpApplicationError{
+                sparenode::http::HttpApplicationErrorCode::request_failed,
+                response.error().detail});
+        }
+        return std::move(response).value();
+    };
 }
 
 /// @brief Copies a memory response body into text for assertions.
@@ -287,7 +306,7 @@ TEST_CASE("Filesystem API publishes fixed and chunked uploads through the stream
         [&](const std::stop_token &stop_token)
         {
             session_result.set_value(sparenode::http::handle_http_connection(
-                std::move(pair.server), router.value(), stop_token));
+                std::move(pair.server), application_for(router.value()), stop_token));
         });
 
     std::string payload(std::size_t{32} * 1024, 'x');
@@ -389,7 +408,8 @@ TEST_CASE("Disconnected partial uploads never reach the configured location",
                           "Content-Length: 10\r\n\r\npartial");
     pair.client.shutdown_send();
 
-    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server), router.value(), {}));
+    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server),
+                                                    application_for(router.value()), {}));
     const auto response = receive_until_closed(pair.client);
     CHECK(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     CHECK_FALSE(std::filesystem::exists(directory.path() / "partial.txt"));

@@ -15,6 +15,8 @@ The initial dependency boundaries are:
 | `sparenode_filesystem` | Canonical roots, path containment, filesystem operations, and location permissions | `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_network_logging` | Network error formatting and logging observers | `sparenode_logging`, `sparenode_network` |
 | `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
+| `sparenode_http_core` | HTTP request and response models, parsing, MIME metadata, and routing | `sparenode_foundation`, `sparenode_storage` |
+| `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
 | `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
 
 Foundation depends only on the C++ standard library. Logging core must not
@@ -30,6 +32,13 @@ Configuration public headers contain no HTTP, network, logging, filesystem, or
 authentication implementation types. MIME registry loading, credential-backed
 authentication, endpoint construction, log severity mapping, receive deadlines, and
 transport policy mapping belong to bootstrap.
+
+HTTP core is transport-neutral: it does not include or link network code. The
+network library knows nothing about HTTP. HTTP transport is the only bridge
+between those modules and receives an `HttpApplication` callback rather than a
+concrete router. The executable composition root adapts `HttpRouter` to that
+callback, so another application implementation can reuse the transport without
+changing its connection code.
 
 Storage owns `TemporaryFile`, its cancellation/deadline policy, cleanup contract,
 and the process-wide limit of 32 active or orphaned native file operations.

@@ -21,15 +21,6 @@ add_executable(sparenode_tests
     application/command_line_test.cpp
     application/running_application_test.cpp
     http/api/filesystem_api_test.cpp
-    http/session/http_connection_handler_test.cpp
-    http/session/http_transport_policy_test.cpp
-    http/session/request_deadlines_test.cpp
-    http/request/http_request_parser_test.cpp
-    http/request/http_body_decoder_test.cpp
-    http/request/request_body_ingestor_test.cpp
-    http/request/request_target_test.cpp
-    http/routing/http_router_test.cpp
-    http/response/http_response_test.cpp
     smoke_test.cpp
 )
 
@@ -60,6 +51,57 @@ sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
+
+add_executable(sparenode_http_core_tests
+    http/request/http_request_parser_test.cpp
+    http/routing/http_router_test.cpp
+)
+
+target_link_libraries(sparenode_http_core_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_http_core
+)
+
+target_include_directories(sparenode_http_core_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_http_core_tests)
+sparenode_enable_cppcheck(sparenode_http_core_tests)
+sparenode_enable_static_analysis(sparenode_http_core_tests)
+
+catch_discover_tests(sparenode_http_core_tests)
+
+add_executable(sparenode_http_transport_tests
+    http/transport/http_connection_handler_test.cpp
+    http/transport/http_transport_policy_test.cpp
+    http/transport/request_body_ingestor_test.cpp
+    http/transport/request_deadlines_test.cpp
+    http/request/http_body_decoder_test.cpp
+    http/request/request_target_test.cpp
+    http/response/http_response_test.cpp
+)
+
+target_link_libraries(sparenode_http_transport_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_http_transport
+    sparenode_network_logging
+    Threads::Threads
+)
+
+target_include_directories(sparenode_http_transport_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_http_transport_tests PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_http_transport_tests)
+sparenode_enable_cppcheck(sparenode_http_transport_tests)
+sparenode_enable_static_analysis(sparenode_http_transport_tests)
+
+catch_discover_tests(sparenode_http_transport_tests)
 
 add_executable(sparenode_configuration_tests
     configuration/config_lexer_test.cpp

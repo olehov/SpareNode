@@ -8,7 +8,7 @@
 #include "sparenode/application/runtime/location_config.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
+#include "sparenode/http/transport/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
 

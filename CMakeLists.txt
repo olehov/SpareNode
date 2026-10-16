@@ -186,6 +186,50 @@ sparenode_enable_compiler_warnings(sparenode_configuration)
 sparenode_enable_cppcheck(sparenode_configuration)
 sparenode_enable_static_analysis(sparenode_configuration)
 
+add_library(sparenode_http_core STATIC
+    src/http/mime_type_registry.cpp
+    src/http/request/http_request.cpp
+    src/http/request/http_request_parser.cpp
+    src/http/request/http_body_decoder.cpp
+    src/http/request/detail/host_authority.cpp
+    src/http/request/detail/request_target.cpp
+    src/http/response/detail/response_date.cpp
+    src/http/routing/http_router.cpp
+    src/http/response/http_response.cpp
+)
+
+target_link_libraries(sparenode_http_core PUBLIC
+    sparenode_foundation
+    sparenode_storage
+)
+
+sparenode_enable_compiler_warnings(sparenode_http_core)
+sparenode_enable_cppcheck(sparenode_http_core)
+sparenode_enable_static_analysis(sparenode_http_core)
+
+add_library(sparenode_http_transport STATIC
+    src/http/transport/http_connection_handler.cpp
+    src/http/transport/http_transport_policy.cpp
+    src/http/transport/http_response_writer.cpp
+    src/http/transport/request_body_ingestor.cpp
+    src/http/transport/detail/request_deadlines.cpp
+    src/http/transport/detail/buffered_request.cpp
+)
+
+target_link_libraries(sparenode_http_transport PUBLIC
+    sparenode_http_core
+    sparenode_network
+    sparenode_storage
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_http_transport PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_http_transport)
+sparenode_enable_cppcheck(sparenode_http_transport)
+sparenode_enable_static_analysis(sparenode_http_transport)
+
 add_library(sparenode_core STATIC
     src/authentication/authentication_service.cpp
     src/authentication/credential_file_provisioner.cpp
@@ -196,21 +240,6 @@ add_library(sparenode_core STATIC
     src/application/command_line.cpp
     src/application/running_application.cpp
     src/http/api/filesystem_api.cpp
-    src/http/mime_type_registry.cpp
-    src/http/session/http_connection_handler.cpp
-    src/http/session/http_transport_policy.cpp
-    src/http/request/http_request.cpp
-    src/http/request/http_request_parser.cpp
-    src/http/request/http_body_decoder.cpp
-    src/http/request/request_body_ingestor.cpp
-    src/http/request/detail/host_authority.cpp
-    src/http/request/detail/request_target.cpp
-    src/http/response/detail/response_date.cpp
-    src/http/session/detail/request_deadlines.cpp
-    src/http/session/detail/buffered_request.cpp
-    src/http/routing/http_router.cpp
-    src/http/response/http_response.cpp
-    src/http/response/http_response_writer.cpp
 )
 
 target_compile_features(sparenode_core PUBLIC
@@ -230,6 +259,8 @@ target_link_libraries(sparenode_core PRIVATE
 target_link_libraries(sparenode_core PUBLIC
     sparenode_foundation
     sparenode_filesystem
+    sparenode_http_core
+    sparenode_http_transport
     sparenode_logging
     sparenode_network
     sparenode_storage

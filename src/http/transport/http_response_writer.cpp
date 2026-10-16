@@ -1,4 +1,4 @@
-#include "sparenode/http/response/http_response_writer.hpp"
+#include "sparenode/http/transport/http_response_writer.hpp"
 
 #include "sparenode/http/detail/number.hpp"
 #include "sparenode/http/response/detail/response_date.hpp"

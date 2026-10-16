@@ -109,7 +109,9 @@ Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &sha
                                             SafePathErrorCode::outside_shared_root});
         }
 
-        struct stat information{};
+        struct stat information
+        {
+        };
         if (::fstat(file->get(), &information) != 0)
         {
             return unexpected(system_failure(last_posix_error()));

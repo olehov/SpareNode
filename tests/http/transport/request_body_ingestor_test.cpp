@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/http/request/request_body_ingestor.hpp"
+#include "sparenode/http/transport/request_body_ingestor.hpp"
 
 namespace
 {
@@ -397,8 +397,7 @@ TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
     {
         sparenode::http::RequestBodyIngestor ingestor(
             {.content_length = 1}, {},
-            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
-            {
+            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
                 return sparenode::unexpected(
                     TemporaryFileError{TemporaryFileErrorCode::create_failed, 1234});
             });
@@ -433,8 +432,7 @@ TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
         {
             sparenode::http::RequestBodyIngestor ingestor(
                 {.content_length = 1}, {},
-                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
-                {
+                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
                     return std::static_pointer_cast<TemporaryFile>(
                         std::make_shared<FailingTemporaryFile>(code));
                 });
@@ -538,8 +536,7 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
     std::stop_source stop;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
-                             [&]
-                             {
+                             [&] {
                                  return ingestor.feed(bytes("x"), {.stop_token = stop.get_token(),
                                                                    .deadline = deadline});
                              });
@@ -615,8 +612,7 @@ TEST_CASE("Deadline releases the request worker while a native file write remain
     auto destroyed = state->destroyed.get_future();
     sparenode::http::RequestBodyIngestor ingestor(
         {.content_length = 1}, {},
-        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
-        {
+        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
             return std::static_pointer_cast<TemporaryFile>(
                 std::make_shared<StalledTemporaryFile>(state));
         });

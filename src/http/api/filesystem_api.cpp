@@ -656,8 +656,7 @@ make_filesystem_api_router(const application::runtime::ServerConfig &server)
                 router, HttpMethod::post, location.api_path(),
                 [location](const HttpRequestView &request, const HttpRouteParameters &)
                 { return handle_directory_creation(location, request, {}); },
-                [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
-                {
+                [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
                     return handle_directory_creation(location, request,
                                                      parameters.wildcard_suffix());
                 });

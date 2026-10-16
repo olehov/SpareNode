@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-#include "sparenode/http/session/detail/request_deadlines.hpp"
+#include "sparenode/http/transport/detail/request_deadlines.hpp"
 #include "support/optional.hpp"
 
 TEST_CASE("HTTP inactivity deadlines renew only on progress and retain the total cap",

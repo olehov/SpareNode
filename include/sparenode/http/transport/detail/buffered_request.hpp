@@ -7,7 +7,7 @@
 #include <variant>
 
 #include "sparenode/http/request/detail/http_request_view_access.hpp"
-#include "sparenode/http/request/request_body_ingestor.hpp"
+#include "sparenode/http/transport/request_body_ingestor.hpp"
 
 namespace sparenode::http::detail
 {

@@ -98,8 +98,7 @@ TEST_CASE("Temporary file writer preserves injected creation failures", "[storag
     using sparenode::storage::TemporaryFileErrorCode;
 
     auto writer = sparenode::storage::TemporaryFileWriter::create(
-        []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
-        {
+        []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
             return sparenode::unexpected(
                 TemporaryFileError{TemporaryFileErrorCode::create_failed, 7});
         });

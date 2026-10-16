@@ -1,4 +1,4 @@
-#include "sparenode/http/session/detail/buffered_request.hpp"
+#include "sparenode/http/transport/detail/buffered_request.hpp"
 
 #include <string_view>
 

@@ -305,4 +305,23 @@ const char *to_string(const HttpRouteRegistrationErrorCode code) noexcept
     return "unknown route registration error";
 }
 
+HttpApplication make_http_application(std::shared_ptr<const HttpRouter> router)
+{
+    if (router == nullptr)
+    {
+        return {};
+    }
+    return [router = std::move(router)](
+               const HttpRequestView &request) -> Result<HttpResponse, HttpApplicationError>
+    {
+        auto response = router->dispatch(request);
+        if (!response)
+        {
+            return unexpected(HttpApplicationError{HttpApplicationErrorCode::request_failed,
+                                                   response.error().detail});
+        }
+        return std::move(response).value();
+    };
+}
+
 } // namespace sparenode::http

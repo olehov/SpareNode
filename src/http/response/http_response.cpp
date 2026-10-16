@@ -170,6 +170,31 @@ HttpResponse::HttpResponse(const HttpStatusCode status_code, std::string reason_
 {
 }
 
+/// @brief Transfers complete response ownership.
+HttpResponse::HttpResponse(HttpResponse &&other) noexcept
+    : status_code_(other.status_code_), reason_phrase_(std::move(other.reason_phrase_)),
+      headers_(std::move(other.headers_)), memory_body_(std::move(other.memory_body_)),
+      content_length_(other.content_length_), date_value_(std::move(other.date_value_)),
+      body_reader_(std::move(other.body_reader_))
+{
+}
+
+/// @brief Replaces this response with transferred response state.
+HttpResponse &HttpResponse::operator=(HttpResponse &&other) noexcept
+{
+    if (this != &other)
+    {
+        status_code_ = other.status_code_;
+        reason_phrase_ = std::move(other.reason_phrase_);
+        headers_ = std::move(other.headers_);
+        memory_body_ = std::move(other.memory_body_);
+        content_length_ = other.content_length_;
+        date_value_ = std::move(other.date_value_);
+        body_reader_ = std::move(other.body_reader_);
+    }
+    return *this;
+}
+
 /// @brief Validates and owns one bounded in-memory response.
 Result<HttpResponse, HttpResponseValidationError>
 HttpResponse::create(const HttpStatusCode status_code, std::string reason_phrase,
