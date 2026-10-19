@@ -20,7 +20,6 @@ add_executable(sparenode_tests
     authentication/password_verifier_test.cpp
     application/command_line_test.cpp
     application/running_application_test.cpp
-    http/api/filesystem_api_test.cpp
     smoke_test.cpp
 )
 
@@ -72,7 +71,46 @@ sparenode_enable_static_analysis(sparenode_http_core_tests)
 
 catch_discover_tests(sparenode_http_core_tests)
 
+add_executable(sparenode_api_core_tests
+    http/api/api_router_builder_test.cpp
+)
+
+target_link_libraries(sparenode_api_core_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_api_core
+)
+
+target_include_directories(sparenode_api_core_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_api_core_tests)
+sparenode_enable_cppcheck(sparenode_api_core_tests)
+sparenode_enable_static_analysis(sparenode_api_core_tests)
+
+catch_discover_tests(sparenode_api_core_tests)
+
+add_executable(sparenode_filesystem_api_tests
+    http/api/filesystem_api_test.cpp
+)
+
+target_link_libraries(sparenode_filesystem_api_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_filesystem_api
+)
+
+target_include_directories(sparenode_filesystem_api_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_api_tests)
+sparenode_enable_cppcheck(sparenode_filesystem_api_tests)
+sparenode_enable_static_analysis(sparenode_filesystem_api_tests)
+
+catch_discover_tests(sparenode_filesystem_api_tests)
+
 add_executable(sparenode_http_transport_tests
+    http/api/filesystem_api_transport_test.cpp
     http/transport/http_connection_handler_test.cpp
     http/transport/http_transport_policy_test.cpp
     http/transport/request_body_ingestor_test.cpp
@@ -85,6 +123,7 @@ add_executable(sparenode_http_transport_tests
 target_link_libraries(sparenode_http_transport_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_http_transport
+    sparenode_filesystem_api
     sparenode_network_logging
     Threads::Threads
 )

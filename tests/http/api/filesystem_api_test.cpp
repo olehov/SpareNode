@@ -1,36 +1,23 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include <algorithm>
 #include <array>
-#include <chrono>
+#include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <future>
 #include <iterator>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
-#include "sparenode/application/runtime/location_config.hpp"
-#include "sparenode/application/runtime/server_config.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
-#include "sparenode/http/transport/http_connection_handler.hpp"
-#include "sparenode/http/transport/http_response_writer.hpp"
-#include "sparenode/logging/log_severity.hpp"
-#include "sparenode/network/tcp_endpoint.hpp"
-#include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -52,25 +39,6 @@ namespace
     return sparenode::test::require_optional(parsed->request());
 }
 
-/// @brief Adapts a borrowed router to the transport-neutral application contract.
-[[nodiscard]] sparenode::http::HttpApplication
-application_for(const sparenode::http::HttpRouter &router)
-{
-    return [&router](const sparenode::http::HttpRequestView &request)
-               -> sparenode::Result<sparenode::http::HttpResponse,
-                                    sparenode::http::HttpApplicationError>
-    {
-        auto response = router.dispatch(request);
-        if (!response)
-        {
-            return sparenode::unexpected(sparenode::http::HttpApplicationError{
-                sparenode::http::HttpApplicationErrorCode::request_failed,
-                response.error().detail});
-        }
-        return std::move(response).value();
-    };
-}
-
 /// @brief Copies a memory response body into text for assertions.
 [[nodiscard]] std::string body_text(const sparenode::http::HttpResponse &response)
 {
@@ -89,42 +57,19 @@ application_for(const sparenode::http::HttpRouter &router)
     return header == headers.end() ? std::string_view{} : std::string_view(header->value);
 }
 
-/// @brief Receives one exact response size from a loopback test client.
-[[nodiscard]] std::string receive_exact(const sparenode::test::TestClientSocket &client,
-                                        const std::size_t size)
-{
-    std::string result(size, '\0');
-    std::size_t received = 0;
-    while (received < result.size())
-    {
-        auto destination =
-            std::as_writable_bytes(std::span(result.data() + received, result.size() - received));
-        const auto count = client.receive(destination);
-        REQUIRE(count > 0);
-        received += static_cast<std::size_t>(count);
-    }
-    return result;
-}
-
-/// @brief Creates one server backed by the supplied temporary location.
-[[nodiscard]] sparenode::application::runtime::ServerConfig
+/// @brief Creates narrow filesystem API settings backed by the supplied temporary location.
+[[nodiscard]] sparenode::http::FilesystemApiSettings
 make_server(const sparenode::test::TemporaryDirectory &directory, const bool allow_read = true,
             sparenode::http::MimeTypeRegistry mime_types = {}, const bool allow_write = false,
             const bool allow_delete = false)
 {
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
-    std::vector<sparenode::application::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root).value(),
-        sparenode::filesystem::LocationPermissions{allow_read, allow_write, allow_delete});
-    return {{"127.0.0.1", 0},
-            false,
-            1,
-            sparenode::logging::LogSeverity::info,
-            std::move(locations),
-            {},
-            std::move(mime_types)};
+    std::vector<sparenode::http::FilesystemApiLocation> locations;
+    locations.push_back(
+        {"/api/Documents", std::move(root).value(),
+         sparenode::filesystem::LocationPermissions{allow_read, allow_write, allow_delete}});
+    return {std::move(locations), std::move(mime_types)};
 }
 
 /// @brief Creates one validated MIME registry for response integration tests.
@@ -205,37 +150,6 @@ dispatch_delete(const sparenode::http::HttpRouter &router, const std::string_vie
     return std::move(response).value();
 }
 
-/// @brief Sends all bytes through a potentially partial loopback socket operation.
-void send_all(const sparenode::test::TestClientSocket &client, const std::string_view source)
-{
-    auto remaining = as_bytes(source);
-    while (!remaining.empty())
-    {
-        const auto sent = client.send(remaining);
-        REQUIRE(sent > 0);
-        remaining = remaining.subspan(static_cast<std::size_t>(sent));
-    }
-}
-
-/// @brief Receives a response until the server closes its sending direction.
-[[nodiscard]] std::string receive_until_closed(const sparenode::test::TestClientSocket &client)
-{
-    std::string response;
-    std::array<std::byte, 512> buffer{};
-    while (true)
-    {
-        const auto received = client.receive_within(buffer, std::chrono::seconds{2});
-        const auto count = sparenode::test::require_optional(received);
-        REQUIRE(count >= 0);
-        if (count == 0)
-        {
-            return response;
-        }
-        response.append(reinterpret_cast<const char *>(buffer.data()),
-                        static_cast<std::size_t>(count));
-    }
-}
-
 /// @brief Reads one test file as exact binary text.
 [[nodiscard]] std::string read_file(const std::filesystem::path &path)
 {
@@ -289,51 +203,6 @@ TEST_CASE("Filesystem API enforces read permission", "[http][filesystem-api][per
     const auto response = dispatch_get(router.value(), "/api/Documents");
     CHECK(response.status_code() == sparenode::http::HttpStatusCode::forbidden);
     CHECK(body_text(response) == "{\"error\":\"read_forbidden\"}");
-}
-
-TEST_CASE("Filesystem API publishes fixed and chunked uploads through the streaming session",
-          "[http][filesystem-api][upload][integration]")
-{
-    const bool chunked = GENERATE(false, true);
-    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-upload");
-    auto router =
-        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, true));
-    REQUIRE(router);
-    auto pair = sparenode::test::create_connected_tcp_pair();
-    std::promise<sparenode::Result<void, sparenode::network::NetworkError>> session_result;
-    auto completed = session_result.get_future();
-    std::jthread worker(
-        [&](const std::stop_token &stop_token)
-        {
-            session_result.set_value(sparenode::http::handle_http_connection(
-                std::move(pair.server), application_for(router.value()), stop_token));
-        });
-
-    std::string payload(std::size_t{32} * 1024, 'x');
-    payload.front() = 'a';
-    payload.back() = 'z';
-    std::ostringstream request;
-    request << "PUT /api/Documents/upload.bin HTTP/1.1\r\nHost: localhost\r\n";
-    if (chunked)
-    {
-        request << "Transfer-Encoding: chunked\r\n\r\n"
-                << std::hex << payload.size() << "\r\n"
-                << payload << "\r\n0\r\n\r\n";
-    }
-    else
-    {
-        request << "Content-Length: " << payload.size() << "\r\n\r\n" << payload;
-    }
-    const auto wire_request = request.str();
-    send_all(pair.client, wire_request);
-    pair.client.shutdown_send();
-
-    const auto response = receive_until_closed(pair.client);
-    REQUIRE(completed.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
-    REQUIRE(completed.get());
-    CHECK(response.starts_with("HTTP/1.1 201 Created\r\n"));
-    CHECK(response.ends_with("{\"status\":\"created\"}"));
-    CHECK(read_file(directory.path() / "upload.bin") == payload);
 }
 
 TEST_CASE("Filesystem API enforces write permission before publishing uploads",
@@ -394,25 +263,6 @@ TEST_CASE("Filesystem API creates empty uploads and rejects unsafe destinations"
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
     CHECK_FALSE(std::filesystem::exists(outside.path() / "escaped.txt"));
-}
-
-TEST_CASE("Disconnected partial uploads never reach the configured location",
-          "[http][filesystem-api][upload][disconnect]")
-{
-    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-upload-disconnect");
-    auto router =
-        sparenode::http::make_filesystem_api_router(make_server(directory, true, {}, true));
-    REQUIRE(router);
-    auto pair = sparenode::test::create_connected_tcp_pair();
-    send_all(pair.client, "PUT /api/Documents/partial.txt HTTP/1.1\r\nHost: localhost\r\n"
-                          "Content-Length: 10\r\n\r\npartial");
-    pair.client.shutdown_send();
-
-    REQUIRE(sparenode::http::handle_http_connection(std::move(pair.server),
-                                                    application_for(router.value()), {}));
-    const auto response = receive_until_closed(pair.client);
-    CHECK(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
-    CHECK_FALSE(std::filesystem::exists(directory.path() / "partial.txt"));
 }
 
 TEST_CASE("Filesystem API creates one directory inside a writable location",
@@ -569,14 +419,12 @@ TEST_CASE("Filesystem API registers multiple configured locations with segment b
     REQUIRE(documents_root);
     REQUIRE(media_root);
 
-    std::vector<sparenode::application::runtime::LocationConfig> locations;
-    locations.emplace_back("/api/docs", std::move(documents_root).value(),
-                           sparenode::filesystem::LocationPermissions{});
-    locations.emplace_back("/api/media", std::move(media_root).value(),
-                           sparenode::filesystem::LocationPermissions{});
-    const sparenode::application::runtime::ServerConfig server(
-        {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, std::move(locations));
-    auto router = sparenode::http::make_filesystem_api_router(server);
+    std::vector<sparenode::http::FilesystemApiLocation> locations;
+    locations.push_back({"/api/docs", std::move(documents_root).value(),
+                         sparenode::filesystem::LocationPermissions{}});
+    locations.push_back({"/api/media", std::move(media_root).value(),
+                         sparenode::filesystem::LocationPermissions{}});
+    auto router = sparenode::http::make_filesystem_api_router({std::move(locations), {}});
     REQUIRE(router);
 
     CHECK(body_text(dispatch_get(router.value(), "/api/docs")).find("document.txt") !=
@@ -610,11 +458,6 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     CHECK(header_value(file, "Content-Type") == "application/octet-stream");
     CHECK(header_value(file, "Content-Disposition") == "inline");
     CHECK(header_value(file, "X-Content-Type-Options") == "nosniff");
-    const std::string expected = sparenode::http::serialize_http_response_head(file) + "download";
-    auto pair = sparenode::test::create_connected_tcp_pair();
-    REQUIRE(sparenode::http::write_http_response(pair.server, file));
-    CHECK(receive_exact(pair.client, expected.size()) == expected);
-
     const auto traversal = dispatch_get(router.value(), "/api/Documents/../outside");
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
@@ -684,17 +527,6 @@ TEST_CASE("Filesystem API preserves inline file metadata for HEAD without consum
     CHECK(head.content_length() == get.content_length());
     CHECK(head.headers().size() == get.headers().size());
     CHECK(header_value(head, "Content-Type") == "text/markdown");
-
-    const auto serialized_head = sparenode::http::serialize_http_response_head(head);
-    auto head_pair = sparenode::test::create_connected_tcp_pair();
-    REQUIRE(sparenode::http::write_http_response(head_pair.server, head, {},
-                                                 sparenode::http::HttpMethod::head));
-    CHECK(receive_exact(head_pair.client, serialized_head.size()) == serialized_head);
-
-    const std::string complete_response = serialized_head + std::string(payload);
-    auto get_pair = sparenode::test::create_connected_tcp_pair();
-    REQUIRE(sparenode::http::write_http_response(get_pair.server, head));
-    CHECK(receive_exact(get_pair.client, complete_response.size()) == complete_response);
 }
 
 TEST_CASE("Filesystem API keeps large inline files outside response memory",
@@ -744,12 +576,10 @@ TEST_CASE("Filesystem API confines inline symbolic-link targets to the configure
     CHECK(body_text(external) == "{\"error\":\"not_found\"}");
 }
 
-TEST_CASE("Filesystem API rejects runtime configuration without a location",
-          "[http][filesystem-api][startup]")
+TEST_CASE("Filesystem API rejects settings without a location", "[http][filesystem-api][startup]")
 {
-    const sparenode::application::runtime::ServerConfig server(
-        {"127.0.0.1", 0}, false, 1, sparenode::logging::LogSeverity::info, {});
-    const auto router = sparenode::http::make_filesystem_api_router(server);
+    const auto router =
+        sparenode::http::make_filesystem_api_router(sparenode::http::FilesystemApiSettings{});
     REQUIRE_FALSE(router);
     CHECK(router.error().code == sparenode::http::FilesystemApiErrorCode::missing_location);
 }

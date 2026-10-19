@@ -16,6 +16,8 @@ The initial dependency boundaries are:
 | `sparenode_network_logging` | Network error formatting and logging observers | `sparenode_logging`, `sparenode_network` |
 | `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
 | `sparenode_http_core` | HTTP request and response models, parsing, MIME metadata, and routing | `sparenode_foundation`, `sparenode_storage` |
+| `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_http_core` |
+| `sparenode_filesystem_api` | Filesystem route registration, focused operation handlers, JSON responses, and public error mapping | `sparenode_api_core`, `sparenode_filesystem`, `sparenode_http_core`, `sparenode_storage` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
 | `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
 
@@ -39,6 +41,15 @@ between those modules and receives an `HttpApplication` callback rather than a
 concrete router. The executable composition root adapts `HttpRouter` to that
 callback, so another application implementation can reuse the transport without
 changing its connection code.
+
+API core distinguishes public and protected routes when they are registered.
+Its protected-route decorator is the composition point for authentication and
+other access policy. Filesystem API registers all filesystem operations through
+that protected contract and accepts only filesystem locations and MIME mappings;
+it does not receive the listener, logging, timeout, or transport settings held by
+`ServerConfig`. Each filesystem operation has its own handler translation unit,
+so route composition can add or remove one operation without changing unrelated
+handlers. HTTP core remains independent of filesystem headers and libraries.
 
 Storage owns `TemporaryFile`, its cancellation/deadline policy, cleanup contract,
 and the process-wide limit of 32 active or orphaned native file operations.
