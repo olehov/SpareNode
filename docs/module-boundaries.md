@@ -19,6 +19,7 @@ The initial dependency boundaries are:
 | `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_http_core` |
 | `sparenode_filesystem_api` | Filesystem route registration, focused operation handlers, JSON responses, and public error mapping | `sparenode_api_core`, `sparenode_filesystem`, `sparenode_http_core`, `sparenode_storage` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
+| `sparenode_core` | Authentication, command-line parsing, and startup of composed server plans | Configuration lexer, foundation, filesystem, HTTP, logging, network, and storage targets |
 | `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
 
 Foundation depends only on the C++ standard library. Logging core must not
@@ -50,6 +51,16 @@ it does not receive the listener, logging, timeout, or transport settings held b
 `ServerConfig`. Each filesystem operation has its own handler translation unit,
 so route composition can add or remove one operation without changing unrelated
 handlers. HTTP core remains independent of filesystem headers and libraries.
+
+`RunningApplication` receives `ServerRuntimePlan` objects and has no configuration
+dependency. Each plan already owns its endpoint, handler, admission limits, and
+failure observers, so one server cannot inherit another server's routes, deadlines,
+transport policy, or logging threshold. Startup transfers one plan at a time; if a
+later server fails, RAII destroys every server started earlier. Bootstrap retains one
+process-wide authentication service for the version-one owner realm while the
+composition executable builds routing and transport policy independently per server.
+The bootstrap plan also exposes the version-one process lifecycle log threshold
+explicitly, so process logging does not obtain policy through a first-server lookup.
 
 Storage owns `TemporaryFile`, its cancellation/deadline policy, cleanup contract,
 and the process-wide limit of 32 active or orphaned native file operations.
