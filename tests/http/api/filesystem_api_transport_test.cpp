@@ -39,8 +39,10 @@ make_settings(const sparenode::test::TemporaryDirectory &directory)
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     std::vector<sparenode::http::FilesystemApiLocation> locations;
-    locations.push_back({"/api/Documents", std::move(root).value(),
-                         sparenode::filesystem::LocationPermissions{true, true, false}});
+    locations.push_back(
+        {"/api/Documents", sparenode::application::FilesystemService(
+                               std::move(root).value(),
+                               sparenode::filesystem::LocationPermissions{true, true, false})});
     return {std::move(locations), {}};
 }
 

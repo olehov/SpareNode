@@ -6,9 +6,7 @@
 #include <string>
 #include <utility>
 
-#include "filesystem_error_response.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
-#include "sparenode/filesystem/file_read_stream.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/response/http_response.hpp"
 
@@ -52,19 +50,14 @@ make_file_response(filesystem::FileReadStream stream, const std::string_view con
 
 } // namespace
 
-Result<HttpResponse, HttpRouteError> handle_file(const FilesystemApiLocation &location,
+Result<HttpResponse, HttpRouteError> handle_file(filesystem::FileReadStream stream,
                                                  const MimeTypeRegistry &mime_types,
                                                  const std::string_view requested_path)
 {
-    auto file = filesystem::FileReadStream::open(location.root, requested_path);
-    if (!file)
-    {
-        return make_public_error_response(file.error());
-    }
     const auto decoded_path = filesystem::detail::decode_path_request(requested_path);
     const auto content_type = decoded_path ? mime_types.content_type_for_path(decoded_path.value())
                                            : mime_types.content_type_for_path({});
-    return make_file_response(std::move(file).value(), content_type);
+    return make_file_response(std::move(stream), content_type);
 }
 
 } // namespace sparenode::http::detail

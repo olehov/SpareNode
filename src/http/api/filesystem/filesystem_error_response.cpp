@@ -176,19 +176,82 @@ public_error(const filesystem::FilesystemEntryRemovalError &error) noexcept
 
 } // namespace
 
-#define SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(ErrorType)                                          \
-    Result<HttpResponse, HttpRouteError> make_public_error_response(const ErrorType &error)        \
-    {                                                                                              \
-        return make_response(public_error(error));                                                 \
+Result<HttpResponse, HttpRouteError>
+make_public_error_response(const application::FilesystemReadError &error)
+{
+    using enum application::FilesystemReadErrorCode;
+    switch (error.code)
+    {
+    case forbidden:
+        return make_response({HttpStatusCode::forbidden, "read_forbidden"});
+    case directory_listing_failed:
+        return make_response(
+            public_error(std::get<filesystem::DirectoryListingError>(error.detail)));
+    case file_read_failed:
+        return make_response(public_error(std::get<filesystem::FileReadError>(error.detail)));
+    case resource_allocation_failed:
+        return make_response({HttpStatusCode::internal_server_error, "internal_error"});
     }
+    return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+}
 
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(filesystem::DirectoryListingError)
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(filesystem::FileReadError)
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(filesystem::UploadFinalizationError)
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(storage::TemporaryFileError)
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(filesystem::DirectoryCreationError)
-SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE(filesystem::FilesystemEntryRemovalError)
+Result<HttpResponse, HttpRouteError>
+make_public_error_response(const application::FilesystemUploadError &error)
+{
+    using enum application::FilesystemUploadErrorCode;
+    switch (error.code)
+    {
+    case forbidden:
+        return make_response({HttpStatusCode::forbidden, "write_forbidden"});
+    case invalid_upload:
+        return make_response({HttpStatusCode::bad_request, "invalid_upload"});
+    case temporary_file_failed:
+        return make_response(public_error(std::get<storage::TemporaryFileError>(error.detail)));
+    case upload_finalization_failed:
+        return make_response(
+            public_error(std::get<filesystem::UploadFinalizationError>(error.detail)));
+    case resource_allocation_failed:
+        return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+    }
+    return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+}
 
-#undef SPARENODE_DEFINE_PUBLIC_ERROR_RESPONSE
+Result<HttpResponse, HttpRouteError>
+make_public_error_response(const application::FilesystemDirectoryCreationError &error)
+{
+    using enum application::FilesystemDirectoryCreationErrorCode;
+    switch (error.code)
+    {
+    case forbidden:
+        return make_response({HttpStatusCode::forbidden, "write_forbidden"});
+    case content_not_allowed:
+        return make_response({HttpStatusCode::bad_request, "body_not_allowed"});
+    case directory_creation_failed:
+        return make_response(
+            public_error(std::get<filesystem::DirectoryCreationError>(error.detail)));
+    case resource_allocation_failed:
+        return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+    }
+    return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+}
+
+Result<HttpResponse, HttpRouteError>
+make_public_error_response(const application::FilesystemRemovalError &error)
+{
+    using enum application::FilesystemRemovalErrorCode;
+    switch (error.code)
+    {
+    case forbidden:
+        return make_response({HttpStatusCode::forbidden, "delete_forbidden"});
+    case content_not_allowed:
+        return make_response({HttpStatusCode::bad_request, "body_not_allowed"});
+    case filesystem_removal_failed:
+        return make_response(
+            public_error(std::get<filesystem::FilesystemEntryRemovalError>(error.detail)));
+    case resource_allocation_failed:
+        return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+    }
+    return make_response({HttpStatusCode::internal_server_error, "internal_error"});
+}
 
 } // namespace sparenode::http::detail

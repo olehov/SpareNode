@@ -90,6 +90,25 @@ sparenode_enable_static_analysis(sparenode_api_core_tests)
 
 catch_discover_tests(sparenode_api_core_tests)
 
+add_executable(sparenode_filesystem_application_tests
+    application/filesystem_service_test.cpp
+)
+
+target_link_libraries(sparenode_filesystem_application_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_filesystem_application
+)
+
+target_include_directories(sparenode_filesystem_application_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_application_tests)
+sparenode_enable_cppcheck(sparenode_filesystem_application_tests)
+sparenode_enable_static_analysis(sparenode_filesystem_application_tests)
+
+catch_discover_tests(sparenode_filesystem_application_tests)
+
 add_executable(sparenode_filesystem_api_tests
     http/api/filesystem_api_test.cpp
 )

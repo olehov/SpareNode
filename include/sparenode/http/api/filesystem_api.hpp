@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "sparenode/filesystem/location_permissions.hpp"
-#include "sparenode/filesystem/shared_root.hpp"
+#include "sparenode/application/filesystem_service.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/http/api/api_router_builder.hpp"
 #include "sparenode/http/mime_type_registry.hpp"
@@ -32,9 +31,8 @@ struct FilesystemApiError
 /// @brief Owns the filesystem-specific settings for one exposed HTTP location.
 struct FilesystemApiLocation
 {
-    std::string api_path;                        ///< Validated public HTTP path prefix.
-    filesystem::SharedRoot root;                 ///< Canonical filesystem security boundary.
-    filesystem::LocationPermissions permissions; ///< Operations enabled for the location.
+    std::string api_path;                   ///< Validated public HTTP path prefix.
+    application::FilesystemService service; ///< Transport-neutral filesystem use cases.
 };
 
 /// @brief Owns only the settings required to compose the filesystem API.
