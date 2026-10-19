@@ -103,6 +103,7 @@ make_server_runtime_plans(const application::runtime::AppConfig &config,
 
 } // namespace
 
+/// @brief Loads configuration, composes server plans, and owns the process lifecycle.
 int run_server(const application::StartupOptions &options)
 {
     // Load and validate the configuration selected on the command line.

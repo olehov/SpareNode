@@ -7,6 +7,7 @@
 namespace sparenode::application
 {
 
+/// @brief Starts complete server plans in order and rolls back on partial failure.
 Result<RunningApplication, ApplicationStartError>
 RunningApplication::start(std::vector<ServerRuntimePlan> plans)
 {
@@ -38,11 +39,13 @@ RunningApplication::start(std::vector<ServerRuntimePlan> plans)
     }
 }
 
+/// @brief Takes ownership of all successfully started connection servers.
 RunningApplication::RunningApplication(std::vector<network::ConnectionServer> servers) noexcept
     : servers_(std::move(servers))
 {
 }
 
+/// @brief Exposes the running servers without transferring ownership.
 const std::vector<network::ConnectionServer> &RunningApplication::servers() const noexcept
 {
     return servers_;

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <semaphore>
 #include <span>
@@ -14,7 +15,6 @@
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/network/network_error.hpp"
 #include "sparenode/network/tcp_connection.hpp"
-#include "sparenode/network/tcp_listener.hpp"
 #include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 
@@ -134,17 +134,20 @@ TEST_CASE("Running application retains each plan's handler and admission policy"
 TEST_CASE("Running application releases started servers after a later plan fails",
           "[application][startup][rollback]")
 {
-    sparenode::network::TcpEndpoint first_endpoint;
+    // The first server's dispatcher owns this token through its handler until rollback completes.
+    auto first_server_lifetime = std::make_shared<std::byte>();
+    const std::weak_ptr<std::byte> first_server_released = first_server_lifetime;
+    auto first_handler =
+        [lifetime = std::move(first_server_lifetime)](
+            sparenode::network::TcpConnection,
+            const std::stop_token &) -> sparenode::Result<void, sparenode::network::NetworkError>
     {
-        auto reservation = sparenode::network::TcpListener::bind({"127.0.0.1", 0});
-        REQUIRE(reservation);
-        auto endpoint = reservation->local_endpoint();
-        REQUIRE(endpoint);
-        first_endpoint = std::move(endpoint).value();
-    }
+        static_cast<void>(lifetime);
+        return {};
+    };
 
     std::vector<sparenode::application::ServerRuntimePlan> plans;
-    plans.push_back(make_plan(successful_handler(), {.endpoint = first_endpoint}));
+    plans.push_back(make_plan(std::move(first_handler)));
     plans.push_back(
         make_plan(successful_handler(), {.multithreading_enabled = true, .worker_count = 0}));
     const auto result = sparenode::application::RunningApplication::start(std::move(plans));
@@ -152,9 +155,7 @@ TEST_CASE("Running application releases started servers after a later plan fails
     CHECK(result.error().code ==
           sparenode::application::ApplicationStartErrorCode::server_start_failed);
     CHECK(result.error().server_index == 1);
-
-    const auto rebound = sparenode::network::TcpListener::bind(first_endpoint);
-    CHECK(rebound.has_value());
+    CHECK(first_server_released.expired());
 }
 
 TEST_CASE("Running application installs a plan's connection failure observer",

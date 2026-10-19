@@ -163,6 +163,7 @@ void append_escaped_path(std::ostringstream &output, const std::filesystem::path
 
 } // namespace
 
+/// @brief Stores concrete runtime settings and process-wide dependencies.
 RuntimePlan::RuntimePlan(application::runtime::AppConfig config,
                          authentication::AuthenticationService authentication,
                          const logging::LogSeverity process_log_severity) noexcept
@@ -171,21 +172,25 @@ RuntimePlan::RuntimePlan(application::runtime::AppConfig config,
 {
 }
 
+/// @brief Exposes the constructed application configuration.
 const application::runtime::AppConfig &RuntimePlan::config() const noexcept
 {
     return config_;
 }
 
+/// @brief Exposes the process-wide authentication service.
 const authentication::AuthenticationService &RuntimePlan::authentication() const noexcept
 {
     return authentication_;
 }
 
+/// @brief Returns the threshold used for process lifecycle messages.
 logging::LogSeverity RuntimePlan::process_log_severity() const noexcept
 {
     return process_log_severity_;
 }
 
+/// @brief Converts validated configuration into concrete runtime dependencies.
 Result<RuntimePlan, RuntimeBootstrapError>
 RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
 {
