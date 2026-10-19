@@ -5,6 +5,7 @@
 #include <stop_token>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/application/running_application.hpp"
@@ -21,6 +22,12 @@ namespace sparenode::app
 {
 namespace
 {
+
+/// @brief Maximum connections waiting in the operating-system accept queue.
+constexpr int listen_backlog = 128;
+
+/// @brief Maximum accepted connections waiting for a request worker per server.
+constexpr std::size_t pending_connection_limit = 128;
 
 /// @brief Projects the runtime server into the narrow filesystem API composition contract.
 [[nodiscard]] http::FilesystemApiSettings
@@ -44,6 +51,56 @@ void write_startup_failure(const std::string &diagnostic)
     std::cerr << "\nSpareNode was not started.\n";
 }
 
+/// @brief Composes every transport and application dependency for one server.
+[[nodiscard]] Result<application::ServerRuntimePlan, http::FilesystemApiError>
+make_server_runtime_plan(const application::runtime::ServerConfig &server,
+                         const std::shared_ptr<logging::LogSink> &console_sink)
+{
+    const logging::Logger logger(console_sink, server.minimum_log_severity());
+    auto router_result = http::make_filesystem_api_router(make_filesystem_api_settings(server));
+    if (!router_result)
+    {
+        return unexpected(router_result.error());
+    }
+
+    const auto router = std::make_shared<const http::HttpRouter>(std::move(router_result).value());
+    auto http_application = http::make_http_application(router);
+    const http::HttpConnectionHandlerConfig handler_config{.timeouts = server.http_timeouts(),
+                                                           .deadline_provider = {},
+                                                           .transport_policy =
+                                                               server.transport_policy()};
+    auto handler = http::make_http_connection_handler(std::move(http_application), handler_config);
+    auto admission = http::make_http_connection_admission(handler_config);
+    return application::ServerRuntimePlan(network::ConnectionServerConfig{
+        server.endpoint(),
+        listen_backlog,
+        server.multithreading_enabled(),
+        {{server.worker_threads(), pending_connection_limit},
+         std::move(handler),
+         logging::make_connection_failure_log_observer(logger),
+         std::move(admission)},
+        logging::make_connection_server_failure_log_observer(logger)});
+}
+
+/// @brief Composes independent runtime plans for every validated server.
+[[nodiscard]] Result<std::vector<application::ServerRuntimePlan>, http::FilesystemApiError>
+make_server_runtime_plans(const application::runtime::AppConfig &config,
+                          const std::shared_ptr<logging::LogSink> &console_sink)
+{
+    std::vector<application::ServerRuntimePlan> plans;
+    plans.reserve(config.servers().size());
+    for (const auto &server : config.servers())
+    {
+        auto plan = make_server_runtime_plan(server, console_sink);
+        if (!plan)
+        {
+            return unexpected(plan.error());
+        }
+        plans.push_back(std::move(plan).value());
+    }
+    return plans;
+}
+
 } // namespace
 
 int run_server(const application::StartupOptions &options)
@@ -63,33 +120,21 @@ int run_server(const application::StartupOptions &options)
         write_startup_failure(bootstrap::format_runtime_bootstrap_error(runtime_result.error()));
         return 3;
     }
-    const auto &server = runtime_result->config().servers().front();
     const auto console_sink = std::make_shared<logging::ConsoleLogSink>(std::clog);
-    const logging::Logger logger(console_sink, server.minimum_log_severity());
+    const logging::Logger process_logger(console_sink, runtime_result->process_log_severity());
 
-    // Compose the filesystem routes and the HTTP connection-processing pipeline.
-    auto router_result = http::make_filesystem_api_router(make_filesystem_api_settings(server));
-    if (!router_result)
+    // Compose routes, HTTP policies, admission, and observers independently per server.
+    auto plans_result = make_server_runtime_plans(runtime_result->config(), console_sink);
+    if (!plans_result)
     {
-        write_startup_failure(std::string("error: ") + http::to_string(router_result.error().code));
+        write_startup_failure(std::string("error: ") + http::to_string(plans_result.error().code));
         return 3;
     }
-    const auto router = std::make_shared<const http::HttpRouter>(std::move(router_result).value());
-    auto http_application = http::make_http_application(router);
-    const http::HttpConnectionHandlerConfig handler_config{.timeouts = server.http_timeouts(),
-                                                           .deadline_provider = {},
-                                                           .transport_policy =
-                                                               server.transport_policy()};
-    auto handler = http::make_http_connection_handler(std::move(http_application), handler_config);
-    auto admission = http::make_http_connection_admission(handler_config);
-    application::RunningApplicationObservers observers{
-        logging::make_connection_failure_log_observer(logger),
-        logging::make_connection_server_failure_log_observer(logger)};
 
     // Transfer runtime resources into the running application and start its listeners.
-    auto application_result = application::RunningApplication::start(
-        std::move(runtime_result).value().release_config(), std::move(handler),
-        std::move(observers), std::move(admission));
+    // RuntimePlan remains alive here so its process-wide authentication context outlives servers.
+    auto application_result =
+        application::RunningApplication::start(std::move(plans_result).value());
     if (!application_result)
     {
         write_startup_failure(
@@ -98,11 +143,11 @@ int run_server(const application::StartupOptions &options)
     }
 
     // Keep the process alive until the operator requests a graceful shutdown.
-    logger.log({logging::LogSeverity::info, "application", "SpareNode startup complete"});
+    process_logger.log({logging::LogSeverity::info, "application", "SpareNode startup complete"});
     std::cout << "SpareNode " << version << " is running. Press Enter to stop.\n";
     std::string line;
     static_cast<void>(std::getline(std::cin, line));
-    logger.log({logging::LogSeverity::info, "application", "SpareNode shutdown complete"});
+    process_logger.log({logging::LogSeverity::info, "application", "SpareNode shutdown complete"});
     return 0;
 }
 
