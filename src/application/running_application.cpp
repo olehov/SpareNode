@@ -6,46 +6,23 @@
 
 namespace sparenode::application
 {
-namespace
-{
-/// @brief Conservative MVP limit for connections waiting in the operating system before accept().
-constexpr int listen_backlog = 128;
 
-/// @brief Conservative MVP limit for accepted connections waiting for a dispatcher worker.
-///
-/// This is not the total client limit: workers may own active connections while
-/// the operating-system backlog holds additional connections that have not yet
-/// been accepted. Keeping the queue bounded provides backpressure and prevents
-/// untrusted clients from causing unbounded socket and memory growth.
-constexpr std::size_t pending_connection_limit = 128;
-} // namespace
-
+/// @brief Starts complete server plans in order and rolls back on partial failure.
 Result<RunningApplication, ApplicationStartError>
-RunningApplication::start(runtime::AppConfig config, network::ConnectionHandler handler,
-                          RunningApplicationObservers observers,
-                          std::optional<network::ConnectionAdmissionOptions> admission)
+RunningApplication::start(std::vector<ServerRuntimePlan> plans)
 {
-    if (config.servers().empty())
+    if (plans.empty())
     {
         return unexpected(ApplicationStartError{ApplicationStartErrorCode::missing_server, 0, {}});
     }
     try
     {
         std::vector<network::ConnectionServer> servers;
-        servers.reserve(config.servers().size());
-        for (std::size_t index = 0; index < config.servers().size(); ++index)
+        servers.reserve(plans.size());
+        for (std::size_t index = 0; index < plans.size(); ++index)
         {
-            const auto &settings = config.servers()[index];
-            network::ConnectionServerConfig server_config{
-                settings.endpoint(),
-                listen_backlog,
-                settings.multithreading_enabled(),
-                {{settings.worker_threads(), pending_connection_limit},
-                 handler,
-                 observers.connection_failure,
-                 admission},
-                observers.server_failure};
-            auto server_result = network::ConnectionServer::start(std::move(server_config));
+            auto server_result =
+                network::ConnectionServer::start(std::move(plans[index]).release_config());
             if (!server_result)
             {
                 return unexpected(ApplicationStartError{
@@ -53,7 +30,7 @@ RunningApplication::start(runtime::AppConfig config, network::ConnectionHandler 
             }
             servers.push_back(std::move(server_result).value());
         }
-        return RunningApplication(std::move(config), std::move(servers));
+        return RunningApplication(std::move(servers));
     }
     catch (const std::bad_alloc &)
     {
@@ -62,17 +39,13 @@ RunningApplication::start(runtime::AppConfig config, network::ConnectionHandler 
     }
 }
 
-RunningApplication::RunningApplication(runtime::AppConfig config,
-                                       std::vector<network::ConnectionServer> servers) noexcept
-    : config_(std::move(config)), servers_(std::move(servers))
+/// @brief Takes ownership of all successfully started connection servers.
+RunningApplication::RunningApplication(std::vector<network::ConnectionServer> servers) noexcept
+    : servers_(std::move(servers))
 {
 }
 
-const runtime::AppConfig &RunningApplication::config() const noexcept
-{
-    return config_;
-}
-
+/// @brief Exposes the running servers without transferring ownership.
 const std::vector<network::ConnectionServer> &RunningApplication::servers() const noexcept
 {
     return servers_;

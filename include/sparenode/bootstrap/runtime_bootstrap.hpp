@@ -12,6 +12,7 @@
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/foundation/result.hpp"
+#include "sparenode/logging/log_severity.hpp"
 
 namespace sparenode::bootstrap
 {
@@ -47,22 +48,29 @@ class RuntimePlan final
     /// @brief Stores fully constructed runtime settings and authentication.
     /// @param[in] config Concrete application settings created by bootstrap.
     /// @param[in] authentication Ready credential-independent authentication service.
+    /// @param[in] process_log_severity Process lifecycle logging threshold.
     RuntimePlan(application::runtime::AppConfig config,
-                authentication::AuthenticationService authentication) noexcept;
+                authentication::AuthenticationService authentication,
+                logging::LogSeverity process_log_severity) noexcept;
 
     /// @brief Returns constructed application settings without transferring ownership.
     /// @return Immutable concrete application settings.
     [[nodiscard]] const application::runtime::AppConfig &config() const noexcept;
-    /// @brief Transfers constructed application settings to the runtime owner.
-    /// @return Concrete application settings moved out of this plan.
-    [[nodiscard]] application::runtime::AppConfig release_config() && noexcept;
-    /// @brief Returns the authentication service retained for application composition.
+    /// @brief Returns the process-wide authentication service retained for composition.
+    ///
+    /// Version one has one owner credential realm. Per-server route and transport
+    /// policies may differ, but they refer to this single process-lifetime service.
     /// @return Immutable ready-to-use authentication service.
     [[nodiscard]] const authentication::AuthenticationService &authentication() const noexcept;
+
+    /// @brief Returns the process lifecycle logging threshold.
+    /// @return Severity derived from the single version-one server configuration.
+    [[nodiscard]] logging::LogSeverity process_log_severity() const noexcept;
 
   private:
     application::runtime::AppConfig config_; ///< Concrete settings ready for application startup.
     authentication::AuthenticationService authentication_; ///< Ready authentication service.
+    logging::LogSeverity process_log_severity_; ///< Process-wide lifecycle logging threshold.
 };
 
 /// @brief Constructs concrete runtime dependencies from pure validated configuration settings.

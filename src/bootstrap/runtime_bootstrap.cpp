@@ -163,27 +163,34 @@ void append_escaped_path(std::ostringstream &output, const std::filesystem::path
 
 } // namespace
 
+/// @brief Stores concrete runtime settings and process-wide dependencies.
 RuntimePlan::RuntimePlan(application::runtime::AppConfig config,
-                         authentication::AuthenticationService authentication) noexcept
-    : config_(std::move(config)), authentication_(std::move(authentication))
+                         authentication::AuthenticationService authentication,
+                         const logging::LogSeverity process_log_severity) noexcept
+    : config_(std::move(config)), authentication_(std::move(authentication)),
+      process_log_severity_(process_log_severity)
 {
 }
 
+/// @brief Exposes the constructed application configuration.
 const application::runtime::AppConfig &RuntimePlan::config() const noexcept
 {
     return config_;
 }
 
-application::runtime::AppConfig RuntimePlan::release_config() && noexcept
-{
-    return std::move(config_);
-}
-
+/// @brief Exposes the process-wide authentication service.
 const authentication::AuthenticationService &RuntimePlan::authentication() const noexcept
 {
     return authentication_;
 }
 
+/// @brief Returns the threshold used for process lifecycle messages.
+logging::LogSeverity RuntimePlan::process_log_severity() const noexcept
+{
+    return process_log_severity_;
+}
+
+/// @brief Converts validated configuration into concrete runtime dependencies.
 Result<RuntimePlan, RuntimeBootstrapError>
 RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
 {
@@ -195,6 +202,7 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
         std::vector<filesystem::SharedRoot> authentication_roots;
         std::filesystem::path credentials_path;
         configuration::SourceLocation credentials_location;
+        std::optional<logging::LogSeverity> process_log_severity;
 
         for (const auto &configured : configured_servers)
         {
@@ -220,11 +228,13 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
                 std::chrono::milliseconds{configured.request_timeout_ms}};
             http::HttpTransportPolicy transport_policy{
                 map_transport_mode(configured.transport_mode), configured.trusted_proxy};
+            const auto log_severity = map_log_level(configured.log_level);
+            process_log_severity = process_log_severity.value_or(log_severity);
             runtime_servers.emplace_back(
                 network::TcpEndpoint{configured.bind_address, configured.port},
-                configured.multithreading_enabled, configured.worker_threads,
-                map_log_level(configured.log_level), std::move(locations).value(), timeouts,
-                std::move(mime_types).value(), std::move(transport_policy), credentials_path);
+                configured.multithreading_enabled, configured.worker_threads, log_severity,
+                std::move(locations).value(), timeouts, std::move(mime_types).value(),
+                std::move(transport_policy), credentials_path);
         }
 
         auto authentication = authentication::create_file_authentication_service(
@@ -240,7 +250,8 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
                                       authentication.error()});
         }
         return RuntimePlan(application::runtime::AppConfig(std::move(runtime_servers)),
-                           std::move(authentication).value());
+                           std::move(authentication).value(),
+                           process_log_severity.value_or(logging::LogSeverity::info));
     }
     catch (const std::bad_alloc &)
     {
