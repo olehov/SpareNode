@@ -583,3 +583,39 @@ TEST_CASE("Filesystem API rejects settings without a location", "[http][filesyst
     REQUIRE_FALSE(router);
     CHECK(router.error().code == sparenode::http::FilesystemApiErrorCode::missing_location);
 }
+
+TEST_CASE("Filesystem API registers every operation as protected",
+          "[http][filesystem-api][policy]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-policy");
+    sparenode::http::api::ProtectedRouteDecorator deny = [](sparenode::http::HttpRouteHandler)
+    {
+        return sparenode::http::HttpRouteHandler{
+            [](const sparenode::http::HttpRequestView &,
+               const sparenode::http::HttpRouteParameters &)
+                -> sparenode::Result<sparenode::http::HttpResponse,
+                                     sparenode::http::HttpRouteError>
+            {
+                auto response = sparenode::http::HttpResponse::create(
+                    sparenode::http::HttpStatusCode::forbidden, "Forbidden", {},
+                    std::vector<std::byte>{});
+                REQUIRE(response);
+                return std::move(response).value();
+            }};
+    };
+    auto router = sparenode::http::make_filesystem_api_router(
+        make_server(directory, true, {}, true, true), std::move(deny));
+    REQUIRE(router);
+
+    for (const std::string_view target : {"/api/Documents", "/api/Documents/item"})
+    {
+        CHECK(dispatch_get(router.value(), target).status_code() ==
+              sparenode::http::HttpStatusCode::forbidden);
+        CHECK(dispatch_put(router.value(), target, "content").status_code() ==
+              sparenode::http::HttpStatusCode::forbidden);
+        CHECK(dispatch_post(router.value(), target).status_code() ==
+              sparenode::http::HttpStatusCode::forbidden);
+        CHECK(dispatch_delete(router.value(), target).status_code() ==
+              sparenode::http::HttpStatusCode::forbidden);
+    }
+}
