@@ -207,6 +207,41 @@ sparenode_enable_compiler_warnings(sparenode_http_core)
 sparenode_enable_cppcheck(sparenode_http_core)
 sparenode_enable_static_analysis(sparenode_http_core)
 
+add_library(sparenode_api_core STATIC
+    src/http/api/api_router_builder.cpp
+)
+
+target_link_libraries(sparenode_api_core PUBLIC
+    sparenode_http_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_api_core)
+sparenode_enable_cppcheck(sparenode_api_core)
+sparenode_enable_static_analysis(sparenode_api_core)
+
+add_library(sparenode_filesystem_api STATIC
+    src/http/api/filesystem_api.cpp
+    src/http/api/filesystem/deletion_handler.cpp
+    src/http/api/filesystem/directory_creation_handler.cpp
+    src/http/api/filesystem/directory_listing_handler.cpp
+    src/http/api/filesystem/file_download_handler.cpp
+    src/http/api/filesystem/filesystem_error_response.cpp
+    src/http/api/filesystem/json_writer.cpp
+    src/http/api/filesystem/response_factory.cpp
+    src/http/api/filesystem/upload_handler.cpp
+)
+
+target_link_libraries(sparenode_filesystem_api PUBLIC
+    sparenode_api_core
+    sparenode_filesystem
+    sparenode_http_core
+    sparenode_storage
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_api)
+sparenode_enable_cppcheck(sparenode_filesystem_api)
+sparenode_enable_static_analysis(sparenode_filesystem_api)
+
 add_library(sparenode_http_transport STATIC
     src/http/transport/http_connection_handler.cpp
     src/http/transport/http_transport_policy.cpp
@@ -239,7 +274,6 @@ add_library(sparenode_core STATIC
     src/authentication/sensitive_password.cpp
     src/application/command_line.cpp
     src/application/running_application.cpp
-    src/http/api/filesystem_api.cpp
 )
 
 target_compile_features(sparenode_core PUBLIC
@@ -290,11 +324,13 @@ sparenode_enable_static_analysis(sparenode_bootstrap)
 
 add_executable(sparenode
     apps/sparenode/main.cpp
+    apps/sparenode/server.cpp
 )
 
 target_link_libraries(sparenode PRIVATE
     sparenode_bootstrap
     sparenode_core
+    sparenode_filesystem_api
     sparenode_network_logging
 )
 
