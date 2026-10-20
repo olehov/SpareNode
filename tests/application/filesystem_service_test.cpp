@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -34,6 +35,18 @@ make_service(const sparenode::test::TemporaryDirectory &directory,
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     return {std::move(root).value(), permissions};
+}
+
+/// @brief Creates one immutable file-backed upload artifact containing the supplied payload.
+[[nodiscard]] std::shared_ptr<const sparenode::storage::TemporaryFile>
+complete_artifact(const std::string_view payload)
+{
+    auto created = sparenode::storage::TemporaryFile::create();
+    REQUIRE(created);
+    auto artifact = std::move(created).value();
+    REQUIRE(artifact.write(as_bytes(payload)));
+    REQUIRE(artifact.complete());
+    return std::make_shared<const sparenode::storage::TemporaryFile>(std::move(artifact));
 }
 
 } // namespace
@@ -131,4 +144,70 @@ TEST_CASE("Filesystem service rejects inconsistent or unexpected operation conte
     REQUIRE_FALSE(remove);
     CHECK(remove.error().code ==
           sparenode::application::FilesystemRemovalErrorCode::content_not_allowed);
+}
+
+TEST_CASE("Filesystem service publishes file-backed artifacts and preserves finalization errors",
+          "[application][filesystem-service][upload]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-artifact");
+    const auto service =
+        make_service(directory, sparenode::filesystem::LocationPermissions{true, true, true});
+    constexpr std::string_view payload = "artifact";
+
+    const auto artifact = complete_artifact(payload);
+    const auto published = service.upload("artifact.txt", {{}, artifact->size(), artifact, {}});
+    REQUIRE(published);
+    CHECK(std::filesystem::file_size(directory.path() / "artifact.txt") == payload.size());
+
+    REQUIRE(std::ofstream(directory.path() / "existing.txt", std::ios::binary) << "original");
+    const auto duplicate_artifact = complete_artifact(payload);
+    const auto duplicate =
+        service.upload("existing.txt", {{}, duplicate_artifact->size(), duplicate_artifact, {}});
+    REQUIRE_FALSE(duplicate);
+    CHECK(duplicate.error().code ==
+          sparenode::application::FilesystemUploadErrorCode::upload_finalization_failed);
+    REQUIRE(std::holds_alternative<sparenode::filesystem::UploadFinalizationError>(
+        duplicate.error().detail));
+    CHECK(std::get<sparenode::filesystem::UploadFinalizationError>(duplicate.error().detail).code ==
+          sparenode::filesystem::UploadFinalizationErrorCode::destination_exists);
+}
+
+TEST_CASE("Filesystem service retains lower-level details for failed confined operations",
+          "[application][filesystem-service][errors]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-errors");
+    const auto service =
+        make_service(directory, sparenode::filesystem::LocationPermissions{true, true, true});
+
+    const auto missing = service.read("missing");
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().code ==
+          sparenode::application::FilesystemReadErrorCode::directory_listing_failed);
+    REQUIRE(std::holds_alternative<sparenode::filesystem::DirectoryListingError>(
+        missing.error().detail));
+    CHECK(std::get<sparenode::filesystem::DirectoryListingError>(missing.error().detail).code ==
+          sparenode::filesystem::DirectoryListingErrorCode::not_found);
+
+    const auto upload_artifact = complete_artifact("content");
+    const auto upload =
+        service.upload("../outside", {{}, upload_artifact->size(), upload_artifact, {}});
+    REQUIRE_FALSE(upload);
+    CHECK(upload.error().code ==
+          sparenode::application::FilesystemUploadErrorCode::upload_finalization_failed);
+    CHECK(std::holds_alternative<sparenode::filesystem::UploadFinalizationError>(
+        upload.error().detail));
+
+    const auto create = service.create_directory("../outside", 0);
+    REQUIRE_FALSE(create);
+    CHECK(create.error().code ==
+          sparenode::application::FilesystemDirectoryCreationErrorCode::directory_creation_failed);
+    CHECK(std::holds_alternative<sparenode::filesystem::DirectoryCreationError>(
+        create.error().detail));
+
+    const auto remove = service.remove("../outside", 0);
+    REQUIRE_FALSE(remove);
+    CHECK(remove.error().code ==
+          sparenode::application::FilesystemRemovalErrorCode::filesystem_removal_failed);
+    CHECK(std::holds_alternative<sparenode::filesystem::FilesystemEntryRemovalError>(
+        remove.error().detail));
 }
