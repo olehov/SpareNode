@@ -17,7 +17,8 @@ The initial dependency boundaries are:
 | `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
 | `sparenode_http_core` | HTTP request and response models, parsing, MIME metadata, and routing | `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_http_core` |
-| `sparenode_filesystem_api` | Filesystem route registration, focused operation handlers, JSON responses, and public error mapping | `sparenode_api_core`, `sparenode_filesystem`, `sparenode_http_core`, `sparenode_storage` |
+| `sparenode_filesystem_application` | Permission enforcement and transport-neutral filesystem use-case orchestration | `sparenode_filesystem`, `sparenode_foundation`, `sparenode_storage` |
+| `sparenode_filesystem_api` | Filesystem route registration, focused HTTP handlers, JSON responses, MIME headers, and public error mapping | `sparenode_api_core`, `sparenode_filesystem_application`, `sparenode_http_core` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
 | `sparenode_core` | Authentication, command-line parsing, and startup of composed server plans | Configuration lexer, foundation, filesystem, HTTP, logging, network, and storage targets |
 | `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
@@ -68,6 +69,12 @@ HTTP request ingestion receives a storage factory and uses `TemporaryFileWriter`
 it does not implement file workers or include filesystem operation headers.
 Upload finalization consumes the completed storage artifact while retaining all
 destination confinement and no-replace publication policy in filesystem.
+
+The filesystem application service owns the list/read decision, upload
+materialization and publication, directory creation, deletion, and the single
+permission check for each use case. Its result types contain no HTTP statuses or
+responses. The filesystem API translates requests into that service contract and
+maps application failures into the existing public HTTP representation.
 
 Module-focused test executables link only the target under test and its declared
 dependencies. This makes an accidental reverse dependency fail during linking

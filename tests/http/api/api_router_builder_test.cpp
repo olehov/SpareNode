@@ -84,9 +84,9 @@ TEST_CASE("API router builder leaves protected handlers unchanged without a poli
 TEST_CASE("API router builder preserves route registration failures", "[http][api][routing]")
 {
     sparenode::http::api::ApiRouterBuilder builder;
-    const auto invalid_public = builder.register_public(
-        {sparenode::http::HttpMethod::get, "relative",
-         status_handler(sparenode::http::HttpStatusCode::ok, "OK")});
+    const auto invalid_public =
+        builder.register_public({sparenode::http::HttpMethod::get, "relative",
+                                 status_handler(sparenode::http::HttpStatusCode::ok, "OK")});
     REQUIRE_FALSE(invalid_public);
     CHECK(invalid_public.error().code ==
           sparenode::http::HttpRouteRegistrationErrorCode::invalid_pattern);
@@ -94,9 +94,9 @@ TEST_CASE("API router builder preserves route registration failures", "[http][ap
     REQUIRE(
         builder.register_protected({sparenode::http::HttpMethod::get, "/duplicate",
                                     status_handler(sparenode::http::HttpStatusCode::ok, "OK")}));
-    const auto duplicate_protected = builder.register_protected(
-        {sparenode::http::HttpMethod::get, "/duplicate",
-         status_handler(sparenode::http::HttpStatusCode::ok, "OK")});
+    const auto duplicate_protected =
+        builder.register_protected({sparenode::http::HttpMethod::get, "/duplicate",
+                                    status_handler(sparenode::http::HttpStatusCode::ok, "OK")});
     REQUIRE_FALSE(duplicate_protected);
     CHECK(duplicate_protected.error().code ==
           sparenode::http::HttpRouteRegistrationErrorCode::duplicate_route);

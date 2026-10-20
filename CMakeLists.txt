@@ -219,6 +219,20 @@ sparenode_enable_compiler_warnings(sparenode_api_core)
 sparenode_enable_cppcheck(sparenode_api_core)
 sparenode_enable_static_analysis(sparenode_api_core)
 
+add_library(sparenode_filesystem_application STATIC
+    src/application/filesystem_service.cpp
+)
+
+target_link_libraries(sparenode_filesystem_application PUBLIC
+    sparenode_filesystem
+    sparenode_foundation
+    sparenode_storage
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_application)
+sparenode_enable_cppcheck(sparenode_filesystem_application)
+sparenode_enable_static_analysis(sparenode_filesystem_application)
+
 add_library(sparenode_filesystem_api STATIC
     src/http/api/filesystem_api.cpp
     src/http/api/filesystem/deletion_handler.cpp
@@ -233,9 +247,8 @@ add_library(sparenode_filesystem_api STATIC
 
 target_link_libraries(sparenode_filesystem_api PUBLIC
     sparenode_api_core
-    sparenode_filesystem
+    sparenode_filesystem_application
     sparenode_http_core
-    sparenode_storage
 )
 
 sparenode_enable_compiler_warnings(sparenode_filesystem_api)

@@ -4,30 +4,19 @@
 
 #include "filesystem_error_response.hpp"
 #include "response_factory.hpp"
-#include "sparenode/filesystem/filesystem_entry_remover.hpp"
 #include "sparenode/http/http_status_code.hpp"
 
 namespace sparenode::http::detail
 {
 
-Result<HttpResponse, HttpRouteError> handle_deletion(const FilesystemApiLocation &location,
+/// @brief Adapts one HTTP request to the confined filesystem-removal use case.
+Result<HttpResponse, HttpRouteError> handle_deletion(const application::FilesystemService &service,
                                                      const HttpRequestView &request,
                                                      const std::string_view requested_path)
 {
     try
     {
-        if (!location.permissions.allows_delete())
-        {
-            return make_json_response(HttpStatusCode::forbidden,
-                                      "{\"error\":\"delete_forbidden\"}");
-        }
-        if (request.body_size() != 0)
-        {
-            return make_json_response(HttpStatusCode::bad_request,
-                                      "{\"error\":\"body_not_allowed\"}");
-        }
-        if (auto removed = filesystem::remove_filesystem_entry(location.root, requested_path);
-            !removed)
+        if (auto removed = service.remove(requested_path, request.body_size()); !removed)
         {
             return make_public_error_response(removed.error());
         }
@@ -37,7 +26,7 @@ Result<HttpResponse, HttpRouteError> handle_deletion(const FilesystemApiLocation
     {
         return unexpected(HttpRouteError{
             HttpRouteErrorCode::handler_failure,
-            static_cast<int>(filesystem::FilesystemEntryRemovalErrorCode::resource_failure)});
+            static_cast<int>(application::FilesystemRemovalErrorCode::resource_allocation_failed)});
     }
 }
 

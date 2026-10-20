@@ -66,9 +66,10 @@ make_server(const sparenode::test::TemporaryDirectory &directory, const bool all
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
     std::vector<sparenode::http::FilesystemApiLocation> locations;
-    locations.push_back(
-        {"/api/Documents", std::move(root).value(),
-         sparenode::filesystem::LocationPermissions{allow_read, allow_write, allow_delete}});
+    locations.push_back({"/api/Documents",
+                         sparenode::application::FilesystemService(
+                             std::move(root).value(), sparenode::filesystem::LocationPermissions{
+                                                          allow_read, allow_write, allow_delete})});
     return {std::move(locations), std::move(mime_types)};
 }
 
@@ -420,10 +421,12 @@ TEST_CASE("Filesystem API registers multiple configured locations with segment b
     REQUIRE(media_root);
 
     std::vector<sparenode::http::FilesystemApiLocation> locations;
-    locations.push_back({"/api/docs", std::move(documents_root).value(),
-                         sparenode::filesystem::LocationPermissions{}});
-    locations.push_back({"/api/media", std::move(media_root).value(),
-                         sparenode::filesystem::LocationPermissions{}});
+    locations.push_back({"/api/docs", sparenode::application::FilesystemService(
+                                          std::move(documents_root).value(),
+                                          sparenode::filesystem::LocationPermissions{})});
+    locations.push_back({"/api/media", sparenode::application::FilesystemService(
+                                           std::move(media_root).value(),
+                                           sparenode::filesystem::LocationPermissions{})});
     auto router = sparenode::http::make_filesystem_api_router({std::move(locations), {}});
     REQUIRE(router);
 
@@ -584,8 +587,7 @@ TEST_CASE("Filesystem API rejects settings without a location", "[http][filesyst
     CHECK(router.error().code == sparenode::http::FilesystemApiErrorCode::missing_location);
 }
 
-TEST_CASE("Filesystem API registers every operation as protected",
-          "[http][filesystem-api][policy]")
+TEST_CASE("Filesystem API registers every operation as protected", "[http][filesystem-api][policy]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-files-api-policy");
     sparenode::http::api::ProtectedRouteDecorator deny = [](sparenode::http::HttpRouteHandler)
@@ -593,8 +595,7 @@ TEST_CASE("Filesystem API registers every operation as protected",
         return sparenode::http::HttpRouteHandler{
             [](const sparenode::http::HttpRequestView &,
                const sparenode::http::HttpRouteParameters &)
-                -> sparenode::Result<sparenode::http::HttpResponse,
-                                     sparenode::http::HttpRouteError>
+                -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
             {
                 auto response = sparenode::http::HttpResponse::create(
                     sparenode::http::HttpStatusCode::forbidden, "Forbidden", {},

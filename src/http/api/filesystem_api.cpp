@@ -49,9 +49,11 @@ register_read_routes(api::ApiRouterBuilder &builder, const SharedLocation &locat
     return register_location_routes(
         builder, HttpMethod::get, location->api_path,
         [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
-        { return detail::handle_resource(*location, *mime_types, {}); },
-        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters)
-        { return detail::handle_resource(*location, *mime_types, parameters.wildcard_suffix()); });
+        { return detail::handle_resource(location->service, *mime_types, {}); },
+        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters) {
+            return detail::handle_resource(location->service, *mime_types,
+                                           parameters.wildcard_suffix());
+        });
 }
 
 /// @brief Registers upload routes for one location.
@@ -61,9 +63,10 @@ register_upload_routes(api::ApiRouterBuilder &builder, const SharedLocation &loc
     return register_location_routes(
         builder, HttpMethod::put, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
-        { return detail::handle_upload(*location, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
-        { return detail::handle_upload(*location, request, parameters.wildcard_suffix()); });
+        { return detail::handle_upload(location->service, request, {}); },
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+            return detail::handle_upload(location->service, request, parameters.wildcard_suffix());
+        });
 }
 
 /// @brief Registers directory-creation routes for one location.
@@ -73,9 +76,10 @@ register_directory_creation_routes(api::ApiRouterBuilder &builder, const SharedL
     return register_location_routes(
         builder, HttpMethod::post, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
-        { return detail::handle_directory_creation(*location, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
-            return detail::handle_directory_creation(*location, request,
+        { return detail::handle_directory_creation(location->service, request, {}); },
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+        {
+            return detail::handle_directory_creation(location->service, request,
                                                      parameters.wildcard_suffix());
         });
 }
@@ -87,9 +91,11 @@ register_deletion_routes(api::ApiRouterBuilder &builder, const SharedLocation &l
     return register_location_routes(
         builder, HttpMethod::delete_method, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
-        { return detail::handle_deletion(*location, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
-        { return detail::handle_deletion(*location, request, parameters.wildcard_suffix()); });
+        { return detail::handle_deletion(location->service, request, {}); },
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+            return detail::handle_deletion(location->service, request,
+                                           parameters.wildcard_suffix());
+        });
 }
 
 } // namespace

@@ -38,7 +38,8 @@ make_filesystem_api_settings(const application::runtime::ServerConfig &server)
     for (const auto &location : server.locations())
     {
         settings.locations.push_back(
-            {location.api_path(), location.root(), location.permissions()});
+            {location.api_path(),
+             application::FilesystemService(location.root(), location.permissions())});
     }
     settings.mime_types = server.mime_types();
     return settings;
