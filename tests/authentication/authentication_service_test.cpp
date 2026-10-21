@@ -16,10 +16,19 @@ namespace
 class TestPasswordVerifier final : public sparenode::authentication::PasswordVerifier
 {
   public:
+    explicit TestPasswordVerifier(const bool fail_hash = false) noexcept : fail_hash_(fail_hash)
+    {
+    }
+
     [[nodiscard]] sparenode::Result<std::string,
                                     sparenode::authentication::PasswordVerifierErrorCode>
     hash(const std::span<const char> password) const override
     {
+        if (fail_hash_)
+        {
+            return sparenode::unexpected(
+                sparenode::authentication::PasswordVerifierErrorCode::hashing_failed);
+        }
         return std::string("test:") + std::string(password.begin(), password.end());
     }
 
@@ -39,6 +48,9 @@ class TestPasswordVerifier final : public sparenode::authentication::PasswordVer
     {
         return encoded_verifier.starts_with("test:");
     }
+
+  private:
+    bool fail_hash_{};
 };
 
 /// @brief Controlled provider used to exercise source-independent authentication behavior.
@@ -83,6 +95,25 @@ class TestCredentialProvider final : public sparenode::authentication::Credentia
 }
 
 } // namespace
+
+TEST_CASE("Authentication service rejects an unavailable verifier", "[authentication][service]")
+{
+    using CreateError = sparenode::authentication::AuthenticationServiceCreateErrorCode;
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+
+    const std::shared_ptr<const sparenode::authentication::PasswordVerifier> missing_verifier;
+    const auto missing =
+        sparenode::authentication::AuthenticationService::create(provider, missing_verifier);
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error() == CreateError::verifier_unavailable);
+
+    const auto failing_verifier = std::make_shared<TestPasswordVerifier>(true);
+    const auto failed =
+        sparenode::authentication::AuthenticationService::create(provider, failing_verifier);
+    REQUIRE_FALSE(failed.has_value());
+    CHECK(failed.error() == CreateError::verifier_unavailable);
+}
 
 TEST_CASE("Authentication service verifies provider records and hides account existence",
           "[authentication][service]")
