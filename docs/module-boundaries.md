@@ -23,8 +23,10 @@ The initial dependency boundaries are:
 | `sparenode_filesystem_application` | Permission enforcement and transport-neutral filesystem use-case orchestration | `sparenode_filesystem`, `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_filesystem_api` | Filesystem route registration, focused HTTP handlers, JSON responses, MIME headers, and public error mapping | `sparenode_api_core`, `sparenode_filesystem_application`, `sparenode_http_core` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
-| `sparenode_core` | Command-line parsing and startup of composed server plans | Configuration lexer, foundation, filesystem, HTTP, logging, network, and storage targets |
-| `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | Authentication adapters, `sparenode_configuration`, transitional `sparenode_core` |
+| `sparenode_command_line` | Startup argument parsing | `sparenode_foundation` |
+| `sparenode_runtime_config` | Header-only immutable runtime settings shared by bootstrap and composition | Filesystem, HTTP, logging, and network targets |
+| `sparenode_application` | Startup and RAII ownership of fully composed server plans | `sparenode_network` |
+| `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | Authentication adapters, `sparenode_configuration`, `sparenode_runtime_config` |
 
 Foundation depends only on the C++ standard library. Logging core must not
 include network headers, and network must not include logging headers. The
@@ -89,6 +91,14 @@ permission check for each use case. Its result types contain no HTTP statuses or
 responses. The filesystem API translates requests into that service contract and
 maps application failures into the existing public HTTP representation.
 
-Module-focused test executables link only the target under test and its declared
-dependencies. This makes an accidental reverse dependency fail during linking
-instead of remaining hidden behind the transitional `sparenode_core` target.
+Module-focused test executables link only the target under test and any dependency
+whose public API the test uses directly. TCP-to-filesystem and authentication
+composition scenarios live in dedicated integration executables, platform
+confinement remains in the filesystem security suite, and generated-version checks
+live in the smoke suite. This makes accidental reverse dependencies fail during
+linking instead of remaining hidden behind a broad aggregate target.
+
+Every production target registers its permitted direct first-party dependencies
+with `SpareNodeArchitecture.cmake`. Configuration fails when a target adds an
+undeclared edge or when registered edges form a cycle. CI also exports CMake's
+Graphviz target graph so architecture changes remain reviewable as an artifact.

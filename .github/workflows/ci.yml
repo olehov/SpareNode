@@ -194,6 +194,46 @@ jobs:
       - name: Validate documentation
         run: cmake --build build/ci-docs --target sparenode_docs
 
+  architecture:
+    name: Architecture graph
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure and validate module boundaries
+        run: >-
+          cmake -S . -B build/ci-architecture
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=OFF
+
+      - name: Generate target dependency graph
+        run: >-
+          cmake --graphviz=build/ci-architecture/sparenode-targets.dot
+          build/ci-architecture
+
+      - name: Verify removed aggregate target
+        shell: bash
+        run: |
+          test -s build/ci-architecture/sparenode-targets.dot
+          if grep -q 'sparenode_core' build/ci-architecture/sparenode-targets.dot; then
+            echo "The removed sparenode_core target is still present in the graph."
+            exit 1
+          fi
+
+      - name: Upload target dependency graph
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sparenode-target-graph
+          path: build/ci-architecture/sparenode-targets.dot
+          if-no-files-found: error
+          retention-days: 7
+
   quality-gate:
     name: Quality gate
     if: ${{ always() }}
@@ -204,6 +244,7 @@ jobs:
       - static-analysis
       - cppcheck
       - documentation
+      - architecture
     runs-on: ubuntu-24.04
 
     steps:
@@ -215,6 +256,7 @@ jobs:
           STATIC_ANALYSIS_RESULT: ${{ needs.static-analysis.result }}
           CPPCHECK_RESULT: ${{ needs.cppcheck.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation.result }}
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
         run: |
           results=(
             "$WINDOWS_RESULT"
@@ -223,6 +265,7 @@ jobs:
             "$STATIC_ANALYSIS_RESULT"
             "$CPPCHECK_RESULT"
             "$DOCUMENTATION_RESULT"
+            "$ARCHITECTURE_RESULT"
           )
 
           for result in "${results[@]}"; do

@@ -13,39 +13,69 @@ FetchContent_MakeAvailable(Catch2)
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
-add_executable(sparenode_tests
+add_executable(sparenode_command_line_tests
     application/command_line_test.cpp
-    application/running_application_test.cpp
-    smoke_test.cpp
 )
 
-target_link_libraries(sparenode_tests PRIVATE
+target_link_libraries(sparenode_command_line_tests PRIVATE
     Catch2::Catch2WithMain
-    sparenode_core
-    sparenode_network_logging
+    sparenode_command_line
+)
+
+target_include_directories(sparenode_command_line_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_command_line_tests)
+sparenode_enable_cppcheck(sparenode_command_line_tests)
+sparenode_enable_static_analysis(sparenode_command_line_tests)
+
+catch_discover_tests(sparenode_command_line_tests PROPERTIES LABELS "unit")
+
+add_executable(sparenode_application_tests
+    application/running_application_test.cpp
+)
+
+target_link_libraries(sparenode_application_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_application
     Threads::Threads
 )
 
 option(SPARENODE_REQUIRE_SYMLINK_TESTS "Fail instead of skipping when symlink privilege is missing" OFF)
-if(SPARENODE_REQUIRE_SYMLINK_TESTS)
-    target_compile_definitions(sparenode_tests PRIVATE SPARENODE_REQUIRE_SYMLINK_TESTS)
-endif()
-
 if(WIN32)
-    # The integration tests call Winsock directly to create their client socket.
-    target_link_libraries(sparenode_tests PRIVATE ws2_32)
+    # The application tests call Winsock directly to create their client socket.
+    target_link_libraries(sparenode_application_tests PRIVATE ws2_32)
 endif()
 
-target_include_directories(sparenode_tests PRIVATE
-    "${PROJECT_BINARY_DIR}/generated"
+target_include_directories(sparenode_application_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-sparenode_enable_compiler_warnings(sparenode_tests)
-sparenode_enable_cppcheck(sparenode_tests)
-sparenode_enable_static_analysis(sparenode_tests)
+sparenode_enable_compiler_warnings(sparenode_application_tests)
+sparenode_enable_cppcheck(sparenode_application_tests)
+sparenode_enable_static_analysis(sparenode_application_tests)
 
-catch_discover_tests(sparenode_tests)
+catch_discover_tests(sparenode_application_tests PROPERTIES LABELS "unit")
+
+add_executable(sparenode_smoke_tests
+    smoke_test.cpp
+)
+
+target_link_libraries(sparenode_smoke_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_foundation
+)
+
+target_include_directories(sparenode_smoke_tests PRIVATE
+    "${PROJECT_BINARY_DIR}/generated"
+)
+
+sparenode_enable_compiler_warnings(sparenode_smoke_tests)
+sparenode_enable_cppcheck(sparenode_smoke_tests)
+sparenode_enable_static_analysis(sparenode_smoke_tests)
+
+catch_discover_tests(sparenode_smoke_tests PROPERTIES LABELS "smoke")
 
 add_executable(sparenode_authentication_core_tests
     authentication/authentication_service_test.cpp
@@ -190,20 +220,18 @@ sparenode_enable_static_analysis(sparenode_filesystem_api_tests)
 catch_discover_tests(sparenode_filesystem_api_tests)
 
 add_executable(sparenode_http_transport_tests
-    http/api/filesystem_api_transport_test.cpp
+    http/request/http_body_decoder_test.cpp
+    http/request/request_target_test.cpp
+    http/response/http_response_test.cpp
     http/transport/http_connection_handler_test.cpp
     http/transport/http_transport_policy_test.cpp
     http/transport/request_body_ingestor_test.cpp
     http/transport/request_deadlines_test.cpp
-    http/request/http_body_decoder_test.cpp
-    http/request/request_target_test.cpp
-    http/response/http_response_test.cpp
 )
 
 target_link_libraries(sparenode_http_transport_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_http_transport
-    sparenode_filesystem_api
     sparenode_network_logging
     Threads::Threads
 )
@@ -221,6 +249,33 @@ sparenode_enable_cppcheck(sparenode_http_transport_tests)
 sparenode_enable_static_analysis(sparenode_http_transport_tests)
 
 catch_discover_tests(sparenode_http_transport_tests)
+
+add_executable(sparenode_filesystem_transport_integration_tests
+    http/api/filesystem_api_transport_test.cpp
+)
+
+target_link_libraries(sparenode_filesystem_transport_integration_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_filesystem_api
+    sparenode_http_transport
+    Threads::Threads
+)
+
+target_include_directories(sparenode_filesystem_transport_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_filesystem_transport_integration_tests PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_transport_integration_tests)
+sparenode_enable_cppcheck(sparenode_filesystem_transport_integration_tests)
+sparenode_enable_static_analysis(sparenode_filesystem_transport_integration_tests)
+
+catch_discover_tests(sparenode_filesystem_transport_integration_tests
+    PROPERTIES LABELS "integration"
+)
 
 add_executable(sparenode_configuration_tests
     configuration/config_lexer_test.cpp
@@ -246,7 +301,6 @@ catch_discover_tests(sparenode_configuration_tests)
 
 add_executable(sparenode_bootstrap_tests
     bootstrap/mime_types_loader_test.cpp
-    bootstrap/runtime_bootstrap_test.cpp
 )
 
 target_link_libraries(sparenode_bootstrap_tests PRIVATE
@@ -263,6 +317,27 @@ sparenode_enable_cppcheck(sparenode_bootstrap_tests)
 sparenode_enable_static_analysis(sparenode_bootstrap_tests)
 
 catch_discover_tests(sparenode_bootstrap_tests)
+
+add_executable(sparenode_bootstrap_integration_tests
+    bootstrap/runtime_bootstrap_test.cpp
+)
+
+target_link_libraries(sparenode_bootstrap_integration_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_file
+    sparenode_authentication_sodium
+    sparenode_bootstrap
+)
+
+target_include_directories(sparenode_bootstrap_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_bootstrap_integration_tests)
+sparenode_enable_cppcheck(sparenode_bootstrap_integration_tests)
+sparenode_enable_static_analysis(sparenode_bootstrap_integration_tests)
+
+catch_discover_tests(sparenode_bootstrap_integration_tests PROPERTIES LABELS "integration")
 
 add_executable(sparenode_foundation_tests
     foundation/result_test.cpp
