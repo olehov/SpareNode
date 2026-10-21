@@ -209,6 +209,7 @@ sparenode_enable_static_analysis(sparenode_http_core)
 
 add_library(sparenode_api_core STATIC
     src/http/api/api_router_builder.cpp
+    src/http/api/protected_route_policy.cpp
 )
 
 target_link_libraries(sparenode_api_core PUBLIC
@@ -278,13 +279,59 @@ sparenode_enable_compiler_warnings(sparenode_http_transport)
 sparenode_enable_cppcheck(sparenode_http_transport)
 sparenode_enable_static_analysis(sparenode_http_transport)
 
-add_library(sparenode_core STATIC
+add_library(sparenode_authentication_core STATIC
     src/authentication/authentication_service.cpp
+    src/authentication/sensitive_password.cpp
+)
+
+target_link_libraries(sparenode_authentication_core PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_core)
+sparenode_enable_cppcheck(sparenode_authentication_core)
+sparenode_enable_static_analysis(sparenode_authentication_core)
+
+add_library(sparenode_authentication_sodium STATIC
+    src/authentication/sodium_password_verifier.cpp
+)
+
+target_link_libraries(sparenode_authentication_sodium PUBLIC
+    sparenode_authentication_core
+)
+
+target_link_libraries(sparenode_authentication_sodium PRIVATE
+    sodium
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_sodium)
+sparenode_enable_cppcheck(sparenode_authentication_sodium)
+sparenode_enable_static_analysis(sparenode_authentication_sodium)
+
+add_library(sparenode_authentication_file STATIC
     src/authentication/credential_file_provisioner.cpp
     src/authentication/file_authentication.cpp
     src/authentication/file_credential_provider.cpp
-    src/authentication/password_verifier.cpp
-    src/authentication/sensitive_password.cpp
+)
+
+target_link_libraries(sparenode_authentication_file PUBLIC
+    sparenode_authentication_core
+    sparenode_filesystem
+)
+
+target_link_libraries(sparenode_authentication_file PRIVATE
+    sparenode_configuration
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_authentication_file PRIVATE advapi32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_authentication_file)
+sparenode_enable_cppcheck(sparenode_authentication_file)
+sparenode_enable_static_analysis(sparenode_authentication_file)
+
+add_library(sparenode_core STATIC
     src/application/command_line.cpp
     src/application/running_application.cpp
 )
@@ -298,7 +345,6 @@ target_include_directories(sparenode_core PUBLIC
 )
 
 target_link_libraries(sparenode_core PRIVATE
-    sodium
     sparenode_configuration
     Threads::Threads
 )
@@ -313,10 +359,6 @@ target_link_libraries(sparenode_core PUBLIC
     sparenode_storage
 )
 
-if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE advapi32)
-endif()
-
 sparenode_enable_compiler_warnings(sparenode_core)
 sparenode_enable_cppcheck(sparenode_core)
 sparenode_enable_static_analysis(sparenode_core)
@@ -327,8 +369,14 @@ add_library(sparenode_bootstrap STATIC
 )
 
 target_link_libraries(sparenode_bootstrap PUBLIC
+    sparenode_authentication_core
+    sparenode_authentication_file
     sparenode_configuration
     sparenode_core
+)
+
+target_link_libraries(sparenode_bootstrap PRIVATE
+    sparenode_authentication_sodium
 )
 
 sparenode_enable_compiler_warnings(sparenode_bootstrap)
@@ -364,7 +412,8 @@ set_target_properties(sparenode_credentials PROPERTIES
 )
 
 target_link_libraries(sparenode_credentials PRIVATE
-    sparenode_core
+    sparenode_authentication_file
+    sparenode_authentication_sodium
 )
 
 sparenode_enable_compiler_warnings(sparenode_credentials)

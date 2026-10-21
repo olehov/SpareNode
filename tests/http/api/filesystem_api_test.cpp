@@ -590,22 +590,24 @@ TEST_CASE("Filesystem API rejects settings without a location", "[http][filesyst
 TEST_CASE("Filesystem API registers every operation as protected", "[http][filesystem-api][policy]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-files-api-policy");
-    sparenode::http::api::ProtectedRouteDecorator deny = [](sparenode::http::HttpRouteHandler)
+    sparenode::http::api::ProtectedRoutePolicies policies;
+    policies.authorization = [](sparenode::http::api::ApiRequestHandler)
     {
-        return sparenode::http::HttpRouteHandler{
-            [](const sparenode::http::HttpRequestView &,
-               const sparenode::http::HttpRouteParameters &)
-                -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+        return sparenode::http::api::ApiRequestHandler(
+            [](sparenode::http::api::ApiRequestContext &)
             {
                 auto response = sparenode::http::HttpResponse::create(
                     sparenode::http::HttpStatusCode::forbidden, "Forbidden", {},
                     std::vector<std::byte>{});
                 REQUIRE(response);
-                return std::move(response).value();
-            }};
+                return sparenode::Result<sparenode::http::HttpResponse,
+                                         sparenode::http::HttpRouteError>(
+                    std::move(response).value());
+            });
     };
     auto router = sparenode::http::make_filesystem_api_router(
-        make_server(directory, true, {}, true, true), std::move(deny));
+        make_server(directory, true, {}, true, true),
+        sparenode::http::api::make_protected_route_decorator(std::move(policies)));
     REQUIRE(router);
 
     for (const std::string_view target : {"/api/Documents", "/api/Documents/item"})

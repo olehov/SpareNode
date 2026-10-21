@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "sparenode/authentication/file_credential_provider.hpp"
-#include "sparenode/authentication/password_verifier.hpp"
 
 namespace sparenode::authentication
 {
@@ -114,9 +113,9 @@ map_provisioning_error(const CredentialProvisioningErrorCode code) noexcept
 
 Result<AuthenticationService, FileAuthenticationErrorCode>
 create_file_authentication_service(const std::filesystem::path &credential_path,
-                                   const std::span<const filesystem::SharedRoot> shared_roots)
+                                   const std::span<const filesystem::SharedRoot> shared_roots,
+                                   std::shared_ptr<const PasswordVerifier> verifier)
 {
-    auto verifier = PasswordVerifier::create();
     if (!verifier)
     {
         return unexpected(FileAuthenticationErrorCode::cryptography_unavailable);
@@ -137,7 +136,7 @@ create_file_authentication_service(const std::filesystem::path &credential_path,
         return unexpected(FileAuthenticationErrorCode::credential_is_shared);
     }
 
-    auto provider = FileCredentialProvider::load(resolved_path.value(), verifier.value());
+    auto provider = FileCredentialProvider::load(resolved_path.value(), *verifier);
     if (!provider)
     {
         return unexpected(map_provisioning_error(provider.error()));
@@ -146,7 +145,8 @@ create_file_authentication_service(const std::filesystem::path &credential_path,
     try
     {
         auto provider_owner = std::make_shared<FileCredentialProvider>(std::move(provider).value());
-        auto service = AuthenticationService::create(std::move(provider_owner), verifier.value());
+        auto service =
+            AuthenticationService::create(std::move(provider_owner), std::move(verifier));
         if (!service)
         {
             return unexpected(FileAuthenticationErrorCode::resource_exhausted);

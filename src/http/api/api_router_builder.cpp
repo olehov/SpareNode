@@ -12,7 +12,14 @@ ApiRouterBuilder::ApiRouterBuilder(ProtectedRouteDecorator protected_route_decor
 
 Result<void, HttpRouteRegistrationError> ApiRouterBuilder::register_public(PublicApiRoute route)
 {
-    return router_.register_route(route.method, std::move(route.pattern), std::move(route.handler));
+    ApiRouteDescriptor descriptor{route.method, route.pattern};
+    auto registered =
+        router_.register_route(route.method, std::move(route.pattern), std::move(route.handler));
+    if (registered)
+    {
+        public_routes_.push_back(std::move(descriptor));
+    }
+    return registered;
 }
 
 Result<void, HttpRouteRegistrationError>
@@ -22,12 +29,31 @@ ApiRouterBuilder::register_protected(ProtectedApiRoute route)
     {
         route.handler = protected_route_decorator_(std::move(route.handler));
     }
-    return router_.register_route(route.method, std::move(route.pattern), std::move(route.handler));
+    ApiRouteDescriptor descriptor{route.method, route.pattern};
+    auto registered =
+        router_.register_route(route.method, std::move(route.pattern), std::move(route.handler));
+    if (registered)
+    {
+        protected_routes_.push_back(std::move(descriptor));
+    }
+    return registered;
+}
+
+const std::vector<ApiRouteDescriptor> &ApiRouterBuilder::public_routes() const noexcept
+{
+    return public_routes_;
+}
+
+const std::vector<ApiRouteDescriptor> &ApiRouterBuilder::protected_routes() const noexcept
+{
+    return protected_routes_;
 }
 
 HttpRouter ApiRouterBuilder::build() && noexcept
 {
     protected_route_decorator_ = nullptr;
+    public_routes_.clear();
+    protected_routes_.clear();
     return std::move(router_);
 }
 

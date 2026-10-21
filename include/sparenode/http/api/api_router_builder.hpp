@@ -2,8 +2,10 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "sparenode/foundation/result.hpp"
+#include "sparenode/http/api/protected_route_policy.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 
 namespace sparenode::http::api
@@ -25,8 +27,12 @@ struct ProtectedApiRoute
     HttpRouteHandler handler; ///< Operation invoked after policy enforcement.
 };
 
-/// @brief Decorates a protected handler with authentication or another access policy.
-using ProtectedRouteDecorator = std::move_only_function<HttpRouteHandler(HttpRouteHandler)>;
+/// @brief Describes one registered route without exposing its handler.
+struct ApiRouteDescriptor
+{
+    HttpMethod method{}; ///< HTTP method matched by the route.
+    std::string pattern; ///< Exact or wildcard origin path.
+};
 
 /// @brief Composes public and protected endpoints into one transport-neutral router.
 class ApiRouterBuilder final
@@ -47,6 +53,14 @@ class ApiRouterBuilder final
     [[nodiscard]] Result<void, HttpRouteRegistrationError>
     register_protected(ProtectedApiRoute route);
 
+    /// @brief Enumerates routes that explicitly bypass the protected-policy pipeline.
+    /// @return Public route descriptors in registration order.
+    [[nodiscard]] const std::vector<ApiRouteDescriptor> &public_routes() const noexcept;
+
+    /// @brief Enumerates routes that explicitly use the protected-policy pipeline.
+    /// @return Protected route descriptors in registration order.
+    [[nodiscard]] const std::vector<ApiRouteDescriptor> &protected_routes() const noexcept;
+
     /// @brief Transfers the composed router to its runtime owner.
     /// @return Router containing every successfully registered endpoint.
     [[nodiscard]] HttpRouter build() && noexcept;
@@ -54,6 +68,8 @@ class ApiRouterBuilder final
   private:
     HttpRouter router_;                                 ///< Routes composed so far.
     ProtectedRouteDecorator protected_route_decorator_; ///< Optional access-policy boundary.
+    std::vector<ApiRouteDescriptor> public_routes_;     ///< Explicit public endpoint catalog.
+    std::vector<ApiRouteDescriptor> protected_routes_;  ///< Explicit protected endpoint catalog.
 };
 
 } // namespace sparenode::http::api

@@ -17,11 +17,14 @@ The initial dependency boundaries are:
 | `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
 | `sparenode_http_core` | HTTP request and response models, parsing, MIME metadata, and routing | `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_http_core` |
+| `sparenode_authentication_core` | Principals, credential and password-verification ports, sensitive input, and authentication use cases | `sparenode_foundation` |
+| `sparenode_authentication_sodium` | Libsodium Argon2id implementation of the password-verification port | `sparenode_authentication_core` |
+| `sparenode_authentication_file` | Bounded credential parsing, secure file loading, placement validation, and provisioning | `sparenode_authentication_core`, `sparenode_configuration`, `sparenode_filesystem` |
 | `sparenode_filesystem_application` | Permission enforcement and transport-neutral filesystem use-case orchestration | `sparenode_filesystem`, `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_filesystem_api` | Filesystem route registration, focused HTTP handlers, JSON responses, MIME headers, and public error mapping | `sparenode_api_core`, `sparenode_filesystem_application`, `sparenode_http_core` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
-| `sparenode_core` | Authentication, command-line parsing, and startup of composed server plans | Configuration lexer, foundation, filesystem, HTTP, logging, network, and storage targets |
-| `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | `sparenode_configuration`, transitional `sparenode_core` |
+| `sparenode_core` | Command-line parsing and startup of composed server plans | Configuration lexer, foundation, filesystem, HTTP, logging, network, and storage targets |
+| `sparenode_bootstrap` | External path resolution and concrete runtime dependency construction | Authentication adapters, `sparenode_configuration`, transitional `sparenode_core` |
 
 Foundation depends only on the C++ standard library. Logging core must not
 include network headers, and network must not include logging headers. The
@@ -44,14 +47,24 @@ concrete router. The executable composition root adapts `HttpRouter` to that
 callback, so another application implementation can reuse the transport without
 changing its connection code.
 
-API core distinguishes public and protected routes when they are registered.
-Its protected-route decorator is the composition point for authentication and
-other access policy. Filesystem API registers all filesystem operations through
-that protected contract and accepts only filesystem locations and MIME mappings;
+API core distinguishes public and protected routes when they are registered and
+retains enumerable descriptors for both groups during composition. Its protected
+route decorator evaluates transport, session authentication, Origin/CSRF,
+authorization, throttling, and resource-coordination policies in that fixed order
+before invoking an operation handler. Filesystem API registers all filesystem
+operations through that protected contract and accepts only filesystem locations and MIME mappings;
 it does not receive the listener, logging, timeout, or transport settings held by
 `ServerConfig`. Each filesystem operation has its own handler translation unit,
 so route composition can add or remove one operation without changing unrelated
 handlers. HTTP core remains independent of filesystem headers and libraries.
+
+Authentication core depends only on foundation contracts. It owns abstract
+credential-provider and password-verification ports, so it contains no HTTP,
+configuration, file-access, or libsodium headers. The sodium and file adapters
+implement those ports in separate targets. Bootstrap selects both concrete
+adapters, verifies that the credential file is outside every shared root, and
+hands only the source-independent `AuthenticationService` to runtime composition.
+The credential provisioning executable selects the same adapters explicitly.
 
 `RunningApplication` receives `ServerRuntimePlan` objects and has no configuration
 dependency. Each plan already owns its endpoint, handler, admission limits, and

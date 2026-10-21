@@ -4,8 +4,8 @@
 #include <string>
 #include <string_view>
 
-#include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 
 namespace
 {
@@ -21,7 +21,7 @@ namespace
 TEST_CASE("Password verifier creates and checks self-contained Argon2id records",
           "[authentication][password]")
 {
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
 
@@ -45,7 +45,7 @@ TEST_CASE("Password verifier creates and checks self-contained Argon2id records"
 TEST_CASE("Password verifier rejects unsafe provisioning material", "[authentication][password]")
 {
     using Error = sparenode::authentication::PasswordVerifierErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
 

@@ -1,7 +1,6 @@
 #include "sparenode/authentication/sensitive_password.hpp"
 
-#include <sodium.h>
-
+#include <cstddef>
 #include <utility>
 
 namespace sparenode::authentication
@@ -11,7 +10,11 @@ void erase_sensitive_bytes(const std::span<char> bytes) noexcept
 {
     if (!bytes.empty())
     {
-        sodium_memzero(bytes.data(), bytes.size());
+        volatile char *current = bytes.data();
+        for (std::size_t index = 0; index < bytes.size(); ++index)
+        {
+            current[index] = 0;
+        }
     }
 }
 
@@ -56,11 +59,13 @@ bool SensitivePassword::equals(const SensitivePassword &other) const noexcept
     {
         return false;
     }
-    if (bytes_.empty())
+    unsigned char difference = 0;
+    for (std::size_t index = 0; index < bytes_.size(); ++index)
     {
-        return true;
+        difference |= static_cast<unsigned char>(bytes_[index]) ^
+                      static_cast<unsigned char>(other.bytes_[index]);
     }
-    return sodium_memcmp(bytes_.data(), other.bytes_.data(), bytes_.size()) == 0;
+    return difference == 0;
 }
 
 void SensitivePassword::erase() noexcept
