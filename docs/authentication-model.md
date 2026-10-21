@@ -106,6 +106,12 @@ application resource handler. Once a protected route is selected, authentication
 path decoding, location permission checks, filesystem inspection, request-body persistence, or
 mutation.
 
+Protected API policies execute in one fixed order: transport requirements, session
+authentication, browser Origin/CSRF validation, authorization, throttling, and resource
+coordination. A policy error or response stops the pipeline, and only a fully accepted request
+reaches its operation handler. The concrete behavior of these stages remains owned by their
+Sprint 5 feature issues.
+
 Requests to a selected protected route without a valid session return `401 Unauthorized` with a
 stable `{"error":"authentication_required"}` body and
 `WWW-Authenticate: SpareNodeSession realm="SpareNode"`. The private challenge name describes the
