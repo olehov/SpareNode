@@ -14,10 +14,6 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
 add_executable(sparenode_tests
-    authentication/authentication_service_test.cpp
-    authentication/credential_file_provisioner_test.cpp
-    authentication/file_credential_provider_test.cpp
-    authentication/password_verifier_test.cpp
     application/command_line_test.cpp
     application/running_application_test.cpp
     smoke_test.cpp
@@ -50,6 +46,71 @@ sparenode_enable_cppcheck(sparenode_tests)
 sparenode_enable_static_analysis(sparenode_tests)
 
 catch_discover_tests(sparenode_tests)
+
+add_executable(sparenode_authentication_core_tests
+    authentication/authentication_service_test.cpp
+)
+
+target_link_libraries(sparenode_authentication_core_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_core
+)
+
+target_include_directories(sparenode_authentication_core_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_core_tests)
+sparenode_enable_cppcheck(sparenode_authentication_core_tests)
+sparenode_enable_static_analysis(sparenode_authentication_core_tests)
+
+catch_discover_tests(sparenode_authentication_core_tests)
+
+add_executable(sparenode_authentication_sodium_tests
+    authentication/password_verifier_test.cpp
+)
+
+target_link_libraries(sparenode_authentication_sodium_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_sodium
+)
+
+target_include_directories(sparenode_authentication_sodium_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_sodium_tests)
+sparenode_enable_cppcheck(sparenode_authentication_sodium_tests)
+sparenode_enable_static_analysis(sparenode_authentication_sodium_tests)
+
+catch_discover_tests(sparenode_authentication_sodium_tests)
+
+add_executable(sparenode_authentication_file_tests
+    authentication/credential_file_provisioner_test.cpp
+    authentication/file_credential_provider_test.cpp
+)
+
+target_link_libraries(sparenode_authentication_file_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_file
+    sparenode_authentication_sodium
+)
+
+target_include_directories(sparenode_authentication_file_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(SPARENODE_REQUIRE_SYMLINK_TESTS)
+    target_compile_definitions(sparenode_authentication_file_tests PRIVATE
+        SPARENODE_REQUIRE_SYMLINK_TESTS
+    )
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_authentication_file_tests)
+sparenode_enable_cppcheck(sparenode_authentication_file_tests)
+sparenode_enable_static_analysis(sparenode_authentication_file_tests)
+
+catch_discover_tests(sparenode_authentication_file_tests)
 
 add_executable(sparenode_http_core_tests
     http/request/http_request_parser_test.cpp

@@ -39,10 +39,11 @@ class AuthenticationService final
   public:
     /// @brief Creates a service and one process-local dummy verification record.
     /// @param[in] provider Abstract credential source retained for service lifetime.
-    /// @param[in] verifier Initialized vetted password verifier.
+    /// @param[in] verifier Abstract verifier retained for service lifetime.
     /// @return Ready authentication service, or a fail-closed construction error.
     [[nodiscard]] static Result<AuthenticationService, AuthenticationServiceCreateErrorCode>
-    create(std::shared_ptr<const CredentialProvider> provider, PasswordVerifier verifier);
+    create(std::shared_ptr<const CredentialProvider> provider,
+           std::shared_ptr<const PasswordVerifier> verifier);
 
     /// @brief Verifies one login attempt and erases its plaintext password before returning.
     /// @param[in] login Untrusted bounded login identifier.
@@ -54,13 +55,14 @@ class AuthenticationService final
   private:
     /// @brief Stores fully initialized service dependencies and dummy verifier.
     /// @param[in,out] provider Abstract credential source transferred into the service.
-    /// @param[in] verifier Initialized password verifier copied into the service.
+    /// @param[in,out] verifier Abstract verifier transferred into the service.
     /// @param[in,out] dummy_verifier Encoded dummy record transferred into the service.
     AuthenticationService(std::shared_ptr<const CredentialProvider> provider,
-                          PasswordVerifier verifier, std::string dummy_verifier) noexcept;
+                          std::shared_ptr<const PasswordVerifier> verifier,
+                          std::string dummy_verifier) noexcept;
 
     std::shared_ptr<const CredentialProvider> provider_; ///< Source-independent credential lookup.
-    PasswordVerifier verifier_;                          ///< Vetted Argon2id operation boundary.
+    std::shared_ptr<const PasswordVerifier> verifier_;   ///< Cryptography-independent port.
     std::string dummy_verifier_; ///< Valid verifier used for unknown login timing work.
 };
 

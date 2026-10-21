@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <span>
 
 #include "sparenode/authentication/authentication_service.hpp"
@@ -30,10 +31,12 @@ enum class FileAuthenticationErrorCode : std::uint8_t
 /// @brief Builds the complete MVP authentication stack from a separate credential file.
 /// @param[in] credential_path File selected by validated runtime configuration.
 /// @param[in] shared_roots Canonical filesystem roots that must not contain the credential file.
+/// @param[in] verifier Concrete cryptography selected by bootstrap through the core port.
 /// @return Ready source-independent service, or a non-sensitive startup failure.
 [[nodiscard]] Result<AuthenticationService, FileAuthenticationErrorCode>
 create_file_authentication_service(const std::filesystem::path &credential_path,
-                                   std::span<const filesystem::SharedRoot> shared_roots);
+                                   std::span<const filesystem::SharedRoot> shared_roots,
+                                   std::shared_ptr<const PasswordVerifier> verifier);
 
 /// @brief Returns a non-sensitive startup diagnostic for one file-auth failure.
 /// @param[in] code Failure category to describe.

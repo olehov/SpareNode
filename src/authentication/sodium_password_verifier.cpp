@@ -1,4 +1,4 @@
-#include "sparenode/authentication/password_verifier.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 
 #include <sodium.h>
 
@@ -38,17 +38,17 @@ constexpr std::string_view supported_password_profile = "$argon2id$v=19$m=65536,
 
 } // namespace
 
-Result<PasswordVerifier, PasswordVerifierErrorCode> PasswordVerifier::create() noexcept
+Result<SodiumPasswordVerifier, PasswordVerifierErrorCode> SodiumPasswordVerifier::create() noexcept
 {
     if (sodium_init() < 0)
     {
         return unexpected(PasswordVerifierErrorCode::initialization_failed);
     }
-    return PasswordVerifier{};
+    return SodiumPasswordVerifier{};
 }
 
 Result<std::string, PasswordVerifierErrorCode>
-PasswordVerifier::hash(const std::span<const char> password) const
+SodiumPasswordVerifier::hash(const std::span<const char> password) const
 {
     if (password.empty())
     {
@@ -78,8 +78,8 @@ PasswordVerifier::hash(const std::span<const char> password) const
 }
 
 Result<bool, PasswordVerifierErrorCode>
-PasswordVerifier::verify(const std::span<const char> password,
-                         const std::string_view encoded_verifier) const noexcept
+SodiumPasswordVerifier::verify(const std::span<const char> password,
+                               const std::string_view encoded_verifier) const noexcept
 {
     if (password.size() > maximum_password_bytes)
     {
@@ -96,7 +96,7 @@ PasswordVerifier::verify(const std::span<const char> password,
                                     static_cast<unsigned long long>(password.size())) == 0;
 }
 
-bool PasswordVerifier::is_usable(const std::string_view encoded_verifier) noexcept
+bool SodiumPasswordVerifier::is_usable(const std::string_view encoded_verifier) const noexcept
 {
     if (!encoded_verifier.starts_with(supported_password_profile))
     {

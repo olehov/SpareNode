@@ -12,6 +12,35 @@
 namespace
 {
 
+/// @brief Deterministic cryptography-free verifier used to isolate authentication core tests.
+class TestPasswordVerifier final : public sparenode::authentication::PasswordVerifier
+{
+  public:
+    [[nodiscard]] sparenode::Result<std::string,
+                                    sparenode::authentication::PasswordVerifierErrorCode>
+    hash(const std::span<const char> password) const override
+    {
+        return std::string("test:") + std::string(password.begin(), password.end());
+    }
+
+    [[nodiscard]] sparenode::Result<bool, sparenode::authentication::PasswordVerifierErrorCode>
+    verify(const std::span<const char> password,
+           const std::string_view encoded_verifier) const noexcept override
+    {
+        if (!is_usable(encoded_verifier))
+        {
+            return sparenode::unexpected(
+                sparenode::authentication::PasswordVerifierErrorCode::invalid_verifier);
+        }
+        return encoded_verifier.substr(5) == std::string_view(password.data(), password.size());
+    }
+
+    [[nodiscard]] bool is_usable(const std::string_view encoded_verifier) const noexcept override
+    {
+        return encoded_verifier.starts_with("test:");
+    }
+};
+
 /// @brief Controlled provider used to exercise source-independent authentication behavior.
 class TestCredentialProvider final : public sparenode::authentication::CredentialProvider
 {
@@ -59,10 +88,8 @@ TEST_CASE("Authentication service verifies provider records and hides account ex
           "[authentication][service]")
 {
     using Error = sparenode::authentication::AuthenticationErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
-    REQUIRE(verifier_result.has_value());
-    const auto verifier = verifier_result.value();
-    auto encoded = verifier.hash(password_bytes("owner password"));
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+    auto encoded = verifier->hash(password_bytes("owner password"));
     REQUIRE(encoded.has_value());
     const auto provider = std::make_shared<TestCredentialProvider>(
         sparenode::authentication::CredentialRecord{"owner", "admin", std::move(encoded).value()});
@@ -98,9 +125,7 @@ TEST_CASE("Authentication service fails closed on malformed provider material",
           "[authentication][service]")
 {
     using Error = sparenode::authentication::AuthenticationErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
-    REQUIRE(verifier_result.has_value());
-    const auto verifier = verifier_result.value();
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
     const auto provider = std::make_shared<TestCredentialProvider>(
         sparenode::authentication::CredentialRecord{"owner", "admin", "$argon2id$invalid"});
     auto service_result =

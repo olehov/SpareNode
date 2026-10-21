@@ -7,8 +7,8 @@
 #include <string_view>
 
 #include "sparenode/authentication/credential_file_provisioner.hpp"
-#include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 #include "sparenode/bootstrap/runtime_bootstrap.hpp"
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
@@ -32,7 +32,7 @@ namespace
 
 void provision_credentials(const std::filesystem::path &path)
 {
-    auto verifier = sparenode::authentication::PasswordVerifier::create();
+    auto verifier = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier.has_value());
     auto provisioned = sparenode::authentication::CredentialFileProvisioner::provision(
         path, "owner", sparenode::authentication::SensitivePassword("bootstrap password"),

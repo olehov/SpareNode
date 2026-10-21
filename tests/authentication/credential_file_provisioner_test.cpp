@@ -6,15 +6,15 @@
 
 #include "sparenode/authentication/credential_file_provisioner.hpp"
 #include "sparenode/authentication/file_credential_provider.hpp"
-#include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
 TEST_CASE("Credential file provisioner creates a loadable persistent owner",
           "[authentication][credentials][provisioning]")
 {
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
 
@@ -45,7 +45,7 @@ TEST_CASE("Credential file provisioner refuses unsafe input and replacement",
           "[authentication][credentials][provisioning]")
 {
     using Error = sparenode::authentication::CredentialFileProvisioningErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
 

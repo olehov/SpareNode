@@ -1,13 +1,16 @@
 #include "sparenode/bootstrap/runtime_bootstrap.hpp"
 
 #include <chrono>
+#include <memory>
 #include <new>
+#include <span>
 #include <sstream>
 #include <utility>
 #include <vector>
 
 #include "sparenode/application/runtime/location_config.hpp"
 #include "sparenode/application/runtime/server_config.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/http/transport/http_transport_policy.hpp"
@@ -147,6 +150,31 @@ struct CredentialSource
             configured.location};
 }
 
+/// @brief Selects the file credential and libsodium adapters behind authentication core ports.
+[[nodiscard]] Result<authentication::AuthenticationService,
+                     authentication::FileAuthenticationErrorCode>
+build_authentication(const std::filesystem::path &credentials_path,
+                     std::span<const filesystem::SharedRoot> shared_roots)
+{
+    auto verifier = authentication::SodiumPasswordVerifier::create();
+    if (!verifier)
+    {
+        return unexpected(authentication::FileAuthenticationErrorCode::cryptography_unavailable);
+    }
+
+    try
+    {
+        auto verifier_owner =
+            std::make_shared<authentication::SodiumPasswordVerifier>(std::move(verifier).value());
+        return authentication::create_file_authentication_service(credentials_path, shared_roots,
+                                                                  std::move(verifier_owner));
+    }
+    catch (const std::bad_alloc &)
+    {
+        return unexpected(authentication::FileAuthenticationErrorCode::resource_exhausted);
+    }
+}
+
 /// @brief Appends a path while escaping bytes that can alter terminal output.
 void append_escaped_path(std::ostringstream &output, const std::filesystem::path &path)
 {
@@ -237,8 +265,7 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
                 std::move(transport_policy), credentials_path);
         }
 
-        auto authentication = authentication::create_file_authentication_service(
-            credentials_path, authentication_roots);
+        auto authentication = build_authentication(credentials_path, authentication_roots);
         if (!authentication)
         {
             return unexpected(
