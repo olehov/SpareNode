@@ -209,6 +209,7 @@ sparenode_enable_static_analysis(sparenode_http_core)
 
 add_library(sparenode_api_core STATIC
     src/http/api/api_router_builder.cpp
+    src/http/api/protected_route_policy.cpp
 )
 
 target_link_libraries(sparenode_api_core PUBLIC
