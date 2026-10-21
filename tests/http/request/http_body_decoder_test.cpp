@@ -2,7 +2,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "sparenode/http/request/http_body_decoder.hpp"
-#include "sparenode/http/session/detail/buffered_request.hpp"
+#include "sparenode/http/transport/detail/buffered_request.hpp"
 #include "support/optional.hpp"
 #include <array>
 #include <fstream>
@@ -240,7 +240,7 @@ TEST_CASE("Buffered request resolves body policy only after complete headers",
     const auto body_options = [&]
     {
         ++body_policy_calls;
-        return sparenode::filesystem::TemporaryFileIoOptions{};
+        return sparenode::storage::TemporaryFileIoOptions{};
     };
     REQUIRE(request
                 .feed_with_body_options(

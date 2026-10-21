@@ -116,8 +116,13 @@ TEST_CASE("Configuration validator accepts version one defaults and independent 
 
     REQUIRE(result.has_value());
     CHECK(result->parsed().server.locations.front().api_path == "/api/Documents");
-    REQUIRE(result->location_roots().size() == 1);
-    CHECK(std::filesystem::equivalent(result->location_roots().front().path(), directory.path()));
+    REQUIRE(result->settings().servers.size() == 1);
+    REQUIRE(result->settings().servers.front().locations.size() == 1);
+    const auto &location = result->settings().servers.front().locations.front();
+    CHECK(location.root.value == directory.path().generic_string());
+    CHECK_FALSE(location.allow_read);
+    CHECK_FALSE(location.allow_write);
+    CHECK(location.allow_delete);
 }
 
 TEST_CASE("Configuration validator requires a nonempty singleton MIME file path",
@@ -243,6 +248,27 @@ TEST_CASE("Configuration validator enforces authentication transport boundaries"
         CHECK(ipv6.has_value());
     }
 
+    SECTION("numeric IPv6 boundaries are accepted")
+    {
+        const std::string address = GENERATE("::", "::1", "1::", "::ffff:127.0.0.1");
+        auto result = sparenode::configuration::ConfigValidator::validate(parse_configuration(
+            make_configuration(directory.path(), "bind \"" + address +
+                                                     "\";\n"
+                                                     "transport_mode \"trusted_lan_http\";\n")));
+        CHECK(result.has_value());
+    }
+
+    SECTION("malformed numeric address boundaries are rejected")
+    {
+        const std::string address =
+            GENERATE(":::", "1.2.3.4::", "1:1.2.3.4::", "1:2:3:4:5:6:7:8:9", "01.2.3.4");
+        const auto errors = require_validation_errors(
+            make_configuration(directory.path(), "bind \"" + address +
+                                                     "\";\n"
+                                                     "transport_mode \"trusted_lan_http\";\n"));
+        CHECK(contains_error(errors, ConfigValidationErrorCode::invalid_bind_address));
+    }
+
     SECTION("loopback mode rejects network-facing listeners")
     {
         const auto errors =
@@ -274,6 +300,13 @@ TEST_CASE("Configuration validator enforces authentication transport boundaries"
             make_configuration(directory.path(), "transport_mode \"trusted_proxy_https\";\n"
                                                  "trusted_proxy \"proxy.internal\";\n"));
         CHECK(contains_error(invalid, ConfigValidationErrorCode::invalid_trusted_proxy));
+
+        const auto misplaced_ipv4_tail = require_validation_errors(
+            make_configuration(directory.path(), "bind \"192.0.2.10\";\n"
+                                                 "transport_mode \"trusted_proxy_https\";\n"
+                                                 "trusted_proxy \"1.2.3.4::\";\n"));
+        CHECK(
+            contains_error(misplaced_ipv4_tail, ConfigValidationErrorCode::invalid_trusted_proxy));
 
         const auto wildcard = require_validation_errors(make_configuration(
             directory.path(), "bind \"::\";\ntransport_mode \"trusted_proxy_https\";\n"
@@ -350,8 +383,7 @@ TEST_CASE("Configuration validator requires locations and rejects ambiguous path
     }
 }
 
-TEST_CASE("Configuration validator reports location directive and filesystem failures",
-          "[configuration][validator]")
+TEST_CASE("Configuration validator reports location syntax failures", "[configuration][validator]")
 {
     const sparenode::test::TemporaryDirectory directory("sparenode-config-validator");
 
@@ -383,28 +415,21 @@ TEST_CASE("Configuration validator reports location directive and filesystem fai
         CHECK(contains_error(errors, ConfigValidationErrorCode::duplicate_location_directive));
     }
 
-    SECTION("missing filesystem entry")
+    SECTION("empty filesystem path")
     {
-        const auto errors =
-            require_validation_errors(make_configuration(directory.path() / "missing"));
+        const auto errors = require_validation_errors(make_configuration(""));
         REQUIRE(errors.size() == 1);
-        REQUIRE(errors.front().shared_root_error.has_value());
-        CHECK(sparenode::test::require_optional(errors.front().shared_root_error).code ==
-              sparenode::configuration::SharedRootErrorCode::not_found);
+        CHECK(errors.front().code == ConfigValidationErrorCode::invalid_location_root);
     }
 
-    SECTION("regular file")
+    SECTION("environment checks are deferred to bootstrap")
     {
-        const auto file = directory.path() / "file.txt";
-        std::ofstream output(file);
-        output << "not a directory";
-        output.close();
-
-        const auto errors = require_validation_errors(make_configuration(file));
-        REQUIRE(errors.size() == 1);
-        REQUIRE(errors.front().shared_root_error.has_value());
-        CHECK(sparenode::test::require_optional(errors.front().shared_root_error).code ==
-              sparenode::configuration::SharedRootErrorCode::not_directory);
+        const auto missing = directory.path() / "missing";
+        const auto result = sparenode::configuration::ConfigValidator::validate(
+            parse_configuration(make_configuration(missing)));
+        REQUIRE(result.has_value());
+        CHECK(result->settings().servers.front().locations.front().root.value ==
+              missing.generic_string());
     }
 }
 

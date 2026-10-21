@@ -4,7 +4,7 @@
 
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 #include "sparenode/filesystem/directory_creator.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem::detail
 {

@@ -3,13 +3,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "sparenode/foundation/result.hpp"
+#include "sparenode/http/http_application.hpp"
 #include "sparenode/http/request/http_request.hpp"
 #include "sparenode/http/response/http_response.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {
@@ -137,5 +139,10 @@ class HttpRouter final
 /// @param[in] code Registration category to describe.
 /// @return Static diagnostic text.
 [[nodiscard]] const char *to_string(HttpRouteRegistrationErrorCode code) noexcept;
+
+/// @brief Adapts one shared immutable router to the generic HTTP application contract.
+/// @param[in] router Route table retained by the returned copyable callback.
+/// @return Application callback, or an empty callback when `router` is null.
+[[nodiscard]] HttpApplication make_http_application(std::shared_ptr<const HttpRouter> router);
 
 } // namespace sparenode::http

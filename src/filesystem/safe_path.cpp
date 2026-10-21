@@ -127,7 +127,7 @@ resolve_existing_path(const std::filesystem::path &path)
 /// @param[in] shared_root Previously validated directory boundary.
 /// @return Current root path, or an error if it disappeared or was redirected.
 [[nodiscard]] Result<std::filesystem::path, SafePathErrorCode>
-recheck_root(const configuration::SharedRoot &shared_root)
+recheck_root(const SharedRoot &shared_root)
 {
     auto inspected_root = resolve_existing_path(shared_root.path());
     if (!inspected_root)
@@ -153,8 +153,7 @@ recheck_root(const configuration::SharedRoot &shared_root)
 /// @param[in] shared_root Root required to contain every resolved request prefix.
 /// @return Canonical existing prefix with any missing suffix, or a confinement error.
 [[nodiscard]] Result<std::filesystem::path, SafePathErrorCode>
-resolve_existing_prefixes(const std::filesystem::path &candidate,
-                          const configuration::SharedRoot &shared_root)
+resolve_existing_prefixes(const std::filesystem::path &candidate, const SharedRoot &shared_root)
 {
     auto root = recheck_root(shared_root);
     if (!root)
@@ -345,7 +344,7 @@ SafePath::SafePath(std::filesystem::path resolved_path) : path_(std::move(resolv
 }
 
 /// @brief Resolves one decoded request path within the configured shared root.
-Result<SafePath, SafePathError> SafePath::resolve(const configuration::SharedRoot &shared_root,
+Result<SafePath, SafePathError> SafePath::resolve(const SharedRoot &shared_root,
                                                   const std::string_view requested_path)
 {
     if (requested_path.size() > maximum_requested_path_bytes)

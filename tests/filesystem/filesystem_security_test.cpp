@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/temporary_directory.hpp"
 #ifdef _WIN32
 #include "support/windows_junction.hpp"
@@ -52,7 +52,7 @@ struct FilesystemSecurityFixture
     /// @return File contents, or no value when resolution or opening is denied.
     [[nodiscard]] std::optional<std::string> read_request(const std::string_view request) const
     {
-        auto root = sparenode::configuration::SharedRoot::create(shared);
+        auto root = sparenode::filesystem::SharedRoot::create(shared);
         REQUIRE(root);
         auto resolved = sparenode::filesystem::SafePath::resolve(root.value(), request);
         if (!resolved)

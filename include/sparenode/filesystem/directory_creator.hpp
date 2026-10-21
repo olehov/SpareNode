@@ -6,9 +6,9 @@
 #include <string_view>
 #include <system_error>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
 {
@@ -41,7 +41,7 @@ struct DirectoryCreationError
 /// @param[in] requested_path URL-encoded relative destination path.
 /// @return Created path or a structured failure without exposing native paths.
 [[nodiscard]] Result<std::filesystem::path, DirectoryCreationError>
-create_directory(const configuration::SharedRoot &shared_root, std::string_view requested_path);
+create_directory(const SharedRoot &shared_root, std::string_view requested_path);
 
 /// @brief Returns stable text for one directory-creation failure category.
 /// @param[in] code Portable failure category.

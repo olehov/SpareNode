@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/http_status_code.hpp"
-#include "sparenode/result.hpp"
 
 namespace sparenode::http
 {
@@ -105,11 +105,11 @@ class HttpResponse final
 
     /// @brief Transfers complete response and body-reader ownership.
     /// @param[in,out] other Response whose owned state is transferred.
-    HttpResponse(HttpResponse &&other) noexcept = default;
+    HttpResponse(HttpResponse &&other) noexcept;
     /// @brief Replaces this response with transferred response state.
     /// @param[in,out] other Response whose owned state is transferred.
     /// @return This response after replacement.
-    HttpResponse &operator=(HttpResponse &&other) noexcept = default;
+    HttpResponse &operator=(HttpResponse &&other) noexcept;
     HttpResponse(const HttpResponse &) = delete;
     HttpResponse &operator=(const HttpResponse &) = delete;
     /// @brief Releases owned headers, memory body, and streaming-reader state.

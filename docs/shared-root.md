@@ -39,8 +39,9 @@ not committed.
 
 ## Security boundary
 
-`SharedRoot` is the configuration-level filesystem boundary. Its constructor is
-private, so callers cannot create an instance without validation. Later path
+`SharedRoot` is the filesystem-owned boundary constructed while configuration
+is validated. Its constructor is private, so callers cannot create an instance
+without validation. Later path
 handling must resolve untrusted client paths relative to `SharedRoot`; it must
 not accept unrestricted host paths as an equivalent substitute.
 

@@ -2,7 +2,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "sparenode/http/request/http_request_parser.hpp"
-#include "sparenode/http/session/detail/buffered_request.hpp"
+#include "sparenode/http/transport/detail/buffered_request.hpp"
 #include "support/optional.hpp"
 #include <fstream>
 #include <string>

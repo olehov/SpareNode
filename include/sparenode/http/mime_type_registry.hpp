@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::http
 {

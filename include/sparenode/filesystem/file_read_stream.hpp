@@ -9,9 +9,9 @@
 #include <string_view>
 #include <system_error>
 
-#include "sparenode/configuration/shared_root.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::filesystem
 {
@@ -57,7 +57,7 @@ class FileReadStream final
     /// @param[in] requested_path URL-encoded relative UTF-8 file path.
     /// @return A stable stream or a structured safe failure.
     [[nodiscard]] static Result<FileReadStream, FileReadError>
-    open(const configuration::SharedRoot &shared_root, std::string_view requested_path);
+    open(const SharedRoot &shared_root, std::string_view requested_path);
 
     /// @brief Returns the file length captured from the opened native handle.
     /// @return Exact byte length used for HTTP Content-Length framing.

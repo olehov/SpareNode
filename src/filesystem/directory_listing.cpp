@@ -101,8 +101,7 @@ struct ChildRequestParts
 
 /// @brief Resolves and verifies the requested listing directory.
 [[nodiscard]] Result<SafePath, DirectoryListingError>
-resolve_directory(const configuration::SharedRoot &shared_root,
-                  const std::string_view requested_path)
+resolve_directory(const SharedRoot &shared_root, const std::string_view requested_path)
 {
     auto directory = SafePath::resolve(shared_root, requested_path);
     if (!directory)
@@ -131,7 +130,7 @@ resolve_directory(const configuration::SharedRoot &shared_root,
 
 /// @brief Reads one entry after independently confining its resolved target.
 [[nodiscard]] Result<std::optional<DirectoryListingEntry>, DirectoryListingError>
-read_entry(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
+read_entry(const SharedRoot &shared_root, const std::string_view requested_path,
            const detail::ConfinedDirectory &directory,
            const std::filesystem::directory_entry &native_entry)
 {
@@ -168,7 +167,7 @@ read_entry(const configuration::SharedRoot &shared_root, const std::string_view 
 
 /// @brief Iterates one verified directory under the configured resource boundary.
 [[nodiscard]] Result<std::vector<DirectoryListingEntry>, DirectoryListingError>
-collect_entries(const configuration::SharedRoot &shared_root, const std::string_view requested_path,
+collect_entries(const SharedRoot &shared_root, const std::string_view requested_path,
                 const SafePath &directory)
 {
     auto confined_directory = detail::open_confined_directory(shared_root.path(), directory.path());
@@ -219,7 +218,7 @@ collect_entries(const configuration::SharedRoot &shared_root, const std::string_
 } // namespace
 
 Result<std::vector<DirectoryListingEntry>, DirectoryListingError>
-list_directory(const configuration::SharedRoot &shared_root, const std::string_view requested_path)
+list_directory(const SharedRoot &shared_root, const std::string_view requested_path)
 {
     try
     {

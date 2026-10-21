@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "sparenode/configuration/config_token.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::configuration
 {

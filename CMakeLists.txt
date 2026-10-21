@@ -33,6 +33,7 @@ FetchContent_MakeAvailable(Sodium)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(SpareNodeBuildSettings)
+include(SpareNodeArchitecture)
 include(SpareNodeCompilerWarnings)
 include(SpareNodeCppcheck)
 include(SpareNodeDocumentation)
@@ -50,49 +51,31 @@ configure_file(
     @ONLY
 )
 
-add_library(sparenode_core STATIC
-    src/authentication/authentication_service.cpp
-    src/authentication/credential_file_provisioner.cpp
-    src/authentication/file_authentication.cpp
-    src/authentication/file_credential_provider.cpp
-    src/authentication/password_verifier.cpp
-    src/authentication/sensitive_password.cpp
-    src/application/command_line.cpp
-    src/application/running_application.cpp
-    src/configuration/config_lexer.cpp
-    src/configuration/config_loader.cpp
-    src/configuration/mime_types_loader.cpp
-    src/configuration/config_parser.cpp
-    src/configuration/config_validator.cpp
-    src/configuration/runtime_config_mapper.cpp
-    src/configuration/shared_root.cpp
-    src/filesystem/detail/path_request_decoder.cpp
-    src/filesystem/directory_creator.cpp
-    src/filesystem/directory_listing.cpp
-    src/filesystem/filesystem_entry_remover.cpp
-    src/filesystem/safe_path.cpp
-    src/filesystem/temporary_file.cpp
-    src/filesystem/upload_finalizer.cpp
-    src/http/api/filesystem_api.cpp
-    src/http/mime_type_registry.cpp
-    src/http/session/http_connection_handler.cpp
-    src/http/session/http_transport_policy.cpp
-    src/http/request/http_request.cpp
-    src/http/request/http_request_parser.cpp
-    src/http/request/http_body_decoder.cpp
-    src/http/request/request_body_ingestor.cpp
-    src/http/request/detail/host_authority.cpp
-    src/http/request/detail/request_target.cpp
-    src/http/response/detail/response_date.cpp
-    src/http/session/detail/request_deadlines.cpp
-    src/http/session/detail/buffered_request.cpp
-    src/http/routing/http_router.cpp
-    src/http/response/http_response.cpp
-    src/http/response/http_response_writer.cpp
+add_library(sparenode_foundation INTERFACE)
+
+target_compile_features(sparenode_foundation INTERFACE
+    cxx_std_23
+)
+
+target_include_directories(sparenode_foundation INTERFACE
+    "${PROJECT_SOURCE_DIR}/include"
+)
+
+add_library(sparenode_logging STATIC
     src/logging/console_log_sink.cpp
     src/logging/logger.cpp
     src/logging/log_severity.cpp
-    src/logging/network_logging.cpp
+)
+
+target_link_libraries(sparenode_logging PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_logging)
+sparenode_enable_cppcheck(sparenode_logging)
+sparenode_enable_static_analysis(sparenode_logging)
+
+add_library(sparenode_network STATIC
     src/network/connection_dispatcher.cpp
     src/network/connection_server.cpp
     src/network/tcp_connection.cpp
@@ -105,8 +88,45 @@ add_library(sparenode_core STATIC
     src/network/detail/socket_wait.cpp
 )
 
+target_link_libraries(sparenode_network
+    PUBLIC sparenode_foundation
+    PRIVATE Threads::Threads
+)
+
 if(WIN32)
-    target_sources(sparenode_core PRIVATE
+    target_link_libraries(sparenode_network PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_network)
+sparenode_enable_cppcheck(sparenode_network)
+sparenode_enable_static_analysis(sparenode_network)
+
+add_library(sparenode_storage STATIC
+    src/storage/temporary_file.cpp
+    src/storage/temporary_file_writer.cpp
+)
+
+target_link_libraries(sparenode_storage
+    PUBLIC sparenode_foundation
+    PRIVATE Threads::Threads
+)
+
+sparenode_enable_compiler_warnings(sparenode_storage)
+sparenode_enable_cppcheck(sparenode_storage)
+sparenode_enable_static_analysis(sparenode_storage)
+
+add_library(sparenode_filesystem STATIC
+    src/filesystem/detail/path_request_decoder.cpp
+    src/filesystem/directory_creator.cpp
+    src/filesystem/directory_listing.cpp
+    src/filesystem/filesystem_entry_remover.cpp
+    src/filesystem/safe_path.cpp
+    src/filesystem/shared_root.cpp
+    src/filesystem/upload_finalizer.cpp
+)
+
+if(WIN32)
+    target_sources(sparenode_filesystem PRIVATE
         src/filesystem/detail/windows_handle.cpp
         src/filesystem/detail/windows_handle_path.cpp
         src/filesystem/detail/windows_file_read_stream.cpp
@@ -117,7 +137,7 @@ if(WIN32)
         src/filesystem/detail/windows_upload_finalizer.cpp
     )
 else()
-    target_sources(sparenode_core PRIVATE
+    target_sources(sparenode_filesystem PRIVATE
         src/filesystem/detail/linux_file_read_stream.cpp
         src/filesystem/detail/linux_directory_creator.cpp
         src/filesystem/detail/linux_directory_entry_reader.cpp
@@ -126,33 +146,259 @@ else()
     )
 endif()
 
-target_compile_features(sparenode_core PUBLIC
-    cxx_std_23
-)
-
-target_include_directories(sparenode_core PUBLIC
-    "${PROJECT_SOURCE_DIR}/include"
-)
-
-target_link_libraries(sparenode_core PRIVATE
-    sodium
-    Threads::Threads
+target_link_libraries(sparenode_filesystem PUBLIC
+    sparenode_foundation
+    sparenode_storage
 )
 
 if(WIN32)
-    target_link_libraries(sparenode_core PRIVATE advapi32 ntdll ws2_32)
+    target_link_libraries(sparenode_filesystem PRIVATE ntdll)
 endif()
 
-sparenode_enable_compiler_warnings(sparenode_core)
-sparenode_enable_cppcheck(sparenode_core)
-sparenode_enable_static_analysis(sparenode_core)
+sparenode_enable_compiler_warnings(sparenode_filesystem)
+sparenode_enable_cppcheck(sparenode_filesystem)
+sparenode_enable_static_analysis(sparenode_filesystem)
+
+add_library(sparenode_network_logging STATIC
+    src/adapters/network_logging.cpp
+)
+
+target_link_libraries(sparenode_network_logging PUBLIC
+    sparenode_logging
+    sparenode_network
+)
+
+sparenode_enable_compiler_warnings(sparenode_network_logging)
+sparenode_enable_cppcheck(sparenode_network_logging)
+sparenode_enable_static_analysis(sparenode_network_logging)
+
+add_library(sparenode_configuration STATIC
+    src/configuration/config_lexer.cpp
+    src/configuration/config_loader.cpp
+    src/configuration/config_parser.cpp
+    src/configuration/config_validator.cpp
+)
+
+target_link_libraries(sparenode_configuration PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_configuration)
+sparenode_enable_cppcheck(sparenode_configuration)
+sparenode_enable_static_analysis(sparenode_configuration)
+
+add_library(sparenode_http_core STATIC
+    src/http/mime_type_registry.cpp
+    src/http/request/http_request.cpp
+    src/http/request/http_request_parser.cpp
+    src/http/request/http_body_decoder.cpp
+    src/http/request/detail/host_authority.cpp
+    src/http/request/detail/request_target.cpp
+    src/http/response/detail/response_date.cpp
+    src/http/routing/http_router.cpp
+    src/http/response/http_response.cpp
+)
+
+target_link_libraries(sparenode_http_core PUBLIC
+    sparenode_foundation
+    sparenode_storage
+)
+
+sparenode_enable_compiler_warnings(sparenode_http_core)
+sparenode_enable_cppcheck(sparenode_http_core)
+sparenode_enable_static_analysis(sparenode_http_core)
+
+add_library(sparenode_api_core STATIC
+    src/http/api/api_router_builder.cpp
+    src/http/api/protected_route_policy.cpp
+)
+
+target_link_libraries(sparenode_api_core PUBLIC
+    sparenode_http_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_api_core)
+sparenode_enable_cppcheck(sparenode_api_core)
+sparenode_enable_static_analysis(sparenode_api_core)
+
+add_library(sparenode_filesystem_application STATIC
+    src/application/filesystem_service.cpp
+)
+
+target_link_libraries(sparenode_filesystem_application PUBLIC
+    sparenode_filesystem
+    sparenode_foundation
+    sparenode_storage
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_application)
+sparenode_enable_cppcheck(sparenode_filesystem_application)
+sparenode_enable_static_analysis(sparenode_filesystem_application)
+
+add_library(sparenode_filesystem_api STATIC
+    src/http/api/filesystem_api.cpp
+    src/http/api/filesystem/deletion_handler.cpp
+    src/http/api/filesystem/directory_creation_handler.cpp
+    src/http/api/filesystem/directory_listing_handler.cpp
+    src/http/api/filesystem/file_download_handler.cpp
+    src/http/api/filesystem/filesystem_error_response.cpp
+    src/http/api/filesystem/json_writer.cpp
+    src/http/api/filesystem/response_factory.cpp
+    src/http/api/filesystem/upload_handler.cpp
+)
+
+target_link_libraries(sparenode_filesystem_api PUBLIC
+    sparenode_api_core
+    sparenode_filesystem_application
+    sparenode_http_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_filesystem_api)
+sparenode_enable_cppcheck(sparenode_filesystem_api)
+sparenode_enable_static_analysis(sparenode_filesystem_api)
+
+add_library(sparenode_http_transport STATIC
+    src/http/transport/http_connection_handler.cpp
+    src/http/transport/http_transport_policy.cpp
+    src/http/transport/http_response_writer.cpp
+    src/http/transport/request_body_ingestor.cpp
+    src/http/transport/detail/request_deadlines.cpp
+    src/http/transport/detail/buffered_request.cpp
+)
+
+target_link_libraries(sparenode_http_transport PUBLIC
+    sparenode_http_core
+    sparenode_network
+    sparenode_storage
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_http_transport PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_http_transport)
+sparenode_enable_cppcheck(sparenode_http_transport)
+sparenode_enable_static_analysis(sparenode_http_transport)
+
+add_library(sparenode_authentication_core STATIC
+    src/authentication/authentication_service.cpp
+    src/authentication/sensitive_password.cpp
+)
+
+target_link_libraries(sparenode_authentication_core PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_core)
+sparenode_enable_cppcheck(sparenode_authentication_core)
+sparenode_enable_static_analysis(sparenode_authentication_core)
+
+add_library(sparenode_authentication_sodium STATIC
+    src/authentication/sodium_password_verifier.cpp
+)
+
+target_link_libraries(sparenode_authentication_sodium PUBLIC
+    sparenode_authentication_core
+)
+
+target_link_libraries(sparenode_authentication_sodium PRIVATE
+    sodium
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_sodium)
+sparenode_enable_cppcheck(sparenode_authentication_sodium)
+sparenode_enable_static_analysis(sparenode_authentication_sodium)
+
+add_library(sparenode_authentication_file STATIC
+    src/authentication/credential_file_provisioner.cpp
+    src/authentication/file_authentication.cpp
+    src/authentication/file_credential_provider.cpp
+)
+
+target_link_libraries(sparenode_authentication_file PUBLIC
+    sparenode_authentication_core
+    sparenode_filesystem
+)
+
+target_link_libraries(sparenode_authentication_file PRIVATE
+    sparenode_configuration
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_authentication_file PRIVATE advapi32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_authentication_file)
+sparenode_enable_cppcheck(sparenode_authentication_file)
+sparenode_enable_static_analysis(sparenode_authentication_file)
+
+add_library(sparenode_command_line STATIC
+    src/application/command_line.cpp
+)
+
+target_link_libraries(sparenode_command_line PUBLIC
+    sparenode_foundation
+)
+
+sparenode_enable_compiler_warnings(sparenode_command_line)
+sparenode_enable_cppcheck(sparenode_command_line)
+sparenode_enable_static_analysis(sparenode_command_line)
+
+add_library(sparenode_runtime_config INTERFACE)
+
+target_link_libraries(sparenode_runtime_config INTERFACE
+    sparenode_filesystem
+    sparenode_http_core
+    sparenode_http_transport
+    sparenode_logging
+    sparenode_network
+)
+
+add_library(sparenode_application STATIC
+    src/application/running_application.cpp
+)
+
+target_link_libraries(sparenode_application PUBLIC
+    sparenode_network
+)
+
+sparenode_enable_compiler_warnings(sparenode_application)
+sparenode_enable_cppcheck(sparenode_application)
+sparenode_enable_static_analysis(sparenode_application)
+
+add_library(sparenode_bootstrap STATIC
+    src/bootstrap/mime_types_loader.cpp
+    src/bootstrap/runtime_bootstrap.cpp
+)
+
+target_link_libraries(sparenode_bootstrap PUBLIC
+    sparenode_authentication_core
+    sparenode_authentication_file
+    sparenode_configuration
+    sparenode_runtime_config
+)
+
+target_link_libraries(sparenode_bootstrap PRIVATE
+    sparenode_authentication_sodium
+)
+
+sparenode_enable_compiler_warnings(sparenode_bootstrap)
+sparenode_enable_cppcheck(sparenode_bootstrap)
+sparenode_enable_static_analysis(sparenode_bootstrap)
 
 add_executable(sparenode
     apps/sparenode/main.cpp
+    apps/sparenode/server.cpp
 )
 
 target_link_libraries(sparenode PRIVATE
-    sparenode_core
+    sparenode_application
+    sparenode_bootstrap
+    sparenode_command_line
+    sparenode_filesystem_api
+    sparenode_http_transport
+    sparenode_logging
+    sparenode_network_logging
 )
 
 target_include_directories(sparenode PRIVATE
@@ -172,12 +418,86 @@ set_target_properties(sparenode_credentials PROPERTIES
 )
 
 target_link_libraries(sparenode_credentials PRIVATE
-    sparenode_core
+    sparenode_authentication_file
+    sparenode_authentication_sodium
 )
 
 sparenode_enable_compiler_warnings(sparenode_credentials)
 sparenode_enable_cppcheck(sparenode_credentials)
 sparenode_enable_static_analysis(sparenode_credentials)
+
+sparenode_register_architecture(sparenode_foundation)
+sparenode_register_architecture(sparenode_logging DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_network DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_storage DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_filesystem DEPENDS
+    sparenode_foundation
+    sparenode_storage
+)
+sparenode_register_architecture(sparenode_network_logging DEPENDS
+    sparenode_logging
+    sparenode_network
+)
+sparenode_register_architecture(sparenode_configuration DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_http_core DEPENDS
+    sparenode_foundation
+    sparenode_storage
+)
+sparenode_register_architecture(sparenode_api_core DEPENDS sparenode_http_core)
+sparenode_register_architecture(sparenode_filesystem_application DEPENDS
+    sparenode_filesystem
+    sparenode_foundation
+    sparenode_storage
+)
+sparenode_register_architecture(sparenode_filesystem_api DEPENDS
+    sparenode_api_core
+    sparenode_filesystem_application
+    sparenode_http_core
+)
+sparenode_register_architecture(sparenode_http_transport DEPENDS
+    sparenode_http_core
+    sparenode_network
+    sparenode_storage
+)
+sparenode_register_architecture(sparenode_authentication_core DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_authentication_sodium DEPENDS
+    sparenode_authentication_core
+)
+sparenode_register_architecture(sparenode_authentication_file DEPENDS
+    sparenode_authentication_core
+    sparenode_configuration
+    sparenode_filesystem
+)
+sparenode_register_architecture(sparenode_command_line DEPENDS sparenode_foundation)
+sparenode_register_architecture(sparenode_runtime_config DEPENDS
+    sparenode_filesystem
+    sparenode_http_core
+    sparenode_http_transport
+    sparenode_logging
+    sparenode_network
+)
+sparenode_register_architecture(sparenode_application DEPENDS sparenode_network)
+sparenode_register_architecture(sparenode_bootstrap DEPENDS
+    sparenode_authentication_core
+    sparenode_authentication_file
+    sparenode_authentication_sodium
+    sparenode_configuration
+    sparenode_runtime_config
+)
+sparenode_register_architecture(sparenode DEPENDS
+    sparenode_application
+    sparenode_bootstrap
+    sparenode_command_line
+    sparenode_filesystem_api
+    sparenode_http_transport
+    sparenode_logging
+    sparenode_network_logging
+)
+sparenode_register_architecture(sparenode_credentials DEPENDS
+    sparenode_authentication_file
+    sparenode_authentication_sodium
+)
+sparenode_validate_architecture()
 
 sparenode_enable_documentation()
 

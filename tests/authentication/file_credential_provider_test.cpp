@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -11,10 +12,8 @@
 
 #include "sparenode/authentication/file_authentication.hpp"
 #include "sparenode/authentication/file_credential_provider.hpp"
-#include "sparenode/authentication/password_verifier.hpp"
-#include "sparenode/configuration/runtime/location_config.hpp"
-#include "sparenode/configuration/runtime/location_permissions.hpp"
-#include "sparenode/configuration/shared_root.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
+#include "sparenode/filesystem/shared_root.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"
 
@@ -40,7 +39,7 @@ namespace
 TEST_CASE("File credential provider loads one validated owner record",
           "[authentication][credentials]")
 {
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
     auto encoded = verifier.hash(password_bytes("owner password"));
@@ -75,7 +74,7 @@ TEST_CASE("File credential provider rejects missing and malformed material",
           "[authentication][credentials]")
 {
     using Error = sparenode::authentication::CredentialProvisioningErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
     auto encoded = verifier.hash(password_bytes("owner password"));
@@ -154,7 +153,7 @@ TEST_CASE("File credential provider rejects a symbolic-link source",
           "[authentication][credentials][security][symlink]")
 {
     using Error = sparenode::authentication::CredentialProvisioningErrorCode;
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
     auto encoded = verifier.hash(password_bytes("owner password"));
@@ -184,7 +183,7 @@ TEST_CASE("File credential provider rejects a symbolic-link source",
 TEST_CASE("File authentication rejects credentials inside a shared location",
           "[authentication][credentials][security]")
 {
-    auto verifier_result = sparenode::authentication::PasswordVerifier::create();
+    auto verifier_result = sparenode::authentication::SodiumPasswordVerifier::create();
     REQUIRE(verifier_result.has_value());
     const auto verifier = verifier_result.value();
     auto encoded = verifier.hash(password_bytes("owner password"));
@@ -198,15 +197,15 @@ TEST_CASE("File authentication rejects credentials inside a shared location",
         output << credential_source("admin", encoded.value());
         REQUIRE(output.good());
     }
-    auto root = sparenode::configuration::SharedRoot::create(directory.path());
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root.has_value());
-    std::vector<sparenode::configuration::runtime::LocationConfig> locations;
-    locations.emplace_back(
-        "/api/Documents", std::move(root).value(),
-        sparenode::configuration::runtime::LocationPermissions{true, false, false});
+    std::vector<sparenode::filesystem::SharedRoot> shared_roots;
+    shared_roots.push_back(std::move(root).value());
 
-    const auto result =
-        sparenode::authentication::create_file_authentication_service(credential_path, locations);
+    auto verifier_owner = std::make_shared<sparenode::authentication::SodiumPasswordVerifier>(
+        std::move(verifier_result).value());
+    const auto result = sparenode::authentication::create_file_authentication_service(
+        credential_path, shared_roots, std::move(verifier_owner));
 
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() ==

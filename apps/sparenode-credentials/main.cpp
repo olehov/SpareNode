@@ -20,8 +20,8 @@
 
 #include "sparenode/authentication/credential_file_provisioner.hpp"
 #include "sparenode/authentication/file_credential_provider.hpp"
-#include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
+#include "sparenode/authentication/sodium_password_verifier.hpp"
 
 namespace
 {
@@ -223,7 +223,7 @@ int main(const int argc, const char *const argv[])
         return argc == 2 && std::string_view(argv[1]) == "--help" ? 0 : 2;
     }
 
-    const auto verifier = sparenode::authentication::PasswordVerifier::create();
+    const auto verifier = sparenode::authentication::SodiumPasswordVerifier::create();
     if (!verifier)
     {
         std::cerr << "error: password cryptography could not be initialized\n";

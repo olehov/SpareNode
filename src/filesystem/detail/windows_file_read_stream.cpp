@@ -71,9 +71,8 @@ FileReadStream &FileReadStream::operator=(FileReadStream &&) noexcept = default;
 FileReadStream::~FileReadStream() = default;
 
 /// @brief Opens a regular Windows file and verifies its post-open containment.
-Result<FileReadStream, FileReadError>
-FileReadStream::open(const configuration::SharedRoot &shared_root,
-                     const std::string_view requested_path)
+Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &shared_root,
+                                                           const std::string_view requested_path)
 {
     try
     {

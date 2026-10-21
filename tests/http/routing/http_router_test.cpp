@@ -1,5 +1,6 @@
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -8,10 +9,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "sparenode/foundation/result.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/http/routing/http_router.hpp"
-#include "sparenode/result.hpp"
 #include "support/optional.hpp"
 
 namespace
@@ -362,4 +363,44 @@ TEST_CASE("A HEAD-only route does not implicitly allow GET", "[http][router][hea
     CHECK(get->status_code() == sparenode::http::HttpStatusCode::method_not_allowed);
     REQUIRE(get->headers().size() == 1);
     CHECK(get->headers().front().value == "HEAD");
+}
+
+TEST_CASE("Router application adapter owns its router and dispatches without transport",
+          "[http][router][application]")
+{
+    auto router = std::make_shared<sparenode::http::HttpRouter>();
+    REQUIRE(router->register_route(sparenode::http::HttpMethod::get, "/",
+                                   respond_with(sparenode::http::HttpStatusCode::ok, "Adapted")));
+
+    auto application = sparenode::http::make_http_application(router);
+    router.reset();
+
+    REQUIRE(application);
+    const std::string source = "GET / HTTP/1.1\r\nHost: local\r\n\r\n";
+    const auto response = application(parse_request(source));
+    REQUIRE(response);
+    CHECK(response->reason_phrase() == "Adapted");
+}
+
+TEST_CASE("Router application adapter rejects null ownership and maps route errors",
+          "[http][router][application][error]")
+{
+    CHECK_FALSE(sparenode::http::make_http_application(nullptr));
+
+    auto router = std::make_shared<sparenode::http::HttpRouter>();
+    REQUIRE(router->register_route(
+        sparenode::http::HttpMethod::get, "/failure",
+        [](const sparenode::http::HttpRequestView &, const sparenode::http::HttpRouteParameters &)
+            -> sparenode::Result<sparenode::http::HttpResponse, sparenode::http::HttpRouteError>
+        {
+            return sparenode::unexpected(sparenode::http::HttpRouteError{
+                sparenode::http::HttpRouteErrorCode::response_validation_failure, 73});
+        }));
+
+    const auto application = sparenode::http::make_http_application(std::move(router));
+    const std::string source = "GET /failure HTTP/1.1\r\nHost: local\r\n\r\n";
+    const auto response = application(parse_request(source));
+    REQUIRE_FALSE(response);
+    CHECK(response.error().code == sparenode::http::HttpApplicationErrorCode::request_failed);
+    CHECK(response.error().detail == 73);
 }

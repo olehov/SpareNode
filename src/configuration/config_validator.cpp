@@ -1,24 +1,14 @@
 #include "sparenode/configuration/config_validator.hpp"
 
 #include <algorithm>
-#include <filesystem>
+#include <array>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <variant>
-
-#include "sparenode/http/request/http_request_timeouts.hpp"
-#include "sparenode/http/session/http_transport_policy.hpp"
-#include "sparenode/logging/log_severity.hpp"
-
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#endif
 
 namespace sparenode::configuration
 {
@@ -29,87 +19,257 @@ constexpr std::uint64_t minimum_port = 1;
 constexpr std::uint64_t maximum_port = 65'535;
 constexpr std::uint64_t minimum_worker_threads = 2;
 constexpr std::uint64_t maximum_worker_threads = 64;
+constexpr std::uint64_t maximum_timeout_ms = 86'400'000;
 using directives::LocationDirectiveKind;
 using directives::ParsedLocationDirective;
 using directives::ParsedServerDirective;
 using directives::ServerDirectiveKind;
 
-/// @brief Reports whether text is exactly one numeric IPv4 or IPv6 address.
-[[nodiscard]] bool is_numeric_ip_address(const std::string &value) noexcept
+/// @brief Stores one parsed numeric address without depending on the network module.
+struct NumericAddress
 {
-    in_addr ipv4{};
-    in6_addr ipv6{};
-#ifdef _WIN32
-    return InetPtonA(AF_INET, value.c_str(), &ipv4) == 1 ||
-           InetPtonA(AF_INET6, value.c_str(), &ipv6) == 1;
-#else
-    return inet_pton(AF_INET, value.c_str(), &ipv4) == 1 ||
-           inet_pton(AF_INET6, value.c_str(), &ipv6) == 1;
-#endif
+    std::array<std::uint8_t, 16> bytes{}; ///< Network-order address bytes.
+    bool ipv4{};                          ///< True when only the first four bytes are significant.
+};
+
+/// @brief Parses one strict dotted-decimal IPv4 address.
+[[nodiscard]] std::optional<std::array<std::uint8_t, 4>>
+parse_ipv4(const std::string_view value) noexcept
+{
+    std::array<std::uint8_t, 4> bytes{};
+    std::size_t begin = 0;
+    for (std::size_t index = 0; index < bytes.size(); ++index)
+    {
+        const auto end = value.find('.', begin);
+        const auto component_end = end == std::string_view::npos ? value.size() : end;
+        const auto component = value.substr(begin, component_end - begin);
+        if (component.empty() || component.size() > 3 ||
+            (component.size() > 1 && component.front() == '0'))
+        {
+            return std::nullopt;
+        }
+        unsigned int number = 0;
+        for (const char digit : component)
+        {
+            if (digit < '0' || digit > '9')
+            {
+                return std::nullopt;
+            }
+            number = number * 10U + static_cast<unsigned int>(digit - '0');
+        }
+        if (number > std::numeric_limits<std::uint8_t>::max())
+        {
+            return std::nullopt;
+        }
+        bytes[index] = static_cast<std::uint8_t>(number);
+        if (index + 1 < bytes.size())
+        {
+            if (end == std::string_view::npos)
+            {
+                return std::nullopt;
+            }
+            begin = end + 1;
+        }
+        else if (end != std::string_view::npos)
+        {
+            return std::nullopt;
+        }
+    }
+    return bytes;
+}
+
+/// @brief Parses one hexadecimal IPv6 group.
+[[nodiscard]] std::optional<std::uint16_t> parse_ipv6_word(const std::string_view value) noexcept
+{
+    if (value.empty() || value.size() > 4)
+    {
+        return std::nullopt;
+    }
+    std::uint16_t word = 0;
+    for (const char digit : value)
+    {
+        unsigned int nibble = 0;
+        if (digit >= '0' && digit <= '9')
+        {
+            nibble = static_cast<unsigned int>(digit - '0');
+        }
+        else if (digit >= 'a' && digit <= 'f')
+        {
+            nibble = static_cast<unsigned int>(digit - 'a') + 10U;
+        }
+        else if (digit >= 'A' && digit <= 'F')
+        {
+            nibble = static_cast<unsigned int>(digit - 'A') + 10U;
+        }
+        else
+        {
+            return std::nullopt;
+        }
+        word = static_cast<std::uint16_t>((word << 4U) | nibble);
+    }
+    return word;
+}
+
+/// @brief Appends IPv6 words from one side of an optional compression marker.
+[[nodiscard]] bool append_ipv6_words(const std::string_view sequence,
+                                     std::vector<std::uint16_t> &words, const bool allow_ipv4_tail)
+{
+    if (sequence.empty())
+    {
+        return true;
+    }
+    std::size_t begin = 0;
+    while (begin <= sequence.size())
+    {
+        const auto end = sequence.find(':', begin);
+        const auto component_end = end == std::string_view::npos ? sequence.size() : end;
+        const auto component = sequence.substr(begin, component_end - begin);
+        if (component.contains('.'))
+        {
+            if (!allow_ipv4_tail || end != std::string_view::npos)
+            {
+                return false;
+            }
+            const auto ipv4 = parse_ipv4(component);
+            if (!ipv4)
+            {
+                return false;
+            }
+            words.push_back(static_cast<std::uint16_t>(((*ipv4)[0] << 8U) | (*ipv4)[1]));
+            words.push_back(static_cast<std::uint16_t>(((*ipv4)[2] << 8U) | (*ipv4)[3]));
+            return true;
+        }
+        const auto word = parse_ipv6_word(component);
+        if (!word)
+        {
+            return false;
+        }
+        words.push_back(*word);
+        if (end == std::string_view::npos)
+        {
+            break;
+        }
+        begin = end + 1;
+    }
+    return true;
+}
+
+/// @brief Parses one numeric IPv4 or IPv6 address into implementation-independent bytes.
+[[nodiscard]] std::optional<NumericAddress> parse_numeric_ip_address(const std::string_view value)
+{
+    if (const auto ipv4 = parse_ipv4(value))
+    {
+        NumericAddress result;
+        result.ipv4 = true;
+        std::ranges::copy(*ipv4, result.bytes.begin());
+        return result;
+    }
+
+    const auto compression = value.find("::");
+    if (compression != std::string_view::npos &&
+        value.find("::", compression + 2) != std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    std::vector<std::uint16_t> left;
+    std::vector<std::uint16_t> right;
+    const bool compressed = compression != std::string_view::npos;
+    const auto left_text = compressed ? value.substr(0, compression) : value;
+    const auto right_text = compressed ? value.substr(compression + 2) : std::string_view{};
+    if (!append_ipv6_words(left_text, left, !compressed) ||
+        !append_ipv6_words(right_text, right, true))
+    {
+        return std::nullopt;
+    }
+    const auto word_count = left.size() + right.size();
+    if ((!compressed && word_count != 8) || (compressed && word_count >= 8))
+    {
+        return std::nullopt;
+    }
+
+    NumericAddress result;
+    const auto store_word = [&result](const std::size_t index, const std::uint16_t word)
+    {
+        result.bytes[index * 2] = static_cast<std::uint8_t>(word >> 8U);
+        result.bytes[index * 2 + 1] = static_cast<std::uint8_t>(word & 0xFFU);
+    };
+    for (std::size_t index = 0; index < left.size(); ++index)
+    {
+        store_word(index, left[index]);
+    }
+    for (std::size_t index = 0; index < right.size(); ++index)
+    {
+        store_word(8 - right.size() + index, right[index]);
+    }
+    return result;
 }
 
 /// @brief Reports whether text identifies an IPv4 or IPv6 loopback address.
-[[nodiscard]] bool is_loopback_ip_address(const std::string &value) noexcept
+[[nodiscard]] bool is_loopback_ip_address(const std::string_view value)
 {
-    in_addr ipv4{};
-#ifdef _WIN32
-    if (InetPtonA(AF_INET, value.c_str(), &ipv4) == 1)
-#else
-    if (inet_pton(AF_INET, value.c_str(), &ipv4) == 1)
-#endif
-    {
-        constexpr unsigned char ipv4_loopback_prefix = 127;
-        return reinterpret_cast<const unsigned char *>(&ipv4)[0] == ipv4_loopback_prefix;
-    }
-    in6_addr ipv6{};
-#ifdef _WIN32
-    if (InetPtonA(AF_INET6, value.c_str(), &ipv6) != 1)
-#else
-    if (inet_pton(AF_INET6, value.c_str(), &ipv6) != 1)
-#endif
+    const auto parsed = parse_numeric_ip_address(value);
+    if (!parsed)
     {
         return false;
     }
-    const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv6);
-    constexpr auto last_byte_offset = sizeof(ipv6) - 1;
-    return std::ranges::all_of(bytes, bytes + last_byte_offset,
-                               [](const unsigned char byte) { return byte == 0; }) &&
-           bytes[last_byte_offset] == 1;
+    if (parsed->ipv4)
+    {
+        return parsed->bytes.front() == 127;
+    }
+    return std::ranges::all_of(parsed->bytes.begin(), parsed->bytes.end() - 1,
+                               [](const std::uint8_t byte) { return byte == 0; }) &&
+           parsed->bytes.back() == 1;
 }
 
 /// @brief Reports whether text identifies an all-interface wildcard address.
-[[nodiscard]] bool is_unspecified_ip_address(const std::string &value) noexcept
+[[nodiscard]] bool is_unspecified_ip_address(const std::string_view value)
 {
-    in_addr ipv4{};
-#ifdef _WIN32
-    if (InetPtonA(AF_INET, value.c_str(), &ipv4) == 1)
-#else
-    if (inet_pton(AF_INET, value.c_str(), &ipv4) == 1)
-#endif
-    {
-        const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv4);
-        return std::ranges::all_of(bytes, bytes + sizeof(ipv4),
-                                   [](const unsigned char byte) { return byte == 0; });
-    }
-    in6_addr ipv6{};
-#ifdef _WIN32
-    if (InetPtonA(AF_INET6, value.c_str(), &ipv6) != 1)
-#else
-    if (inet_pton(AF_INET6, value.c_str(), &ipv6) != 1)
-#endif
-    {
-        return false;
-    }
-    const auto *bytes = reinterpret_cast<const unsigned char *>(&ipv6);
-    return std::ranges::all_of(bytes, bytes + sizeof(ipv6),
-                               [](const unsigned char byte) { return byte == 0; });
+    const auto parsed = parse_numeric_ip_address(value);
+    const auto size = parsed && parsed->ipv4 ? std::size_t{4} : std::size_t{16};
+    return parsed && std::ranges::all_of(parsed->bytes.begin(), parsed->bytes.begin() + size,
+                                         [](const std::uint8_t byte) { return byte == 0; });
 }
 
-/// @brief Converts one decoded UTF-8 path value into the host filesystem representation.
-[[nodiscard]] std::filesystem::path path_from_utf8(const std::string &value)
+/// @brief Converts one validated log-level spelling into a configuration-owned value.
+[[nodiscard]] std::optional<ConfiguredLogLevel>
+parse_configured_log_level(const std::string_view value) noexcept
 {
-    const std::u8string utf8_value(value.begin(), value.end());
-    return std::filesystem::path(utf8_value);
+    if (value == "debug")
+    {
+        return ConfiguredLogLevel::debug;
+    }
+    if (value == "info")
+    {
+        return ConfiguredLogLevel::info;
+    }
+    if (value == "warning")
+    {
+        return ConfiguredLogLevel::warning;
+    }
+    if (value == "error")
+    {
+        return ConfiguredLogLevel::error;
+    }
+    return std::nullopt;
+}
+
+/// @brief Converts one deployment-mode spelling into a configuration-owned value.
+[[nodiscard]] std::optional<ConfiguredTransportMode>
+parse_configured_transport_mode(const std::string_view value) noexcept
+{
+    if (value == "loopback_http")
+    {
+        return ConfiguredTransportMode::loopback_http;
+    }
+    if (value == "trusted_lan_http")
+    {
+        return ConfiguredTransportMode::trusted_lan_http;
+    }
+    if (value == "trusted_proxy_https")
+    {
+        return ConfiguredTransportMode::trusted_proxy_https;
+    }
+    return std::nullopt;
 }
 
 /// @brief Reports whether one decoded location argument is a supported HTTP origin path.
@@ -189,6 +349,7 @@ class ValidationState final
     explicit ValidationState(const ParsedConfiguration &configuration)
         : configuration_(configuration)
     {
+        server_.location = configuration.server.location;
     }
 
     /// @brief Applies every independently detectable version-one validation rule.
@@ -202,11 +363,12 @@ class ValidationState final
         return std::move(errors_);
     }
 
-    /// @brief Transfers canonical roots collected for successfully validated locations.
-    /// @return Roots in the same order as the parsed location blocks.
-    [[nodiscard]] std::vector<SharedRoot> release_location_roots() &&
+    /// @brief Transfers validated primitive settings to the bootstrap boundary.
+    [[nodiscard]] AppSettings release_settings() &&
     {
-        return std::move(location_roots_);
+        AppSettings settings;
+        settings.servers.push_back(std::move(server_));
+        return settings;
     }
 
   private:
@@ -240,9 +402,11 @@ class ValidationState final
             break;
         case ServerDirectiveKind::multithreading:
             multithreading_enabled_ = std::get<bool>(directive.value.scalar);
+            server_.multithreading_enabled = multithreading_enabled_;
             break;
         case ServerDirectiveKind::worker_threads:
             worker_threads_ = std::get<std::uint64_t>(directive.value.scalar);
+            server_.worker_threads = static_cast<std::size_t>(worker_threads_);
             worker_threads_directive_ = &directive;
             break;
         case ServerDirectiveKind::log_level:
@@ -272,7 +436,7 @@ class ValidationState final
     void validate_transport_mode(const ParsedServerDirective &directive)
     {
         const auto parsed =
-            http::parse_http_transport_mode(std::get<std::string>(directive.value.scalar));
+            parse_configured_transport_mode(std::get<std::string>(directive.value.scalar));
         if (!parsed)
         {
             transport_mode_valid_ = false;
@@ -280,14 +444,16 @@ class ValidationState final
                              directive.value.location);
             return;
         }
-        transport_mode_ = parsed.value();
+        server_.transport_mode = parsed.value();
     }
 
     /// @brief Requires one numeric address for the sole trusted reverse proxy.
     void validate_trusted_proxy(const ParsedServerDirective &directive)
     {
         trusted_proxy_directive_ = &directive;
-        if (!is_numeric_ip_address(std::get<std::string>(directive.value.scalar)))
+        const auto &address = std::get<std::string>(directive.value.scalar);
+        server_.trusted_proxy = address;
+        if (!parse_numeric_ip_address(address))
         {
             add_server_error(ConfigValidationErrorCode::invalid_trusted_proxy, directive,
                              directive.value.location);
@@ -299,11 +465,24 @@ class ValidationState final
     void validate_timeout(const ParsedServerDirective &directive)
     {
         const auto value = std::get<std::uint64_t>(directive.value.scalar);
-        if (value == 0 || value > static_cast<std::uint64_t>(
-                                      http::HttpRequestTimeouts::maximum_config_timeout.count()))
+        if (value == 0 || value > maximum_timeout_ms)
         {
             add_server_error(ConfigValidationErrorCode::timeout_out_of_range, directive,
                              directive.value.location);
+        }
+        switch (directive.kind)
+        {
+        case ServerDirectiveKind::header_timeout_ms:
+            server_.header_timeout_ms = value;
+            break;
+        case ServerDirectiveKind::body_timeout_ms:
+            server_.body_timeout_ms = value;
+            break;
+        case ServerDirectiveKind::request_timeout_ms:
+            server_.request_timeout_ms = value;
+            break;
+        default:
+            break;
         }
     }
 
@@ -312,8 +491,9 @@ class ValidationState final
     {
         const auto &address = std::get<std::string>(directive.value.scalar);
         bind_address_ = address;
+        server_.bind_address = address;
         bind_directive_ = &directive;
-        if (!is_numeric_ip_address(address))
+        if (!parse_numeric_ip_address(address))
         {
             add_server_error(ConfigValidationErrorCode::invalid_bind_address, directive,
                              directive.value.location);
@@ -327,7 +507,7 @@ class ValidationState final
         {
             return;
         }
-        if (transport_mode_ == http::HttpTransportMode::loopback_http)
+        if (server_.transport_mode == ConfiguredTransportMode::loopback_http)
         {
             if (!is_loopback_ip_address(bind_address_) && bind_directive_ != nullptr)
             {
@@ -341,7 +521,7 @@ class ValidationState final
             }
             return;
         }
-        if (transport_mode_ == http::HttpTransportMode::trusted_lan_http)
+        if (server_.transport_mode == ConfiguredTransportMode::trusted_lan_http)
         {
             if (trusted_proxy_directive_ != nullptr)
             {
@@ -373,16 +553,22 @@ class ValidationState final
             add_server_error(ConfigValidationErrorCode::port_out_of_range, directive,
                              directive.value.location);
         }
+        server_.port = static_cast<std::uint16_t>(port);
     }
 
     /// @brief Accepts only severities documented by the persistent format.
     void validate_log_level(const ParsedServerDirective &directive)
     {
         const auto &value = std::get<std::string>(directive.value.scalar);
-        if (!logging::parse_log_severity(value).has_value())
+        const auto level = parse_configured_log_level(value);
+        if (!level)
         {
             add_server_error(ConfigValidationErrorCode::invalid_log_level, directive,
                              directive.value.location);
+        }
+        else
+        {
+            server_.log_level = *level;
         }
     }
 
@@ -393,21 +579,25 @@ class ValidationState final
     /// non-empty `mime_types_file` path can reach validated configuration.
     void validate_mime_types_file(const ParsedServerDirective &directive)
     {
-        if (std::get<std::string>(directive.value.scalar).empty())
+        const auto &path = std::get<std::string>(directive.value.scalar);
+        if (path.empty())
         {
             add_server_error(ConfigValidationErrorCode::invalid_mime_types_file, directive,
                              directive.value.location);
         }
+        server_.mime_types_file = ConfiguredPath{path, directive.value.location};
     }
 
     /// @brief Rejects an empty external owner credential path.
     void validate_credentials_file(const ParsedServerDirective &directive)
     {
-        if (std::get<std::string>(directive.value.scalar).empty())
+        const auto &path = std::get<std::string>(directive.value.scalar);
+        if (path.empty())
         {
             add_server_error(ConfigValidationErrorCode::invalid_credentials_file, directive,
                              directive.value.location);
         }
+        server_.credentials_file = ConfiguredPath{path, directive.value.location};
     }
 
     /// @brief Enforces the dependency between multithreading and worker count.
@@ -486,6 +676,8 @@ class ValidationState final
     {
         std::unordered_set<LocationDirectiveKind> encountered;
         const ParsedLocationDirective *path_directive = nullptr;
+        LocationSettings settings;
+        settings.api_path = location.api_path;
         for (const auto &directive : location.directives)
         {
             if (!encountered.insert(directive.kind).second)
@@ -498,13 +690,30 @@ class ValidationState final
             {
                 path_directive = &directive;
             }
+            else if (directive.kind == LocationDirectiveKind::read_permission)
+            {
+                settings.allow_read = std::get<bool>(directive.value.scalar);
+            }
+            else if (directive.kind == LocationDirectiveKind::write_permission)
+            {
+                settings.allow_write = std::get<bool>(directive.value.scalar);
+            }
+            else if (directive.kind == LocationDirectiveKind::delete_permission)
+            {
+                settings.allow_delete = std::get<bool>(directive.value.scalar);
+            }
         }
-        validate_location_root(location, path_directive);
+        if (const auto root = validate_location_root(location, path_directive))
+        {
+            settings.root = *root;
+            server_.locations.push_back(std::move(settings));
+        }
     }
 
-    /// @brief Requires a path and delegates canonical filesystem checks to SharedRoot.
-    void validate_location_root(const ParsedLocationBlock &location,
-                                const ParsedLocationDirective *path_directive)
+    /// @brief Requires nonempty path text while deferring environment checks to bootstrap.
+    [[nodiscard]] std::optional<ConfiguredPath>
+    validate_location_root(const ParsedLocationBlock &location,
+                           const ParsedLocationDirective *path_directive)
     {
         if (path_directive == nullptr)
         {
@@ -513,22 +722,20 @@ class ValidationState final
             error.location_directive = LocationDirectiveKind::path;
             error.location_path = location.api_path;
             errors_.push_back(std::move(error));
-            return;
+            return std::nullopt;
         }
 
         const auto &path_text = std::get<std::string>(path_directive->value.scalar);
-        auto root_result = SharedRoot::create(path_from_utf8(path_text));
-        if (!root_result)
+        if (path_text.empty())
         {
             ConfigValidationError error{ConfigValidationErrorCode::invalid_location_root,
                                         path_directive->value.location};
             error.location_directive = LocationDirectiveKind::path;
             error.location_path = location.api_path;
-            error.shared_root_error = std::move(root_result.error());
             errors_.push_back(std::move(error));
-            return;
+            return std::nullopt;
         }
-        location_roots_.push_back(std::move(root_result).value());
+        return ConfiguredPath{path_text, path_directive->value.location};
     }
 
     /// @brief Adds an error associated with one server directive.
@@ -570,12 +777,11 @@ class ValidationState final
 
     const ParsedConfiguration &configuration_;
     std::vector<ConfigValidationError> errors_;
-    std::vector<SharedRoot> location_roots_;
+    ServerSettings server_;
     bool multithreading_enabled_{false};
     std::uint64_t worker_threads_{};
     const ParsedServerDirective *worker_threads_directive_{};
     std::string bind_address_{"127.0.0.1"};
-    http::HttpTransportMode transport_mode_{http::HttpTransportMode::loopback_http};
     bool transport_mode_valid_{true};
     const ParsedServerDirective *bind_directive_{};
     const ParsedServerDirective *trusted_proxy_directive_{};
@@ -590,8 +796,8 @@ ConfigValidationError::ConfigValidationError(const ConfigValidationErrorCode err
 }
 
 ValidatedConfiguration::ValidatedConfiguration(ParsedConfiguration parsed_configuration,
-                                               std::vector<SharedRoot> location_roots)
-    : parsed_(std::move(parsed_configuration)), location_roots_(std::move(location_roots))
+                                               AppSettings settings)
+    : parsed_(std::move(parsed_configuration)), settings_(std::move(settings))
 {
 }
 
@@ -605,14 +811,14 @@ ParsedConfiguration ValidatedConfiguration::release_parsed() && noexcept
     return std::move(parsed_);
 }
 
-const std::vector<SharedRoot> &ValidatedConfiguration::location_roots() const noexcept
+const AppSettings &ValidatedConfiguration::settings() const noexcept
 {
-    return location_roots_;
+    return settings_;
 }
 
-std::vector<SharedRoot> ValidatedConfiguration::release_location_roots() && noexcept
+AppSettings ValidatedConfiguration::release_settings() && noexcept
 {
-    return std::move(location_roots_);
+    return std::move(settings_);
 }
 
 Result<ValidatedConfiguration, std::vector<ConfigValidationError>>
@@ -625,7 +831,7 @@ ConfigValidator::validate(ParsedConfiguration configuration)
         return unexpected(std::move(errors));
     }
     return ValidatedConfiguration(std::move(configuration),
-                                  std::move(validation).release_location_roots());
+                                  std::move(validation).release_settings());
 }
 
 /// @brief Describes a validation failure, including the accepted receive-timeout range.
@@ -676,7 +882,7 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
     case ConfigValidationErrorCode::missing_location_root:
         return "the required location filesystem path is missing";
     case ConfigValidationErrorCode::invalid_location_root:
-        return "location filesystem path was rejected as a shared root";
+        return "location filesystem path must not be empty";
     }
     return "unknown configuration validation error";
 }

@@ -15,26 +15,31 @@ constexpr std::string_view dummy_password = "SpareNode unknown-login verificatio
 
 Result<AuthenticationService, AuthenticationServiceCreateErrorCode>
 AuthenticationService::create(std::shared_ptr<const CredentialProvider> provider,
-                              PasswordVerifier verifier)
+                              std::shared_ptr<const PasswordVerifier> verifier)
 {
     if (!provider)
     {
         return unexpected(AuthenticationServiceCreateErrorCode::missing_provider);
     }
+    if (!verifier)
+    {
+        return unexpected(AuthenticationServiceCreateErrorCode::verifier_unavailable);
+    }
 
     const auto input = std::span(dummy_password.data(), dummy_password.size());
-    auto dummy_result = verifier.hash(input);
+    auto dummy_result = verifier->hash(input);
     if (!dummy_result)
     {
         return unexpected(AuthenticationServiceCreateErrorCode::verifier_unavailable);
     }
-    return AuthenticationService(std::move(provider), verifier, std::move(dummy_result).value());
+    return AuthenticationService(std::move(provider), std::move(verifier),
+                                 std::move(dummy_result).value());
 }
 
 AuthenticationService::AuthenticationService(std::shared_ptr<const CredentialProvider> provider,
-                                             PasswordVerifier verifier,
+                                             std::shared_ptr<const PasswordVerifier> verifier,
                                              std::string dummy_verifier) noexcept
-    : provider_(std::move(provider)), verifier_(verifier),
+    : provider_(std::move(provider)), verifier_(std::move(verifier)),
       dummy_verifier_(std::move(dummy_verifier))
 {
 }
@@ -55,7 +60,7 @@ AuthenticationService::authenticate(const std::string_view login,
         const auto &credential = credential_result.value();
         const std::string_view encoded_verifier =
             credential.has_value() ? credential->encoded_password_verifier : dummy_verifier_;
-        const auto matches = verifier_.verify(password.bytes(), encoded_verifier);
+        const auto matches = verifier_->verify(password.bytes(), encoded_verifier);
         if (!matches)
         {
             return unexpected(AuthenticationErrorCode::unavailable);

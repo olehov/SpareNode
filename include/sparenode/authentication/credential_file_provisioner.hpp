@@ -6,7 +6,7 @@
 
 #include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::authentication
 {

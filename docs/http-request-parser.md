@@ -64,11 +64,12 @@ Limits are C++ parser settings; payload defaults remain 1 MiB. Payload or framin
 limit errors map to 413, while chunk/trailer syntax errors map to 400.
 
 Session `RequestBodyIngestor` consumes the decoder output directly for either framing
-mode using a fixed 16 KiB decode buffer. It lazily creates a private, collision-safe
-temporary file for nonempty payloads, writes each decoded span, and flushes and closes
-the file before routing. `HttpRequestView::body_size()` reports the decoded length and
-`temporary_body()` shares the completed artifact; its destructor removes the path
-unless a later upload finalizer explicitly releases ownership. Protocol errors,
+mode using a fixed 16 KiB decode buffer. An injected storage factory lazily creates a
+private, collision-safe temporary file for nonempty payloads. The storage writer owns
+bounded I/O isolation, flushes and closes the file before routing, and retains cleanup
+ownership after an interrupted native call. `HttpRequestView::body_size()` reports the
+decoded length and `temporary_body()` shares the completed artifact; its destructor
+removes the path unless a later upload finalizer explicitly releases ownership. Protocol errors,
 limit violations, cancellation, allocation failures, and native file failures remain
 distinct terminal errors, and partial artifacts are removed through RAII.
 

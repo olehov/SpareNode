@@ -20,7 +20,7 @@
 
 #include "sparenode/http/response/detail/response_date.hpp"
 #include "sparenode/http/response/http_response.hpp"
-#include "sparenode/http/response/http_response_writer.hpp"
+#include "sparenode/http/transport/http_response_writer.hpp"
 #include "support/connected_tcp_pair.hpp"
 #include "support/optional.hpp"
 #include "support/temporary_directory.hpp"

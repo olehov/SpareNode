@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "sparenode/result.hpp"
+#include "sparenode/foundation/result.hpp"
 
 namespace sparenode::authentication
 {
@@ -25,34 +25,43 @@ enum class PasswordVerifierErrorCode : std::uint8_t
     resource_exhausted,    ///< Result storage could not be allocated.
 };
 
-/// @brief Wraps libsodium's Argon2id encoded-password API.
-class PasswordVerifier final
+/// @brief Abstracts password hashing and verification from concrete cryptography.
+class PasswordVerifier
 {
   public:
-    /// @brief Initializes the process-wide vetted cryptographic runtime.
-    /// @return Ready verifier, or an initialization failure.
-    [[nodiscard]] static Result<PasswordVerifier, PasswordVerifierErrorCode> create() noexcept;
+    virtual ~PasswordVerifier() = default;
 
     /// @brief Creates an encoded Argon2id verifier with a cryptographically random salt.
     /// @param[in] password Temporary plaintext bytes to hash without retaining them.
     /// @return Self-contained encoded verifier, or a bounded hashing failure.
-    [[nodiscard]] Result<std::string, PasswordVerifierErrorCode>
-    hash(std::span<const char> password) const;
+    [[nodiscard]] virtual Result<std::string, PasswordVerifierErrorCode>
+    hash(std::span<const char> password) const = 0;
 
     /// @brief Verifies plaintext against one prevalidated encoded Argon2id verifier.
     /// @param[in] password Temporary plaintext bytes to verify without retaining them.
     /// @param[in] encoded_verifier Algorithm, parameters, salt, and hash from a provider.
     /// @return Match result, or `invalid_verifier` for unsupported credential material.
-    [[nodiscard]] Result<bool, PasswordVerifierErrorCode>
-    verify(std::span<const char> password, std::string_view encoded_verifier) const noexcept;
+    [[nodiscard]] virtual Result<bool, PasswordVerifierErrorCode>
+    verify(std::span<const char> password, std::string_view encoded_verifier) const noexcept = 0;
 
     /// @brief Checks the verifier syntax, algorithm, and bounded parameter profile.
     /// @param[in] encoded_verifier Candidate provider material.
     /// @return `true` only for the currently supported Argon2id profile.
-    [[nodiscard]] static bool is_usable(std::string_view encoded_verifier) noexcept;
+    [[nodiscard]] virtual bool is_usable(std::string_view encoded_verifier) const noexcept = 0;
 
-  private:
+  protected:
+    /// @brief Allows construction only through concrete verifier adapters.
     PasswordVerifier() = default;
+    /// @brief Supports copying concrete verifier adapters.
+    PasswordVerifier(const PasswordVerifier &) = default;
+    /// @brief Supports copy assignment for concrete verifier adapters.
+    /// @return This verifier port.
+    PasswordVerifier &operator=(const PasswordVerifier &) = default;
+    /// @brief Supports moving concrete verifier adapters.
+    PasswordVerifier(PasswordVerifier &&) noexcept = default;
+    /// @brief Supports move assignment for concrete verifier adapters.
+    /// @return This verifier port.
+    PasswordVerifier &operator=(PasswordVerifier &&) noexcept = default;
 };
 
 } // namespace sparenode::authentication
