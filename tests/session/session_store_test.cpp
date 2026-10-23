@@ -261,6 +261,16 @@ TEST_CASE("Session store retries a generated digest collision", "[session][colli
     REQUIRE(second);
     CHECK(second.value() == "second");
     CHECK(store.value()->size() == 2);
+
+    auto first_principal = store.value()->authenticate(first.value());
+    REQUIRE(first_principal);
+    REQUIRE(first_principal->has_value());
+    CHECK(sparenode::test::require_optional(first_principal.value()).identity == "first");
+
+    auto second_principal = store.value()->authenticate(second.value());
+    REQUIRE(second_principal);
+    REQUIRE(second_principal->has_value());
+    CHECK(sparenode::test::require_optional(second_principal.value()).identity == "second");
 }
 
 TEST_CASE("Session store evicts expired then least recently active entries", "[session][bounds]")
