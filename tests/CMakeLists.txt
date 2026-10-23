@@ -142,6 +142,59 @@ sparenode_enable_static_analysis(sparenode_authentication_file_tests)
 
 catch_discover_tests(sparenode_authentication_file_tests)
 
+add_executable(sparenode_session_core_tests
+    session/session_store_test.cpp
+)
+
+target_link_libraries(sparenode_session_core_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_session_core
+)
+
+target_include_directories(sparenode_session_core_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_session_core_tests)
+sparenode_enable_cppcheck(sparenode_session_core_tests)
+sparenode_enable_static_analysis(sparenode_session_core_tests)
+
+catch_discover_tests(sparenode_session_core_tests)
+
+add_executable(sparenode_session_sodium_tests
+    session/sodium_session_credential_codec_test.cpp
+)
+
+target_link_libraries(sparenode_session_sodium_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_session_sodium
+)
+
+sparenode_enable_compiler_warnings(sparenode_session_sodium_tests)
+sparenode_enable_cppcheck(sparenode_session_sodium_tests)
+sparenode_enable_static_analysis(sparenode_session_sodium_tests)
+
+catch_discover_tests(sparenode_session_sodium_tests)
+
+add_executable(sparenode_authentication_api_tests
+    authentication/session_authentication_policy_test.cpp
+)
+
+target_link_libraries(sparenode_authentication_api_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_api
+)
+
+target_include_directories(sparenode_authentication_api_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+sparenode_enable_compiler_warnings(sparenode_authentication_api_tests)
+sparenode_enable_cppcheck(sparenode_authentication_api_tests)
+sparenode_enable_static_analysis(sparenode_authentication_api_tests)
+
+catch_discover_tests(sparenode_authentication_api_tests)
+
 add_executable(sparenode_http_core_tests
     http/request/http_request_parser_test.cpp
     http/routing/http_router_test.cpp

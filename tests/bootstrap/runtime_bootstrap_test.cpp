@@ -72,6 +72,7 @@ TEST_CASE("Runtime bootstrap constructs equivalent default runtime settings",
     auto runtime = sparenode::bootstrap::RuntimeBootstrap::build(load_configuration(config_path));
 
     REQUIRE(runtime.has_value());
+    REQUIRE(runtime->sessions() != nullptr);
     REQUIRE(runtime->config().servers().size() == 1);
     const auto &server = runtime->config().servers().front();
     CHECK(server.endpoint() == sparenode::network::TcpEndpoint{"127.0.0.1", 8080});

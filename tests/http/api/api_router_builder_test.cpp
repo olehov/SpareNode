@@ -96,7 +96,7 @@ TEST_CASE("Protected route policies execute in the fixed security order", "[http
                 [&events, next = std::move(next)](sparenode::http::api::ApiRequestContext &context)
                 {
                     events.emplace_back("session");
-                    context.authenticated_principal = "owner";
+                    context.authenticated_principal = sparenode::authentication::Principal{"owner"};
                     return next(context);
                 });
         },
@@ -108,7 +108,8 @@ TEST_CASE("Protected route policies execute in the fixed security order", "[http
                 [&events, next = std::move(next)](sparenode::http::api::ApiRequestContext &context)
                 {
                     events.emplace_back("authorization");
-                    REQUIRE(context.authenticated_principal == "owner");
+                    REQUIRE(context.authenticated_principal.has_value());
+                    REQUIRE(context.authenticated_principal->identity == "owner");
                     return next(context);
                 });
         },
