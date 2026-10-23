@@ -16,10 +16,13 @@ The initial dependency boundaries are:
 | `sparenode_network_logging` | Network error formatting and logging observers | `sparenode_logging`, `sparenode_network` |
 | `sparenode_configuration` | File loading, lexer, parser, source-located validation, and primitive settings DTOs | `sparenode_foundation` |
 | `sparenode_http_core` | HTTP request and response models, parsing, MIME metadata, and routing | `sparenode_foundation`, `sparenode_storage` |
-| `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_http_core` |
+| `sparenode_api_core` | Public/protected route composition and the protected-route policy boundary | `sparenode_authentication_core`, `sparenode_http_core` |
 | `sparenode_authentication_core` | Principals, credential and password-verification ports, sensitive input, and authentication use cases | `sparenode_foundation` |
 | `sparenode_authentication_sodium` | Libsodium Argon2id implementation of the password-verification port | `sparenode_authentication_core` |
 | `sparenode_authentication_file` | Bounded credential parsing, secure file loading, placement validation, and provisioning | `sparenode_authentication_core`, `sparenode_configuration`, `sparenode_filesystem` |
+| `sparenode_session_core` | Bounded in-memory session lifecycle behind injected credential cryptography and monotonic time | `sparenode_authentication_core`, `sparenode_foundation` |
+| `sparenode_session_sodium` | Secure 256-bit session credential generation and one-way lookup digests | `sparenode_session_core` |
+| `sparenode_authentication_api` | Cookie-backed session authentication policy for protected API routes | `sparenode_api_core`, `sparenode_session_core` |
 | `sparenode_filesystem_application` | Permission enforcement and transport-neutral filesystem use-case orchestration | `sparenode_filesystem`, `sparenode_foundation`, `sparenode_storage` |
 | `sparenode_filesystem_api` | Filesystem route registration, focused HTTP handlers, JSON responses, MIME headers, and public error mapping | `sparenode_api_core`, `sparenode_filesystem_application`, `sparenode_http_core` |
 | `sparenode_http_transport` | Bounded HTTP connection ingestion and response transmission over TCP | `sparenode_http_core`, `sparenode_network`, `sparenode_storage` |
@@ -67,6 +70,14 @@ implement those ports in separate targets. Bootstrap selects both concrete
 adapters, verifies that the credential file is outside every shared root, and
 hands only the source-independent `AuthenticationService` to runtime composition.
 The credential provisioning executable selects the same adapters explicitly.
+
+Session core retains only one-way credential digests and is independent of HTTP,
+configuration, files, and libsodium. Its synchronized store applies the centrally
+defined 12-hour absolute lifetime, 30-minute idle timeout, and 64-entry bound. The
+sodium adapter generates 256-bit opaque credentials, while bootstrap owns the
+process-wide store selected for API composition. Authentication API translates the
+host-only session cookie into the fixed protected-route policy and supplies a
+source-independent `Principal` to later authorization stages.
 
 `RunningApplication` receives `ServerRuntimePlan` objects and has no configuration
 dependency. Each plan already owns its endpoint, handler, admission limits, and

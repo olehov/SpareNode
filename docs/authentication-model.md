@@ -55,6 +55,12 @@ bounded profile, startup failures, and provisioning procedure are documented in
 [Owner credential provisioning](credential-provisioning.md). Parameter upgrades and secure
 password setup remain outside the session and HTTP layers.
 
+SN-043 implements the process-wide synchronized session store behind a cryptographic credential
+codec. The core store depends only on authentication contracts and monotonic time; bootstrap
+selects the libsodium adapter. Protected-route session policy validates the host-only
+`spnode_session` cookie and supplies the authenticated principal to the remaining policy stages.
+SN-107 retains ownership of the final browser cookie attributes and cross-site rules.
+
 ## Authentication flow
 
 ```text
