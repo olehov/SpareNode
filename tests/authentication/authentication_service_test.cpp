@@ -132,7 +132,7 @@ TEST_CASE("Authentication service verifies provider records and hides account ex
     const auto authenticated = service.authenticate(
         "admin", sparenode::authentication::SensitivePassword("owner password"));
     REQUIRE(authenticated.has_value());
-    CHECK(authenticated->identity == "owner");
+    CHECK(authenticated->principal.identity == "owner");
     CHECK(authenticated->canonical_login == "admin");
 
     const auto incorrect = service.authenticate(

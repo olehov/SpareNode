@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "sparenode/authentication/principal.hpp"
 #include "sparenode/foundation/result.hpp"
 #include "sparenode/http/routing/http_router.hpp"
 
@@ -15,7 +16,8 @@ struct ApiRequestContext
 {
     const HttpRequestView &request;        ///< Parsed request before operation-specific access.
     const HttpRouteParameters &parameters; ///< Matched route parameters, still undecoded.
-    std::optional<std::string> authenticated_principal; ///< Identity established by a session.
+    std::optional<authentication::Principal>
+        authenticated_principal; ///< Identity established by a session.
 };
 
 /// @brief Handles one request after all outer protected-route stages have accepted it.

@@ -69,7 +69,8 @@ AuthenticationService::authenticate(const std::string_view login,
         {
             return unexpected(AuthenticationErrorCode::invalid_credentials);
         }
-        return AuthenticatedCredential{credential->identity, credential->canonical_login};
+        return AuthenticatedCredential{Principal{credential->identity},
+                                       credential->canonical_login};
     }
     catch (const std::bad_alloc &)
     {

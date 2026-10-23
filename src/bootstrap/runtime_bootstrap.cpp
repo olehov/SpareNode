@@ -16,6 +16,7 @@
 #include "sparenode/http/transport/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
 #include "sparenode/network/tcp_endpoint.hpp"
+#include "sparenode/session/sodium_session_credential_codec.hpp"
 
 namespace sparenode::bootstrap
 {
@@ -175,6 +176,43 @@ build_authentication(const std::filesystem::path &credentials_path,
     }
 }
 
+/// @brief Selects the libsodium credential codec behind the bounded session core.
+[[nodiscard]] Result<std::shared_ptr<session::SessionStore>, RuntimeBootstrapErrorCode>
+build_sessions()
+{
+    auto session_codec = session::SodiumSessionCredentialCodec::create();
+    if (!session_codec)
+    {
+        return unexpected(RuntimeBootstrapErrorCode::session_initialization_failed);
+    }
+    auto codec_owner =
+        std::make_shared<session::SodiumSessionCredentialCodec>(std::move(session_codec).value());
+    auto sessions = session::SessionStore::create(std::move(codec_owner));
+    if (!sessions)
+    {
+        return unexpected(RuntimeBootstrapErrorCode::session_initialization_failed);
+    }
+    return std::move(sessions).value();
+}
+
+/// @brief Joins credential verification to the selected bounded session implementation.
+[[nodiscard]] Result<application::SessionAuthenticationService, RuntimeBootstrapErrorCode>
+build_session_authentication(authentication::AuthenticationService authentication)
+{
+    auto sessions = build_sessions();
+    if (!sessions)
+    {
+        return unexpected(sessions.error());
+    }
+    auto service = application::SessionAuthenticationService::create(std::move(authentication),
+                                                                     std::move(sessions).value());
+    if (!service)
+    {
+        return unexpected(RuntimeBootstrapErrorCode::session_initialization_failed);
+    }
+    return std::move(service).value();
+}
+
 /// @brief Appends a path while escaping bytes that can alter terminal output.
 void append_escaped_path(std::ostringstream &output, const std::filesystem::path &path)
 {
@@ -193,9 +231,9 @@ void append_escaped_path(std::ostringstream &output, const std::filesystem::path
 
 /// @brief Stores concrete runtime settings and process-wide dependencies.
 RuntimePlan::RuntimePlan(application::runtime::AppConfig config,
-                         authentication::AuthenticationService authentication,
+                         application::SessionAuthenticationService session_authentication,
                          const logging::LogSeverity process_log_severity) noexcept
-    : config_(std::move(config)), authentication_(std::move(authentication)),
+    : config_(std::move(config)), session_authentication_(std::move(session_authentication)),
       process_log_severity_(process_log_severity)
 {
 }
@@ -209,7 +247,18 @@ const application::runtime::AppConfig &RuntimePlan::config() const noexcept
 /// @brief Exposes the process-wide authentication service.
 const authentication::AuthenticationService &RuntimePlan::authentication() const noexcept
 {
-    return authentication_;
+    return session_authentication_.authentication();
+}
+
+const application::SessionAuthenticationService &
+RuntimePlan::session_authentication() const noexcept
+{
+    return session_authentication_;
+}
+
+const std::shared_ptr<session::SessionStore> &RuntimePlan::sessions() const noexcept
+{
+    return session_authentication_.sessions();
 }
 
 /// @brief Returns the threshold used for process lifecycle messages.
@@ -276,8 +325,15 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
                                       {},
                                       authentication.error()});
         }
+        auto session_authentication =
+            build_session_authentication(std::move(authentication).value());
+        if (!session_authentication)
+        {
+            return unexpected(RuntimeBootstrapError{
+                RuntimeBootstrapErrorCode::session_initialization_failed, {}, {}, {}, {}, {}});
+        }
         return RuntimePlan(application::runtime::AppConfig(std::move(runtime_servers)),
-                           std::move(authentication).value(),
+                           std::move(session_authentication).value(),
                            process_log_severity.value_or(logging::LogSeverity::info));
     }
     catch (const std::bad_alloc &)
@@ -326,6 +382,8 @@ const char *to_string(const RuntimeBootstrapErrorCode code) noexcept
         return "configured MIME registry could not be constructed";
     case RuntimeBootstrapErrorCode::authentication_failed:
         return "configured authentication service could not be constructed";
+    case RuntimeBootstrapErrorCode::session_initialization_failed:
+        return "bounded session service could not be constructed";
     case RuntimeBootstrapErrorCode::resource_allocation_failed:
         return "runtime bootstrap memory allocation failed";
     }

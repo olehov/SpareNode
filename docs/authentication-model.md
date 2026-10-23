@@ -55,6 +55,14 @@ bounded profile, startup failures, and provisioning procedure are documented in
 [Owner credential provisioning](credential-provisioning.md). Parameter upgrades and secure
 password setup remain outside the session and HTTP layers.
 
+SN-043 implements the process-wide synchronized session store behind a cryptographic credential
+codec and an application service that joins successful credential verification to session
+creation and explicit logout to session invalidation. The core store depends only on
+authentication contracts and monotonic time; bootstrap selects the libsodium adapter and composes
+the application service. Protected-route session policy validates the host-only
+`spnode_session` cookie and supplies the authenticated principal to the remaining policy stages.
+SN-107 retains ownership of the final browser cookie attributes and cross-site rules.
+
 ## Authentication flow
 
 ```text
@@ -255,7 +263,7 @@ one another.
 | Issue | Responsibility under this model |
 | --- | --- |
 | SN-041 | Credential provider, secret provisioning, vetted password hashing, and verification. |
-| SN-043 | Principal types, bounded session store, cookie credential validation, expiry, and protected-route enforcement. |
+| SN-043 | Principal types, bounded session store, login/logout lifecycle orchestration, cookie credential validation, expiry, and protected-route enforcement. |
 | SN-042 | Bounded login/logout parsing and responses integrated with SN-041 and SN-043. |
 | SN-107 | Cookie hardening, Origin/CSRF policy, CORS restrictions, and preview-origin isolation. |
 | SN-044 | Bounded failed-login throttling without permanent owner lockout. |
