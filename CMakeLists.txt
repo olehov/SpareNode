@@ -346,6 +346,19 @@ sparenode_enable_compiler_warnings(sparenode_session_core)
 sparenode_enable_cppcheck(sparenode_session_core)
 sparenode_enable_static_analysis(sparenode_session_core)
 
+add_library(sparenode_session_application STATIC
+    src/application/session_authentication_service.cpp
+)
+
+target_link_libraries(sparenode_session_application PUBLIC
+    sparenode_authentication_core
+    sparenode_session_core
+)
+
+sparenode_enable_compiler_warnings(sparenode_session_application)
+sparenode_enable_cppcheck(sparenode_session_application)
+sparenode_enable_static_analysis(sparenode_session_application)
+
 add_library(sparenode_session_sodium STATIC
     src/session/sodium_session_credential_codec.cpp
 )
@@ -419,6 +432,7 @@ target_link_libraries(sparenode_bootstrap PUBLIC
     sparenode_authentication_file
     sparenode_configuration
     sparenode_runtime_config
+    sparenode_session_application
     sparenode_session_core
 )
 
@@ -521,6 +535,10 @@ sparenode_register_architecture(sparenode_session_core DEPENDS
     sparenode_authentication_core
     sparenode_foundation
 )
+sparenode_register_architecture(sparenode_session_application DEPENDS
+    sparenode_authentication_core
+    sparenode_session_core
+)
 sparenode_register_architecture(sparenode_session_sodium DEPENDS sparenode_session_core)
 sparenode_register_architecture(sparenode_authentication_api DEPENDS
     sparenode_api_core
@@ -541,6 +559,7 @@ sparenode_register_architecture(sparenode_bootstrap DEPENDS
     sparenode_authentication_sodium
     sparenode_configuration
     sparenode_runtime_config
+    sparenode_session_application
     sparenode_session_core
     sparenode_session_sodium
 )
