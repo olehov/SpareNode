@@ -7,6 +7,7 @@
 
 #include "sparenode/authentication/credential_provider.hpp"
 #include "sparenode/authentication/password_verifier.hpp"
+#include "sparenode/authentication/principal.hpp"
 #include "sparenode/authentication/sensitive_password.hpp"
 
 namespace sparenode::authentication
@@ -15,7 +16,7 @@ namespace sparenode::authentication
 /// @brief Identity established by successful credential verification.
 struct AuthenticatedCredential
 {
-    std::string identity;        ///< Opaque identity used by the future session layer.
+    Principal principal;         ///< Source-independent identity admitted to a session.
     std::string canonical_login; ///< Provider-owned login for internal decisions.
 };
 

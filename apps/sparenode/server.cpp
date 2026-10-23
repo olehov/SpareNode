@@ -9,6 +9,7 @@
 
 #include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/application/running_application.hpp"
+#include "sparenode/authentication/api/session_authentication_policy.hpp"
 #include "sparenode/bootstrap/runtime_bootstrap.hpp"
 #include "sparenode/configuration/config_loader.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
@@ -55,10 +56,16 @@ void write_startup_failure(const std::string &diagnostic)
 /// @brief Composes every transport and application dependency for one server.
 [[nodiscard]] Result<application::ServerRuntimePlan, http::FilesystemApiError>
 make_server_runtime_plan(const application::runtime::ServerConfig &server,
-                         const std::shared_ptr<logging::LogSink> &console_sink)
+                         const std::shared_ptr<logging::LogSink> &console_sink,
+                         const std::shared_ptr<session::SessionStore> &sessions)
 {
     const logging::Logger logger(console_sink, server.minimum_log_severity());
-    auto router_result = http::make_filesystem_api_router(make_filesystem_api_settings(server));
+    http::api::ProtectedRoutePolicies policies;
+    policies.session_authentication =
+        authentication::api::make_session_authentication_policy(sessions);
+    auto router_result = http::make_filesystem_api_router(
+        make_filesystem_api_settings(server),
+        http::api::make_protected_route_decorator(std::move(policies)));
     if (!router_result)
     {
         return unexpected(router_result.error());
@@ -86,13 +93,14 @@ make_server_runtime_plan(const application::runtime::ServerConfig &server,
 /// @brief Composes independent runtime plans for every validated server.
 [[nodiscard]] Result<std::vector<application::ServerRuntimePlan>, http::FilesystemApiError>
 make_server_runtime_plans(const application::runtime::AppConfig &config,
-                          const std::shared_ptr<logging::LogSink> &console_sink)
+                          const std::shared_ptr<logging::LogSink> &console_sink,
+                          const std::shared_ptr<session::SessionStore> &sessions)
 {
     std::vector<application::ServerRuntimePlan> plans;
     plans.reserve(config.servers().size());
     for (const auto &server : config.servers())
     {
-        auto plan = make_server_runtime_plan(server, console_sink);
+        auto plan = make_server_runtime_plan(server, console_sink, sessions);
         if (!plan)
         {
             return unexpected(plan.error());
@@ -126,7 +134,8 @@ int run_server(const application::StartupOptions &options)
     const logging::Logger process_logger(console_sink, runtime_result->process_log_severity());
 
     // Compose routes, HTTP policies, admission, and observers independently per server.
-    auto plans_result = make_server_runtime_plans(runtime_result->config(), console_sink);
+    auto plans_result = make_server_runtime_plans(runtime_result->config(), console_sink,
+                                                  runtime_result->sessions());
     if (!plans_result)
     {
         write_startup_failure(std::string("error: ") + http::to_string(plans_result.error().code));
