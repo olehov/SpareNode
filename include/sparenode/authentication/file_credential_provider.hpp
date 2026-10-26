@@ -13,9 +13,6 @@
 namespace sparenode::authentication
 {
 
-/// @brief Maximum byte length of the MVP owner login identifier.
-inline constexpr std::size_t maximum_owner_login_bytes = 128;
-
 /// @brief Maximum encoded size accepted for one credential file.
 inline constexpr std::size_t maximum_credential_file_bytes = 4096;
 

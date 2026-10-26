@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "sparenode/authentication/api/session_authentication_policy.hpp"
-#include "sparenode/authentication/file_credential_provider.hpp"
+#include "sparenode/authentication/credential_provider.hpp"
 #include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/foundation/text/hexadecimal.hpp"
 #include "sparenode/foundation/text/utf8.hpp"
@@ -123,6 +123,7 @@ class LoginJsonParser final
         {
             return false;
         }
+        const SensitiveTextEraser erase_value(*value);
         if (*name == "login" && !login && value->size() <= maximum_owner_login_bytes)
         {
             login = std::move(*value);
@@ -132,7 +133,6 @@ class LoginJsonParser final
         {
             return false;
         }
-        const SensitiveTextEraser erase_password(*value);
         const bool valid_password = !password && value->size() <= maximum_password_bytes;
         if (valid_password)
         {
@@ -254,6 +254,15 @@ class LoginJsonParser final
         }
         constexpr unsigned char first_unescaped_json_byte = 0x20U;
         std::string output;
+
+        // Decoded text cannot exceed the remaining bounded JSON input. Reserving that upper bound
+        // prevents reallocations from leaving discarded partial password copies in heap memory.
+        output.reserve(input_.size() - position_);
+        const auto reject = [&output]() -> std::optional<std::string>
+        {
+            erase_sensitive_bytes(std::span(output.data(), output.size()));
+            return std::nullopt;
+        };
         while (position_ < input_.size())
         {
             const auto byte = static_cast<unsigned char>(input_[position_++]);
@@ -263,7 +272,7 @@ class LoginJsonParser final
             }
             if (byte < first_unescaped_json_byte)
             {
-                return std::nullopt;
+                return reject();
             }
             if (byte != '\\')
             {
@@ -272,10 +281,10 @@ class LoginJsonParser final
             }
             if (!append_escape(output))
             {
-                return std::nullopt;
+                return reject();
             }
         }
-        return std::nullopt;
+        return reject();
     }
 
     std::string_view input_; ///< Complete bounded request payload.
