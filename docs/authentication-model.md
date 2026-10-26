@@ -133,6 +133,19 @@ surface.
 The login contract accepts a login identifier and password over the transport permitted by
 SN-108. The following rules apply:
 
+```http
+POST /api/auth/login HTTP/1.1
+Content-Type: application/json; charset=utf-8
+
+{"login":"owner","password":"..."}
+```
+
+The complete decoded JSON body is limited to 4096 bytes and contains exactly one non-empty
+`login` string and one non-empty `password` string. Unknown or duplicate members, invalid UTF-8,
+invalid JSON escapes, trailing data, a missing/duplicate `Content-Type`, and any other media type
+are rejected before password verification. Unlike filesystem request bodies, this small credential
+body remains in an erasable memory allocation and never enters temporary-file storage.
+
 1. Parse only the documented bounded media type and schema.
 2. Apply SN-044 throttling before an expensive password verification.
 3. Verify through the credential-provider and password-verifier boundaries.
@@ -143,6 +156,9 @@ SN-108. The following rules apply:
    identifier across login.
 6. Do not return credential records or identity details beyond what the client needs to establish
    the owner session.
+
+Success returns `204 No Content` and a host-only `spnode_session` cookie scoped to `Path=/` with
+`HttpOnly`. SN-107 owns the final `Secure`, `SameSite`, Origin, and CSRF policy.
 
 Malformed input returns `400 Bad Request`. Temporarily unavailable credential infrastructure fails
 closed with `503 Service Unavailable` and the stable
