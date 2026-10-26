@@ -50,8 +50,7 @@ register_read_routes(api::ApiRouterBuilder &builder, const SharedLocation &locat
         builder, HttpMethod::get, location->api_path,
         [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
         { return detail::handle_resource(location->service, *mime_types, {}); },
-        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters)
-        {
+        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters) {
             return detail::handle_resource(location->service, *mime_types,
                                            parameters.wildcard_suffix());
         });
@@ -65,8 +64,7 @@ register_upload_routes(api::ApiRouterBuilder &builder, const SharedLocation &loc
         builder, HttpMethod::put, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
         { return detail::handle_upload(location->service, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
-        {
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
             return detail::handle_upload(location->service, request, parameters.wildcard_suffix());
         });
 }
@@ -94,8 +92,7 @@ register_deletion_routes(api::ApiRouterBuilder &builder, const SharedLocation &l
         builder, HttpMethod::delete_method, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
         { return detail::handle_deletion(location->service, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
-        {
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
             return detail::handle_deletion(location->service, request,
                                            parameters.wildcard_suffix());
         });

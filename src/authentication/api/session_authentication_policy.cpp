@@ -23,8 +23,7 @@ namespace
            std::ranges::equal(left, right,
                               [](const unsigned char lhs, const unsigned char rhs)
                               {
-                                  const auto lower = [](const unsigned char byte)
-                                  {
+                                  const auto lower = [](const unsigned char byte) {
                                       return byte >= 'A' && byte <= 'Z' ? byte + ('a' - 'A') : byte;
                                   };
                                   return lower(lhs) == lower(rhs);
