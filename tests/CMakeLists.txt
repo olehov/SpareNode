@@ -416,6 +416,7 @@ catch_discover_tests(sparenode_bootstrap_integration_tests PROPERTIES LABELS "in
 add_executable(sparenode_foundation_tests
     foundation/hexadecimal_test.cpp
     foundation/result_test.cpp
+    foundation/secure_erase_test.cpp
     foundation/utf8_test.cpp
 )
 

@@ -98,7 +98,7 @@ TEST_CASE("UTF-8 encoding appends canonical scalar bytes", "[foundation][utf8]")
     for (const auto invalid : {char32_t{0xD800U}, char32_t{0xDFFFU}, char32_t{0x110000U}})
     {
         std::string output = "unchanged";
-        CHECK_FALSE(sparenode::text::utf8::append_code_point(output, invalid));
+        CHECK(!sparenode::text::utf8::append_code_point(output, invalid));
         CHECK(output == "unchanged");
     }
 }
