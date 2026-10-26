@@ -1,5 +1,6 @@
 #include "sparenode/http/transport/detail/buffered_request.hpp"
 
+#include <algorithm>
 #include <string_view>
 
 #include "sparenode/http/detail/ascii.hpp"
@@ -87,7 +88,15 @@ Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
     }
     auto head = std::move(parsed.value()).value_or(HttpRequestHead{});
     const auto head_bytes = head.consumed_bytes;
-    ingestor_.emplace(head, limits_, file_factory_);
+    const auto storage_policy =
+        storage_policy_selector_ ? storage_policy_selector_(head) : RequestBodyStoragePolicy{};
+    auto body_limits = limits_;
+    if (storage_policy.max_body_bytes != 0)
+    {
+        body_limits.max_body_bytes =
+            (std::min)(body_limits.max_body_bytes, storage_policy.max_body_bytes);
+    }
+    ingestor_.emplace(head, body_limits, file_factory_, storage_policy.mode);
     head_ = std::move(head);
     const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options_provider());
     metadata_.resize(head_bytes);

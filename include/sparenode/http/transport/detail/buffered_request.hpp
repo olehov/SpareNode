@@ -22,17 +22,20 @@ enum class RequestExpectation : std::uint8_t
 /// @brief Distinguishes metadata parsing from body ingestion failures.
 using BufferedRequestError = std::variant<HttpRequestParseError, RequestBodyIngestionError>;
 
-/// @brief Adapts streaming body ingestion to the session's file-backed route contract.
-/// Metadata storage freezes after parsing; decoded body bytes stream to temporary storage.
+/// @brief Adapts streaming body ingestion to the storage policy selected from request metadata.
+/// Metadata storage freezes after parsing; decoded bytes use bounded memory or temporary storage.
 class BufferedRequest final
 {
   public:
     /// @brief Retains the limits for one session-owned request.
     /// @param[in] limits Request metadata, decoded payload, and framing budgets.
     /// @param[in] file_factory Optional source of temporary body storage.
+    /// @param[in] storage_policy_selector Optional route-specific body storage selector.
     explicit BufferedRequest(const HttpRequestParserLimits &limits,
-                             storage::TemporaryFileFactory file_factory = {})
-        : limits_(limits), file_factory_(std::move(file_factory))
+                             storage::TemporaryFileFactory file_factory = {},
+                             RequestBodyStoragePolicySelector storage_policy_selector = {})
+        : limits_(limits), file_factory_(std::move(file_factory)),
+          storage_policy_selector_(std::move(storage_policy_selector))
     {
     }
 
@@ -85,6 +88,10 @@ class BufferedRequest final
             throw std::logic_error("HTTP request is incomplete");
         }
         const auto &ingestor = ingestor_.value();
+        if (const auto memory = ingestor.memory_body())
+        {
+            return HttpRequestViewAccess::create(head_.value(), *memory, memory);
+        }
         return HttpRequestViewAccess::create_file_backed(head_.value(), ingestor.body_size(),
                                                          ingestor.artifact(), options);
     }
@@ -101,9 +108,11 @@ class BufferedRequest final
     [[nodiscard]] Result<void, BufferedRequestError>
     feed_body(std::span<const std::byte> input, const storage::TemporaryFileIoOptions &options);
 
-    bool expectation_checked_{};                  ///< Prevents repeated interim responses.
-    HttpRequestParserLimits limits_;              ///< Session parser and decoder limits.
-    storage::TemporaryFileFactory file_factory_;  ///< Optional controlled body-file factory.
+    bool expectation_checked_{};                 ///< Prevents repeated interim responses.
+    HttpRequestParserLimits limits_;             ///< Session parser and decoder limits.
+    storage::TemporaryFileFactory file_factory_; ///< Optional controlled body-file factory.
+    RequestBodyStoragePolicySelector
+        storage_policy_selector_;                 ///< Optional route-specific body storage choice.
     std::vector<std::byte> metadata_;             ///< Frozen metadata backing all header views.
     std::optional<HttpRequestHead> head_;         ///< Validated borrowed request metadata.
     std::optional<RequestBodyIngestor> ingestor_; ///< Framing and temporary-file body sink.

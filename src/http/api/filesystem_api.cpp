@@ -50,7 +50,8 @@ register_read_routes(api::ApiRouterBuilder &builder, const SharedLocation &locat
         builder, HttpMethod::get, location->api_path,
         [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
         { return detail::handle_resource(location->service, *mime_types, {}); },
-        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters) {
+        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters)
+        {
             return detail::handle_resource(location->service, *mime_types,
                                            parameters.wildcard_suffix());
         });
@@ -64,7 +65,8 @@ register_upload_routes(api::ApiRouterBuilder &builder, const SharedLocation &loc
         builder, HttpMethod::put, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
         { return detail::handle_upload(location->service, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+        {
             return detail::handle_upload(location->service, request, parameters.wildcard_suffix());
         });
 }
@@ -92,7 +94,8 @@ register_deletion_routes(api::ApiRouterBuilder &builder, const SharedLocation &l
         builder, HttpMethod::delete_method, location->api_path,
         [location](const HttpRequestView &request, const HttpRouteParameters &)
         { return detail::handle_deletion(location->service, request, {}); },
-        [location](const HttpRequestView &request, const HttpRouteParameters &parameters) {
+        [location](const HttpRequestView &request, const HttpRouteParameters &parameters)
+        {
             return detail::handle_deletion(location->service, request,
                                            parameters.wildcard_suffix());
         });
@@ -100,9 +103,8 @@ register_deletion_routes(api::ApiRouterBuilder &builder, const SharedLocation &l
 
 } // namespace
 
-Result<HttpRouter, FilesystemApiError>
-make_filesystem_api_router(FilesystemApiSettings settings,
-                           api::ProtectedRouteDecorator protected_route_decorator)
+Result<void, FilesystemApiError> register_filesystem_api_routes(api::ApiRouterBuilder &builder,
+                                                                FilesystemApiSettings settings)
 {
     try
     {
@@ -113,7 +115,6 @@ make_filesystem_api_router(FilesystemApiSettings settings,
 
         const auto mime_types =
             std::make_shared<const MimeTypeRegistry>(std::move(settings.mime_types));
-        api::ApiRouterBuilder builder(std::move(protected_route_decorator));
         for (auto &location : settings.locations)
         {
             const auto shared_location =
@@ -135,13 +136,25 @@ make_filesystem_api_router(FilesystemApiSettings settings,
                 return unexpected(registration_failure(remove.error()));
             }
         }
-        return std::move(builder).build();
+        return {};
     }
     catch (const std::bad_alloc &)
     {
         return unexpected(
             FilesystemApiError{FilesystemApiErrorCode::resource_allocation_failed, {}});
     }
+}
+
+Result<HttpRouter, FilesystemApiError>
+make_filesystem_api_router(FilesystemApiSettings settings,
+                           api::ProtectedRouteDecorator protected_route_decorator)
+{
+    api::ApiRouterBuilder builder(std::move(protected_route_decorator));
+    if (auto registered = register_filesystem_api_routes(builder, std::move(settings)); !registered)
+    {
+        return unexpected(registered.error());
+    }
+    return std::move(builder).build();
 }
 
 const char *to_string(const FilesystemApiErrorCode code) noexcept

@@ -42,6 +42,13 @@ struct FilesystemApiSettings
     MimeTypeRegistry mime_types;                  ///< Immutable response media-type mappings.
 };
 
+/// @brief Registers every configured filesystem operation as a protected route.
+/// @param[in,out] builder Shared API router composition boundary.
+/// @param[in] settings Filesystem locations and MIME mappings consumed by the handlers.
+/// @return Success, or a structured API construction failure.
+[[nodiscard]] Result<void, FilesystemApiError>
+register_filesystem_api_routes(api::ApiRouterBuilder &builder, FilesystemApiSettings settings);
+
 /// @brief Builds the immutable-ready version-one filesystem API routes.
 /// @param[in] settings Filesystem locations and MIME mappings consumed by the handlers.
 /// @param[in] protected_route_decorator Optional access policy applied to every endpoint.

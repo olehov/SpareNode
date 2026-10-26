@@ -53,9 +53,10 @@ class RuntimePlan final
     /// @param[in] config Concrete application settings created by bootstrap.
     /// @param[in] session_authentication Ready login and session-lifecycle application service.
     /// @param[in] process_log_severity Process lifecycle logging threshold.
-    RuntimePlan(application::runtime::AppConfig config,
-                application::SessionAuthenticationService session_authentication,
-                logging::LogSeverity process_log_severity) noexcept;
+    RuntimePlan(
+        application::runtime::AppConfig config,
+        std::shared_ptr<const application::SessionAuthenticationService> session_authentication,
+        logging::LogSeverity process_log_severity) noexcept;
 
     /// @brief Returns constructed application settings without transferring ownership.
     /// @return Immutable concrete application settings.
@@ -69,7 +70,7 @@ class RuntimePlan final
 
     /// @brief Returns the process-wide login and session-lifecycle application service.
     /// @return Immutable service whose operations mutate only the shared bounded store.
-    [[nodiscard]] const application::SessionAuthenticationService &
+    [[nodiscard]] const std::shared_ptr<const application::SessionAuthenticationService> &
     session_authentication() const noexcept;
 
     /// @brief Shares the process-wide bounded session service with API composition.
@@ -82,8 +83,8 @@ class RuntimePlan final
 
   private:
     application::runtime::AppConfig config_; ///< Concrete settings ready for application startup.
-    application::SessionAuthenticationService
-        session_authentication_; ///< Ready login and session-lifecycle orchestration.
+    std::shared_ptr<const application::SessionAuthenticationService>
+        session_authentication_; ///< Shared login and session-lifecycle orchestration.
     logging::LogSeverity process_log_severity_; ///< Process-wide lifecycle logging threshold.
 };
 
