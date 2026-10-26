@@ -23,7 +23,8 @@ TEST_CASE("Hexadecimal digit conversion accepts both ASCII letter cases",
 
 TEST_CASE("Hexadecimal digit conversion rejects non-hexadecimal bytes", "[foundation][hexadecimal]")
 {
-    constexpr std::array invalid{'/', ':', 'g', 'G'};
+    constexpr std::array invalid{
+        '\0', '/', ':', '@', '`', 'g', 'G', static_cast<char>(0x80), static_cast<char>(0xFF)};
     for (const auto character : invalid)
     {
         CHECK(!sparenode::text::hexadecimal::digit_value(character));

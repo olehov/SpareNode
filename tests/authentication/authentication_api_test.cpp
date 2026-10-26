@@ -241,7 +241,8 @@ TEST_CASE("Authentication API rejects malformed input before verification", "[au
          {"", R"({"login":"admin"})", R"({"password":"password"})",
           R"({"login":"admin","password":"password","extra":"value"})",
           R"({"login":"admin","login":"other","password":"password"})",
-          R"({"login":7,"password":"password"})", R"({"login":"admin",})"})
+          R"({"login":7,"password":"password"})", R"({"login":"admin",})",
+          R"({"login":"admin","password":"\uDC00"})", R"({"login":"admin","password":"\u12"})"})
     {
         const auto response = dispatch_login(router, body);
         CHECK(response.status_code() == sparenode::http::HttpStatusCode::bad_request);
@@ -260,6 +261,73 @@ TEST_CASE("Authentication API rejects malformed input before verification", "[au
     const auto encoding = dispatch_login(router, invalid_utf8);
     CHECK(encoding.status_code() == sparenode::http::HttpStatusCode::bad_request);
     CHECK(fixture.verifier->calls.load() == initial_calls);
+
+    const std::string exact_limit(sparenode::authentication::api::maximum_login_body_bytes, ' ');
+    const auto exact = dispatch_login(router, exact_limit);
+    CHECK(exact.status_code() == sparenode::http::HttpStatusCode::bad_request);
+
+    const std::string oversized(sparenode::authentication::api::maximum_login_body_bytes + 1, ' ');
+    const auto too_large = dispatch_login(router, oversized);
+    CHECK(too_large.status_code() == sparenode::http::HttpStatusCode::bad_request);
+    CHECK(fixture.verifier->calls.load() == initial_calls);
+}
+
+TEST_CASE("Authentication API rejects ambiguous media and session fields", "[authentication][api]")
+{
+    const auto fixture = make_fixture();
+    const auto router = make_router(fixture);
+    constexpr std::string_view credentials = R"({"login":"admin","password":"password"})";
+
+    for (const std::string_view headers :
+         {"", "Content-Type: application/json\r\nContent-Type: application/json\r\n",
+          "Content-Type: application/json; charset=iso-8859-1\r\n"})
+    {
+        const auto response = dispatch_login(router, credentials, headers);
+        CHECK(response.status_code() == sparenode::http::HttpStatusCode::unsupported_media_type);
+    }
+    CHECK(fixture.verifier->calls.load() == 0);
+
+    const auto established = dispatch_login(router, credentials);
+    REQUIRE(established.status_code() == sparenode::http::HttpStatusCode::no_content);
+    const auto calls_after_login = fixture.verifier->calls.load();
+
+    for (const std::string_view headers :
+         {"Content-Type: application/json\r\nCookie: spnode_session=session-0\r\nCookie: "
+          "other=value\r\n",
+          "Content-Type: application/json\r\nCookie: spnode_session=session-0; "
+          "spnode_session=session-0\r\n"})
+    {
+        const auto response = dispatch_login(router, credentials, headers);
+        CHECK(response.status_code() == sparenode::http::HttpStatusCode::bad_request);
+        const auto retained = fixture.sessions->authenticate("session-0");
+        REQUIRE(retained);
+        CHECK(retained->has_value());
+    }
+    CHECK(fixture.verifier->calls.load() == calls_after_login);
+}
+
+TEST_CASE("Authentication body storage policy matches only the login route",
+          "[authentication][api]")
+{
+    using sparenode::authentication::api::authentication_body_storage_policy;
+    using sparenode::http::HttpMethod;
+    using sparenode::http::HttpRequestHead;
+    using sparenode::http::RequestBodyStorageMode;
+
+    const auto login = authentication_body_storage_policy(
+        HttpRequestHead{.method = HttpMethod::post, .target = "/api/auth/login?source=test"});
+    CHECK(login.mode == RequestBodyStorageMode::memory);
+    CHECK(login.max_body_bytes == sparenode::authentication::api::maximum_login_body_bytes);
+
+    const auto wrong_method = authentication_body_storage_policy(
+        HttpRequestHead{.method = HttpMethod::put, .target = "/api/auth/login"});
+    CHECK(wrong_method.mode == RequestBodyStorageMode::temporary_file);
+    CHECK(wrong_method.max_body_bytes == 0);
+
+    const auto wrong_path = authentication_body_storage_policy(
+        HttpRequestHead{.method = HttpMethod::post, .target = "/api/auth/logout"});
+    CHECK(wrong_path.mode == RequestBodyStorageMode::temporary_file);
+    CHECK(wrong_path.max_body_bytes == 0);
 }
 
 TEST_CASE("Authentication API fails closed when credential infrastructure is unavailable",
