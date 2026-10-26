@@ -52,6 +52,7 @@ configure_file(
 )
 
 add_library(sparenode_foundation STATIC
+    src/foundation/memory/secure_erase.cpp
     src/foundation/text/utf8.cpp
 )
 

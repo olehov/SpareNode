@@ -3,12 +3,34 @@
 #include <algorithm>
 #include <string_view>
 
+#include "sparenode/foundation/memory/secure_erase.hpp"
 #include "sparenode/http/detail/ascii.hpp"
 
 namespace sparenode::http::detail
 {
 namespace
 {
+
+/// @brief Erases a borrowed sensitive byte range before its vector releases logical ownership.
+class SensitiveByteEraser final
+{
+  public:
+    explicit SensitiveByteEraser(const std::span<std::byte> bytes) noexcept : bytes_(bytes)
+    {
+    }
+
+    ~SensitiveByteEraser()
+    {
+        memory::secure_erase(bytes_);
+    }
+
+    SensitiveByteEraser(const SensitiveByteEraser &) = delete;
+    SensitiveByteEraser &operator=(const SensitiveByteEraser &) = delete;
+
+  private:
+    std::span<std::byte> bytes_; ///< Live coalesced body range owned by BufferedRequest.
+};
+
 /// @brief Accepts a bounded list of 100-continue tokens, ignoring empty list members.
 [[nodiscard]] bool supported_expectations(std::string_view value)
 {
@@ -98,7 +120,12 @@ Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
     }
     ingestor_.emplace(head, body_limits, file_factory_, storage_policy.mode);
     head_ = std::move(head);
-    const auto result = feed_body(std::span(metadata_).subspan(head_bytes), options_provider());
+    const auto result = [&]
+    {
+        const auto body = std::span(metadata_).subspan(head_bytes);
+        const SensitiveByteEraser erase_body(body);
+        return feed_body(body, options_provider());
+    }();
     metadata_.resize(head_bytes);
     return result;
 }
