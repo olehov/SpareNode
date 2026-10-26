@@ -324,6 +324,35 @@ TEST_CASE("Request body ingestor completes an empty body without creating a file
     REQUIRE(ingestor.finish().has_value());
 }
 
+TEST_CASE("Request body ingestor retains selected sensitive bodies only in bounded memory",
+          "[http][body][memory][security]")
+{
+    constexpr std::string_view payload = R"({"login":"owner","password":"secret"})";
+    bool file_factory_called = false;
+    sparenode::storage::TemporaryFileFactory file_factory = [&file_factory_called]()
+    {
+        file_factory_called = true;
+        return sparenode::unexpected(sparenode::storage::TemporaryFileError{
+            sparenode::storage::TemporaryFileErrorCode::create_failed, 0});
+    };
+    sparenode::http::HttpRequestParserLimits limits{};
+    limits.max_body_bytes = 4096;
+    sparenode::http::RequestBodyIngestor ingestor({.content_length = payload.size()}, limits,
+                                                  std::move(file_factory),
+                                                  sparenode::http::RequestBodyStorageMode::memory);
+
+    const auto progress = ingestor.feed(bytes(payload));
+
+    REQUIRE(progress);
+    REQUIRE(ingestor.complete());
+    CHECK_FALSE(file_factory_called);
+    CHECK_FALSE(ingestor.artifact());
+    const auto memory = ingestor.memory_body();
+    REQUIRE(memory);
+    CHECK(std::string_view(reinterpret_cast<const char *>(memory->data()), memory->size()) ==
+          payload);
+}
+
 TEST_CASE("Request body ingestor rejects fixed and decoded chunked bodies above the limit",
           "[http][body][limits][temporary-file]")
 {
@@ -397,7 +426,8 @@ TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
     {
         sparenode::http::RequestBodyIngestor ingestor(
             {.content_length = 1}, {},
-            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+            []() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+            {
                 return sparenode::unexpected(
                     TemporaryFileError{TemporaryFileErrorCode::create_failed, 1234});
             });
@@ -432,7 +462,8 @@ TEST_CASE("Request body ingestor propagates temporary file lifecycle failures",
         {
             sparenode::http::RequestBodyIngestor ingestor(
                 {.content_length = 1}, {},
-                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+                [code]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+                {
                     return std::static_pointer_cast<TemporaryFile>(
                         std::make_shared<FailingTemporaryFile>(code));
                 });
@@ -536,7 +567,8 @@ TEST_CASE("Deadline interrupts an injected blocked body write and releases its a
     std::stop_source stop;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     auto result = std::async(std::launch::async,
-                             [&] {
+                             [&]
+                             {
                                  return ingestor.feed(bytes("x"), {.stop_token = stop.get_token(),
                                                                    .deadline = deadline});
                              });
@@ -612,7 +644,8 @@ TEST_CASE("Deadline releases the request worker while a native file write remain
     auto destroyed = state->destroyed.get_future();
     sparenode::http::RequestBodyIngestor ingestor(
         {.content_length = 1}, {},
-        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError> {
+        [state]() -> sparenode::Result<std::shared_ptr<TemporaryFile>, TemporaryFileError>
+        {
             return std::static_pointer_cast<TemporaryFile>(
                 std::make_shared<StalledTemporaryFile>(state));
         });

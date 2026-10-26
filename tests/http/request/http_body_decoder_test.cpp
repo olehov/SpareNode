@@ -259,3 +259,36 @@ TEST_CASE("Buffered request resolves body policy only after complete headers",
     input.get(payload);
     CHECK(payload == 'x');
 }
+
+TEST_CASE("Buffered request applies metadata-selected in-memory body storage",
+          "[http][body][session][memory]")
+{
+    bool file_factory_called = false;
+    sparenode::storage::TemporaryFileFactory file_factory = [&file_factory_called]()
+    {
+        file_factory_called = true;
+        return sparenode::unexpected(sparenode::storage::TemporaryFileError{
+            sparenode::storage::TemporaryFileErrorCode::create_failed, 0});
+    };
+    sparenode::http::detail::BufferedRequest request(
+        {}, std::move(file_factory),
+        [](const sparenode::http::HttpRequestHead &request_head)
+        {
+            return request_head.target == "/login"
+                       ? sparenode::http::
+                             RequestBodyStoragePolicy{sparenode::http::RequestBodyStorageMode::
+                                                          memory,
+                                                      64}
+                       : sparenode::http::RequestBodyStoragePolicy{};
+        });
+    constexpr std::string_view source =
+        "POST /login HTTP/1.1\r\nHost: local\r\nContent-Length: 6\r\n\r\nsecret";
+
+    REQUIRE(request.feed(bytes(source)).has_value());
+    REQUIRE(request.complete());
+    const auto view = request.request();
+    CHECK_FALSE(file_factory_called);
+    CHECK_FALSE(view.temporary_body());
+    CHECK(std::string_view(reinterpret_cast<const char *>(view.body().data()),
+                           view.body().size()) == "secret");
+}

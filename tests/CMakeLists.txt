@@ -196,12 +196,14 @@ sparenode_enable_static_analysis(sparenode_session_sodium_tests)
 catch_discover_tests(sparenode_session_sodium_tests)
 
 add_executable(sparenode_authentication_api_tests
+    authentication/authentication_api_test.cpp
     authentication/session_authentication_policy_test.cpp
 )
 
 target_link_libraries(sparenode_authentication_api_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_authentication_api
+    sparenode_session_application
 )
 
 target_include_directories(sparenode_authentication_api_tests PRIVATE
@@ -412,7 +414,9 @@ sparenode_enable_static_analysis(sparenode_bootstrap_integration_tests)
 catch_discover_tests(sparenode_bootstrap_integration_tests PROPERTIES LABELS "integration")
 
 add_executable(sparenode_foundation_tests
+    foundation/hexadecimal_test.cpp
     foundation/result_test.cpp
+    foundation/utf8_test.cpp
 )
 
 target_link_libraries(sparenode_foundation_tests PRIVATE

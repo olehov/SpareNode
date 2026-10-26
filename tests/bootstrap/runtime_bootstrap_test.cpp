@@ -74,14 +74,14 @@ TEST_CASE("Runtime bootstrap constructs equivalent default runtime settings",
 
     REQUIRE(runtime.has_value());
     REQUIRE(runtime->sessions() != nullptr);
-    CHECK(runtime->session_authentication().sessions() == runtime->sessions());
-    auto session = runtime->session_authentication().login(
+    CHECK(runtime->session_authentication()->sessions() == runtime->sessions());
+    auto session = runtime->session_authentication()->login(
         "owner", sparenode::authentication::SensitivePassword("bootstrap password"));
     REQUIRE(session);
     auto principal = runtime->sessions()->authenticate(session.value());
     REQUIRE(principal);
     CHECK(sparenode::test::require_optional(principal.value()).identity == "owner");
-    auto logout = runtime->session_authentication().logout(session.value());
+    auto logout = runtime->session_authentication()->logout(session.value());
     REQUIRE(logout);
     CHECK(sparenode::test::require_optional(logout.value()).identity == "owner");
     auto rejected = runtime->sessions()->authenticate(session.value());
