@@ -1,10 +1,28 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace sparenode::text::utf8
 {
+
+/// @brief Describes one validated Unicode scalar and its encoded width.
+struct DecodedScalar
+{
+    char32_t value{};         ///< Decoded Unicode scalar value.
+    std::size_t byte_count{}; ///< Number of source bytes occupied by the scalar.
+};
+
+/// @brief Decodes the first canonical Unicode scalar from a byte sequence.
+///
+/// The input may contain more scalars after the first one. Validation covers the complete first
+/// sequence, including shortest-form encoding, continuation bytes, surrogate exclusion, and the
+/// U+10FFFF limit.
+/// @param[in] input Byte sequence beginning at the scalar to decode.
+/// @return Decoded scalar and its byte width, or no value for empty or malformed input.
+[[nodiscard]] std::optional<DecodedScalar> decode_one(std::string_view input) noexcept;
 
 /// @brief Checks that every byte belongs to one canonical Unicode scalar sequence.
 ///
