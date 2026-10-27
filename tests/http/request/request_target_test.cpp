@@ -15,6 +15,11 @@ std::span<const std::byte> bytes(const std::string_view text)
 {
     return std::as_bytes(std::span(text.data(), text.size()));
 }
+/// @brief Borrows mutable request fixture storage that BufferedRequest will erase.
+std::span<std::byte> writable_bytes(std::string &text)
+{
+    return std::as_writable_bytes(std::span(text.data(), text.size()));
+}
 } // namespace
 
 TEST_CASE("Absolute targets normalize path and query without decoding", "[http][target]")
@@ -124,12 +129,12 @@ TEST_CASE("Absolute wire length is bounded before normalization", "[http][target
 TEST_CASE("Normalized query target survives incremental chunked ingestion",
           "[http][target][chunked]")
 {
-    const std::string source = "POST http://local?x=1 HTTP/1.9\r\nHost: "
-                               "other\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n";
+    std::string source = "POST http://local?x=1 HTTP/1.9\r\nHost: "
+                         "other\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n";
     sparenode::http::detail::BufferedRequest request({});
     for (std::size_t index = 0; index < source.size(); ++index)
     {
-        REQUIRE(request.feed(bytes(source).subspan(index, 1)).has_value());
+        REQUIRE(request.feed(writable_bytes(source).subspan(index, 1)).has_value());
     }
     REQUIRE(request.complete());
     const auto parsed = request.request();

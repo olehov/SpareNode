@@ -4,6 +4,7 @@
 #include "sparenode/http/request/http_body_decoder.hpp"
 #include "sparenode/http/transport/detail/buffered_request.hpp"
 #include "support/optional.hpp"
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <string>
@@ -14,6 +15,11 @@ namespace
 std::span<const std::byte> bytes(const std::string_view text)
 {
     return std::as_bytes(std::span(text.data(), text.size()));
+}
+/// @brief Borrows mutable request fixture storage that BufferedRequest will erase.
+std::span<std::byte> writable_bytes(std::string &text)
+{
+    return std::as_writable_bytes(std::span(text.data(), text.size()));
 }
 /// @brief Copies decoded output into a test-owned string.
 std::string text(const std::span<const std::byte> data)
@@ -210,11 +216,12 @@ TEST_CASE("Chunked request parser returns owned decoded payload and wire length"
 TEST_CASE("Buffered request feeds one-byte fragments without retaining chunk framing",
           "[http][chunked][session]")
 {
-    const std::string source = std::string(head) + "1\r\na\r\n1\r\nb\r\n0\r\nX: ignored\r\n\r\n";
+    std::string source = std::string(head) + "1\r\na\r\n1\r\nb\r\n0\r\nX: ignored\r\n\r\n";
     sparenode::http::detail::BufferedRequest request({});
-    for (const auto &byte : source)
+    for (auto &byte : source)
     {
-        REQUIRE(request.feed(bytes(std::string_view(&byte, 1))).has_value());
+        auto input = std::as_writable_bytes(std::span(&byte, std::size_t{1}));
+        REQUIRE(request.feed(input).has_value());
     }
     REQUIRE(request.complete());
     const auto view = request.request();
@@ -242,13 +249,15 @@ TEST_CASE("Buffered request resolves body policy only after complete headers",
         ++body_policy_calls;
         return sparenode::storage::TemporaryFileIoOptions{};
     };
-    REQUIRE(request
-                .feed_with_body_options(
-                    bytes("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n"), body_options)
-                .has_value());
+    std::string head_fragment = "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n";
+    REQUIRE(
+        request.feed_with_body_options(writable_bytes(head_fragment), body_options).has_value());
     CHECK(body_policy_calls == 0);
     CHECK_FALSE(request.reading_body());
-    REQUIRE(request.feed_with_body_options(bytes("\r\nx"), body_options).has_value());
+    std::string body_fragment = "\r\nx";
+    REQUIRE(
+        request.feed_with_body_options(writable_bytes(body_fragment), body_options).has_value());
+    CHECK(std::ranges::all_of(body_fragment, [](const char byte) { return byte == '\0'; }));
     CHECK(body_policy_calls == 1);
     REQUIRE(request.complete());
     const auto artifact = request.request().temporary_body();
@@ -281,10 +290,10 @@ TEST_CASE("Buffered request applies metadata-selected in-memory body storage",
                                                       64}
                        : sparenode::http::RequestBodyStoragePolicy{};
         });
-    constexpr std::string_view source =
-        "POST /login HTTP/1.1\r\nHost: local\r\nContent-Length: 6\r\n\r\nsecret";
+    std::string source = "POST /login HTTP/1.1\r\nHost: local\r\nContent-Length: 6\r\n\r\nsecret";
 
-    REQUIRE(request.feed(bytes(source)).has_value());
+    REQUIRE(request.feed(writable_bytes(source)).has_value());
+    CHECK(std::ranges::all_of(source, [](const char byte) { return byte == '\0'; }));
     REQUIRE(request.complete());
     const auto view = request.request();
     CHECK_FALSE(file_factory_called);
