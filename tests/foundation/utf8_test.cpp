@@ -72,6 +72,44 @@ TEST_CASE("UTF-8 validation rejects malformed and non-scalar sequences", "[found
     }
 }
 
+TEST_CASE("UTF-8 scalar decoding reports value and exact source width", "[foundation][utf8]")
+{
+    const std::array cases{
+        std::pair{std::string{"A"}, sparenode::text::utf8::DecodedScalar{U'A', 1}},
+        std::pair{bytes({0xC2U, 0xA2U}), sparenode::text::utf8::DecodedScalar{char32_t{0xA2U}, 2}},
+        std::pair{bytes({0xE2U, 0x82U, 0xACU}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0x20ACU}, 3}},
+        std::pair{bytes({0xF0U, 0x9FU, 0x98U, 0x80U}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0x1F600U}, 4}},
+        std::pair{bytes({0xDFU, 0xBFU}), sparenode::text::utf8::DecodedScalar{char32_t{0x7FFU}, 2}},
+        std::pair{bytes({0xE0U, 0xA0U, 0x80U}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0x800U}, 3}},
+        std::pair{bytes({0xEDU, 0x9FU, 0xBFU}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0xD7FFU}, 3}},
+        std::pair{bytes({0xEEU, 0x80U, 0x80U}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0xE000U}, 3}},
+        std::pair{bytes({0xEFU, 0xBFU, 0xBFU}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0xFFFFU}, 3}},
+        std::pair{bytes({0xF0U, 0x90U, 0x80U, 0x80U}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0x10000U}, 4}},
+        std::pair{bytes({0xF4U, 0x8FU, 0xBFU, 0xBFU}),
+                  sparenode::text::utf8::DecodedScalar{char32_t{0x10FFFFU}, 4}},
+    };
+
+    for (const auto &[input, expected] : cases)
+    {
+        const auto decoded = sparenode::text::utf8::decode_one(input + "trailing");
+        REQUIRE(decoded);
+        const auto scalar = decoded.value_or(sparenode::text::utf8::DecodedScalar{});
+        CHECK(scalar.value == expected.value);
+        CHECK(scalar.byte_count == expected.byte_count);
+    }
+
+    CHECK(!sparenode::text::utf8::decode_one("").has_value());
+    CHECK(!sparenode::text::utf8::decode_one(bytes({0xE2U, 0x82U})).has_value());
+    CHECK(!sparenode::text::utf8::decode_one(bytes({0xEDU, 0xA0U, 0x80U})).has_value());
+}
+
 TEST_CASE("UTF-8 encoding appends canonical scalar bytes", "[foundation][utf8]")
 {
     const std::array cases{

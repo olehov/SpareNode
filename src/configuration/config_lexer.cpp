@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "sparenode/configuration/detail/config_lexer_constants.hpp"
+#include "sparenode/foundation/text/utf8.hpp"
 
 namespace sparenode::configuration
 {
@@ -127,63 +128,8 @@ void ConfigLexer::advance_ascii() noexcept
 std::size_t ConfigLexer::utf8_sequence_length() const noexcept
 {
     assert(!at_end());
-    const unsigned char leading = to_unsigned_byte(input_[offset_]);
-    std::size_t length = 0;
-    std::uint32_t code_point = 0;
-    std::uint32_t minimum_code_point = 0;
-
-    if ((leading & lexer_constants::utf8_two_byte_prefix_mask) ==
-        lexer_constants::utf8_two_byte_prefix)
-    {
-        length = 2;
-        code_point = leading & lexer_constants::utf8_two_byte_payload_mask;
-        minimum_code_point = lexer_constants::utf8_two_byte_minimum_code_point;
-    }
-    else if ((leading & lexer_constants::utf8_three_byte_prefix_mask) ==
-             lexer_constants::utf8_three_byte_prefix)
-    {
-        length = 3;
-        code_point = leading & lexer_constants::utf8_three_byte_payload_mask;
-        minimum_code_point = lexer_constants::utf8_three_byte_minimum_code_point;
-    }
-    else if ((leading & lexer_constants::utf8_four_byte_prefix_mask) ==
-             lexer_constants::utf8_four_byte_prefix)
-    {
-        length = 4;
-        code_point = leading & lexer_constants::utf8_four_byte_payload_mask;
-        minimum_code_point = lexer_constants::utf8_four_byte_minimum_code_point;
-    }
-    else
-    {
-        return 0;
-    }
-
-    if (length > input_.size() - offset_)
-    {
-        return 0;
-    }
-
-    for (std::size_t index = 1; index < length; ++index)
-    {
-        const unsigned char continuation = to_unsigned_byte(input_[offset_ + index]);
-        if ((continuation & lexer_constants::utf8_continuation_prefix_mask) !=
-            lexer_constants::utf8_continuation_prefix)
-        {
-            return 0;
-        }
-        code_point = (code_point << lexer_constants::utf8_continuation_payload_bits) |
-                     (continuation & lexer_constants::utf8_continuation_payload_mask);
-    }
-
-    if (code_point < minimum_code_point ||
-        (code_point >= lexer_constants::unicode_first_surrogate &&
-         code_point <= lexer_constants::unicode_last_surrogate) ||
-        code_point > lexer_constants::unicode_maximum_code_point)
-    {
-        return 0;
-    }
-
-    return length;
+    const auto scalar = text::utf8::decode_one(input_.substr(offset_));
+    return scalar ? scalar->byte_count : 0;
 }
 
 void ConfigLexer::advance_utf8(const std::size_t sequence_length) noexcept
@@ -225,12 +171,6 @@ std::optional<ConfigLexerError> ConfigLexer::skip_trivia()
                     make_context(input_, offset_, lexer_constants::utf8_byte_order_mark.size())};
                 return error;
             }
-            if (comment_byte < lexer_constants::utf8_first_non_ascii_byte)
-            {
-                advance_ascii();
-                continue;
-            }
-
             const auto length = utf8_sequence_length();
             if (length == 0)
             {
@@ -238,7 +178,14 @@ std::optional<ConfigLexerError> ConfigLexer::skip_trivia()
                                               make_context(input_, offset_)};
                 return error;
             }
-            advance_utf8(length);
+            if (length == 1)
+            {
+                advance_ascii();
+            }
+            else
+            {
+                advance_utf8(length);
+            }
         }
     }
 
@@ -323,13 +270,6 @@ std::optional<ConfigLexerError> ConfigLexer::consume_string_character(std::strin
     {
         return consume_escape(decoded);
     }
-    if (byte < lexer_constants::utf8_first_non_ascii_byte)
-    {
-        decoded.push_back(static_cast<char>(byte));
-        advance_ascii();
-        return std::nullopt;
-    }
-
     const auto length = utf8_sequence_length();
     if (length == 0)
     {
@@ -337,7 +277,14 @@ std::optional<ConfigLexerError> ConfigLexer::consume_string_character(std::strin
                                 make_context(input_, offset_)};
     }
     decoded.append(input_.substr(offset_, length));
-    advance_utf8(length);
+    if (length == 1)
+    {
+        advance_ascii();
+    }
+    else
+    {
+        advance_utf8(length);
+    }
     return std::nullopt;
 }
 
@@ -368,7 +315,8 @@ std::optional<ConfigLexerError> ConfigLexer::consume_escape(std::string &decoded
             ConfigLexerErrorCode::unexpected_byte_order_mark, location(),
             make_context(input_, offset_, lexer_constants::utf8_byte_order_mark.size())};
     }
-    if (byte >= lexer_constants::utf8_first_non_ascii_byte && utf8_sequence_length() == 0)
+    const auto escaped_length = utf8_sequence_length();
+    if (escaped_length == 0)
     {
         return ConfigLexerError{ConfigLexerErrorCode::invalid_utf8, location(),
                                 make_context(input_, offset_)};
@@ -394,9 +342,6 @@ std::optional<ConfigLexerError> ConfigLexer::consume_escape(std::string &decoded
         break;
     default:
     {
-        const std::size_t escaped_length = byte < lexer_constants::utf8_first_non_ascii_byte
-                                               ? std::size_t{1}
-                                               : utf8_sequence_length();
         return ConfigLexerError{
             ConfigLexerErrorCode::invalid_escape_sequence, escape_location,
             make_context(input_, escape_location.byte_offset, std::size_t{1} + escaped_length)};
@@ -471,14 +416,13 @@ Result<ConfigToken, ConfigLexerError> ConfigLexer::next()
             ConfigLexerErrorCode::unexpected_byte_order_mark, location(),
             make_context(input_, offset_, lexer_constants::utf8_byte_order_mark.size())});
     }
-    if (byte >= lexer_constants::utf8_first_non_ascii_byte && utf8_sequence_length() == 0)
+    const auto context_length = utf8_sequence_length();
+    if (context_length == 0)
     {
         return fail(ConfigLexerError{ConfigLexerErrorCode::invalid_utf8, location(),
                                      make_context(input_, offset_)});
     }
 
-    const std::size_t context_length =
-        byte < lexer_constants::utf8_first_non_ascii_byte ? std::size_t{1} : utf8_sequence_length();
     return fail(ConfigLexerError{ConfigLexerErrorCode::unexpected_character, location(),
                                  make_context(input_, offset_, context_length)});
 }

@@ -51,74 +51,86 @@ constexpr std::uint32_t maximum_code_point = 0x10FFFFU;
 
 } // namespace
 
+std::optional<DecodedScalar> decode_one(const std::string_view input) noexcept
+{
+    if (input.empty())
+    {
+        return std::nullopt;
+    }
+    const auto leading_byte = static_cast<unsigned char>(input.front());
+
+    // ASCII occupies one byte and needs no continuation-byte decoding.
+    if (leading_byte < ascii_limit)
+    {
+        return DecodedScalar{static_cast<char32_t>(leading_byte), 1};
+    }
+
+    // Select the sequence shape from the fixed prefix of its leading byte. `minimum` is the
+    // smallest code point that requires this many bytes and later rejects overlong encodings.
+    std::size_t length{};
+    std::uint32_t code_point{};
+    std::uint32_t minimum{};
+    if ((leading_byte & two_byte_leading_mask) == two_byte_leading_pattern)
+    {
+        length = two_byte_sequence_length;
+        code_point = leading_byte & two_byte_leading_payload_mask;
+        minimum = two_byte_minimum_code_point;
+    }
+    else if ((leading_byte & three_byte_leading_mask) == three_byte_leading_pattern)
+    {
+        length = three_byte_sequence_length;
+        code_point = leading_byte & three_byte_leading_payload_mask;
+        minimum = three_byte_minimum_code_point;
+    }
+    else if ((leading_byte & four_byte_leading_mask) == four_byte_leading_pattern)
+    {
+        length = four_byte_sequence_length;
+        code_point = leading_byte & four_byte_leading_payload_mask;
+        minimum = four_byte_minimum_code_point;
+    }
+    else
+    {
+        return std::nullopt;
+    }
+
+    // A recognized leading byte must still have enough bytes remaining for the whole scalar.
+    if (input.size() < length)
+    {
+        return std::nullopt;
+    }
+
+    // Each continuation byte has the form 10xxxxxx. Append its six payload bits to the value
+    // already extracted from the leading byte.
+    for (std::size_t continuation = 1; continuation < length; ++continuation)
+    {
+        const auto byte = static_cast<unsigned char>(input[continuation]);
+        if ((byte & continuation_mask) != continuation_pattern)
+        {
+            return std::nullopt;
+        }
+        code_point = (code_point << continuation_payload_bits) | (byte & continuation_payload_mask);
+    }
+
+    // The lower bound excludes alternate, longer encodings of the same scalar. The scalar check
+    // rejects UTF-16 surrogates and values beyond Unicode's U+10FFFF limit.
+    if (code_point < minimum || !is_scalar_value(code_point))
+    {
+        return std::nullopt;
+    }
+    return DecodedScalar{static_cast<char32_t>(code_point), length};
+}
+
 bool is_valid(const std::string_view input) noexcept
 {
     std::size_t index{};
     while (index < input.size())
     {
-        const auto leading_byte = static_cast<unsigned char>(input[index]);
-
-        // ASCII occupies one byte and needs no continuation-byte decoding.
-        if (leading_byte < ascii_limit)
-        {
-            ++index;
-            continue;
-        }
-
-        // Select the sequence shape from the fixed prefix of its leading byte. `minimum` is the
-        // smallest code point that requires this many bytes and later rejects overlong encodings.
-        std::size_t length{};
-        std::uint32_t code_point{};
-        std::uint32_t minimum{};
-        if ((leading_byte & two_byte_leading_mask) == two_byte_leading_pattern)
-        {
-            length = two_byte_sequence_length;
-            code_point = leading_byte & two_byte_leading_payload_mask;
-            minimum = two_byte_minimum_code_point;
-        }
-        else if ((leading_byte & three_byte_leading_mask) == three_byte_leading_pattern)
-        {
-            length = three_byte_sequence_length;
-            code_point = leading_byte & three_byte_leading_payload_mask;
-            minimum = three_byte_minimum_code_point;
-        }
-        else if ((leading_byte & four_byte_leading_mask) == four_byte_leading_pattern)
-        {
-            length = four_byte_sequence_length;
-            code_point = leading_byte & four_byte_leading_payload_mask;
-            minimum = four_byte_minimum_code_point;
-        }
-        else
+        const auto scalar = decode_one(input.substr(index));
+        if (!scalar)
         {
             return false;
         }
-
-        // A recognized leading byte must still have enough bytes remaining for the whole scalar.
-        if (input.size() - index < length)
-        {
-            return false;
-        }
-
-        // Each continuation byte has the form 10xxxxxx. Append its six payload bits to the value
-        // already extracted from the leading byte.
-        for (std::size_t continuation = 1; continuation < length; ++continuation)
-        {
-            const auto byte = static_cast<unsigned char>(input[index + continuation]);
-            if ((byte & continuation_mask) != continuation_pattern)
-            {
-                return false;
-            }
-            code_point =
-                (code_point << continuation_payload_bits) | (byte & continuation_payload_mask);
-        }
-
-        // The lower bound excludes alternate, longer encodings of the same scalar. The scalar
-        // check rejects UTF-16 surrogates and values beyond Unicode's U+10FFFF limit.
-        if (code_point < minimum || !is_scalar_value(code_point))
-        {
-            return false;
-        }
-        index += length;
+        index += scalar->byte_count;
     }
     return true;
 }

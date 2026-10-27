@@ -76,7 +76,7 @@ class ConfigLexer final
     /// @pre At least one input byte remains at `offset_`.
     void advance_ascii() noexcept;
 
-    /// @brief Validates the non-ASCII UTF-8 scalar at `offset_` without advancing.
+    /// @brief Validates the UTF-8 scalar at `offset_` without advancing.
     /// @return Scalar byte length, or zero for malformed UTF-8.
     /// @pre At least one input byte remains at `offset_`.
     [[nodiscard]] std::size_t utf8_sequence_length() const noexcept;

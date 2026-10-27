@@ -2,13 +2,13 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <ranges>
 #include <utility>
 
 #include "detail/path_containment.hpp"
 #include "detail/upload_stage_name.hpp"
 #include "sparenode/filesystem/detail/path_request_decoder.hpp"
+#include "sparenode/foundation/text/utf8.hpp"
 #ifdef _WIN32
 #include "detail/windows_path_inspector.hpp"
 #endif
@@ -17,78 +17,6 @@ namespace sparenode::filesystem
 {
 namespace
 {
-
-/// @brief Checks whether a byte sequence is a well-formed UTF-8 string.
-/// @param[in] input Bytes to validate without modifying them.
-/// @return `true` when every byte belongs to one valid Unicode scalar sequence.
-[[nodiscard]] bool is_valid_utf8(const std::string_view input) noexcept
-{
-    std::size_t index = 0;
-    while (index < input.size())
-    {
-        const auto leading_byte = static_cast<std::uint8_t>(input[index]);
-        if (leading_byte <= 0x7F)
-        {
-            ++index;
-            continue;
-        }
-
-        std::size_t sequence_length = 0;
-        std::uint32_t code_point = 0;
-        std::uint32_t minimum_code_point = 0;
-        if ((leading_byte & 0xE0) == 0xC0)
-        {
-            sequence_length = 2;
-            code_point = leading_byte & 0x1F;
-            minimum_code_point = 0x80;
-        }
-        else if ((leading_byte & 0xF0) == 0xE0)
-        {
-            sequence_length = 3;
-            code_point = leading_byte & 0x0F;
-            minimum_code_point = 0x800;
-        }
-        else if ((leading_byte & 0xF8) == 0xF0)
-        {
-            sequence_length = 4;
-            code_point = leading_byte & 0x07;
-            minimum_code_point = 0x10000;
-        }
-        else
-        {
-            return false;
-        }
-
-        if (sequence_length > input.size() - index)
-        {
-            return false;
-        }
-
-        for (std::size_t offset = 1; offset < sequence_length; ++offset)
-        {
-            const auto continuation_byte = static_cast<std::uint8_t>(input[index + offset]);
-            if ((continuation_byte & 0xC0) != 0x80)
-            {
-                return false;
-            }
-            code_point = (code_point << 6) | (continuation_byte & 0x3F);
-        }
-
-        constexpr std::uint32_t first_surrogate = 0xD800;
-        constexpr std::uint32_t last_surrogate = 0xDFFF;
-        constexpr std::uint32_t maximum_code_point = 0x10FFFF;
-        if (code_point < minimum_code_point ||
-            (code_point >= first_surrogate && code_point <= last_surrogate) ||
-            code_point > maximum_code_point)
-        {
-            return false;
-        }
-
-        index += sequence_length;
-    }
-
-    return true;
-}
 
 /// @brief Resolves one existing object using the host's native path semantics.
 /// @param[in] path Existing filesystem path to canonicalize.
@@ -359,7 +287,7 @@ Result<SafePath, SafePathError> SafePath::resolve(const SharedRoot &shared_root,
                                         std::string(requested_path)});
     }
     const auto &normalized_request = decoded_request.value();
-    if (!is_valid_utf8(normalized_request))
+    if (!text::utf8::is_valid(normalized_request))
     {
         return unexpected(
             SafePathError{SafePathErrorCode::invalid_encoding, std::string(requested_path)});
