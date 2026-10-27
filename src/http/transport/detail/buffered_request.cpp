@@ -57,6 +57,17 @@ class SensitiveByteEraser final
 }
 } // namespace
 
+BufferedRequest::~BufferedRequest()
+{
+    erase_metadata();
+}
+
+void BufferedRequest::erase_metadata() noexcept
+{
+    memory::secure_erase(metadata_);
+    metadata_.clear();
+}
+
 /// @brief Returns the pending Expect decision once and clears it from the request state.
 RequestExpectation BufferedRequest::take_expectation()
 {
@@ -103,7 +114,9 @@ Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
     auto parsed = parse_http_request_head(metadata_, limits_);
     if (!parsed)
     {
-        return unexpected(BufferedRequestError(parsed.error()));
+        const auto error = parsed.error();
+        erase_metadata();
+        return unexpected(BufferedRequestError(error));
     }
     if (!parsed->has_value())
     {

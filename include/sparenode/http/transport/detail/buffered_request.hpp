@@ -39,6 +39,9 @@ class BufferedRequest final
     {
     }
 
+    /// @brief Securely erases retained request bytes before releasing their allocation.
+    ~BufferedRequest();
+
     /// @brief Adds wire bytes, retaining metadata and streaming decoded payload to its sink.
     /// @param[in,out] input Fresh receive bytes, securely erased before this call returns.
     /// @param[in] options Cancellation and deadline observed by body filesystem operations.
@@ -101,6 +104,9 @@ class BufferedRequest final
     [[nodiscard]] RequestExpectation take_expectation();
 
   private:
+    /// @brief Securely erases and logically releases all accumulated metadata bytes.
+    void erase_metadata() noexcept;
+
     /// @brief Drains decoder output into the request's temporary-file sink.
     /// @param[in] input New body wire bytes, excluding previously consumed data.
     /// @param[in] options Cancellation and deadline observed by body filesystem operations.
