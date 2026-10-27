@@ -100,9 +100,8 @@ register_deletion_routes(api::ApiRouterBuilder &builder, const SharedLocation &l
 
 } // namespace
 
-Result<HttpRouter, FilesystemApiError>
-make_filesystem_api_router(FilesystemApiSettings settings,
-                           api::ProtectedRouteDecorator protected_route_decorator)
+Result<void, FilesystemApiError> register_filesystem_api_routes(api::ApiRouterBuilder &builder,
+                                                                FilesystemApiSettings settings)
 {
     try
     {
@@ -113,7 +112,6 @@ make_filesystem_api_router(FilesystemApiSettings settings,
 
         const auto mime_types =
             std::make_shared<const MimeTypeRegistry>(std::move(settings.mime_types));
-        api::ApiRouterBuilder builder(std::move(protected_route_decorator));
         for (auto &location : settings.locations)
         {
             const auto shared_location =
@@ -135,13 +133,25 @@ make_filesystem_api_router(FilesystemApiSettings settings,
                 return unexpected(registration_failure(remove.error()));
             }
         }
-        return std::move(builder).build();
+        return {};
     }
     catch (const std::bad_alloc &)
     {
         return unexpected(
             FilesystemApiError{FilesystemApiErrorCode::resource_allocation_failed, {}});
     }
+}
+
+Result<HttpRouter, FilesystemApiError>
+make_filesystem_api_router(FilesystemApiSettings settings,
+                           api::ProtectedRouteDecorator protected_route_decorator)
+{
+    api::ApiRouterBuilder builder(std::move(protected_route_decorator));
+    if (auto registered = register_filesystem_api_routes(builder, std::move(settings)); !registered)
+    {
+        return unexpected(registered.error());
+    }
+    return std::move(builder).build();
 }
 
 const char *to_string(const FilesystemApiErrorCode code) noexcept

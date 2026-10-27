@@ -443,7 +443,8 @@ respond_to_request_failure(network::TcpConnection &connection,
 run_http_connection(network::TcpConnection &connection, const HttpConnectionRunContext &context)
 {
     detail::BufferedRequest request(context.config.parser_limits,
-                                    context.config.temporary_body_file_factory);
+                                    context.config.temporary_body_file_factory,
+                                    context.config.body_storage_policy_selector);
     std::vector<std::byte> input((std::min)(maximum_metadata_bytes(context.config.parser_limits),
                                             context.config.receive_chunk_bytes));
     while (true)

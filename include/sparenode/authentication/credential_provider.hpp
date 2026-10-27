@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -9,6 +10,9 @@
 
 namespace sparenode::authentication
 {
+
+/// @brief Maximum byte length accepted for an authentication login identifier.
+inline constexpr std::size_t maximum_owner_login_bytes = 128;
 
 /// @brief Stores password-verification material without containing a plaintext password.
 struct CredentialRecord

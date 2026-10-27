@@ -2,34 +2,14 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
-#include <optional>
+
+#include "sparenode/foundation/text/hexadecimal.hpp"
 
 namespace sparenode::filesystem::detail
 {
 
 namespace
 {
-
-/// @brief Converts one ASCII hexadecimal digit to its numeric value.
-/// @param[in] character Byte to classify without locale-sensitive rules.
-/// @return Value from zero to fifteen, or no value for a non-hexadecimal byte.
-[[nodiscard]] std::optional<std::uint8_t> hex_value(const char character) noexcept
-{
-    if (character >= '0' && character <= '9')
-    {
-        return static_cast<std::uint8_t>(character - '0');
-    }
-    if (character >= 'A' && character <= 'F')
-    {
-        return static_cast<std::uint8_t>(character - 'A' + 10);
-    }
-    if (character >= 'a' && character <= 'f')
-    {
-        return static_cast<std::uint8_t>(character - 'a' + 10);
-    }
-    return std::nullopt;
-}
 
 /// @brief Detects a valid percent escape left after the first decoding pass.
 /// @param[in] decoded_path Decoded bytes that must not be decoded a second time.
@@ -38,8 +18,9 @@ namespace
 {
     for (std::size_t index = 0; index + 2 < decoded_path.size(); ++index)
     {
-        if (decoded_path[index] == '%' && hex_value(decoded_path[index + 1]).has_value() &&
-            hex_value(decoded_path[index + 2]).has_value())
+        if (decoded_path[index] == '%' &&
+            text::hexadecimal::digit_value(decoded_path[index + 1]).has_value() &&
+            text::hexadecimal::digit_value(decoded_path[index + 2]).has_value())
         {
             return true;
         }
@@ -68,8 +49,8 @@ decode_path_request(const std::string_view requested_path)
         {
             return unexpected(PathRequestDecodeError::invalid_percent_encoding);
         }
-        const auto high = hex_value(requested_path[index + 1]);
-        const auto low = hex_value(requested_path[index + 2]);
+        const auto high = text::hexadecimal::digit_value(requested_path[index + 1]);
+        const auto low = text::hexadecimal::digit_value(requested_path[index + 2]);
         if (!high.has_value() || !low.has_value())
         {
             return unexpected(PathRequestDecodeError::invalid_percent_encoding);

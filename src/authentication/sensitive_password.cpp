@@ -3,19 +3,14 @@
 #include <cstddef>
 #include <utility>
 
+#include "sparenode/foundation/memory/secure_erase.hpp"
+
 namespace sparenode::authentication
 {
 
 void erase_sensitive_bytes(const std::span<char> bytes) noexcept
 {
-    if (!bytes.empty())
-    {
-        volatile char *current = bytes.data();
-        for (std::size_t index = 0; index < bytes.size(); ++index)
-        {
-            current[index] = 0;
-        }
-    }
+    memory::secure_erase(std::as_writable_bytes(bytes));
 }
 
 SensitivePassword::SensitivePassword(const std::string_view password)

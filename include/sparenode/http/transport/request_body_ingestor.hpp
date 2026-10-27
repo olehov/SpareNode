@@ -5,8 +5,10 @@
 #include <optional>
 #include <span>
 #include <stop_token>
+#include <vector>
 
 #include "sparenode/http/request/http_body_decoder.hpp"
+#include "sparenode/http/request/request_body_storage_policy.hpp"
 #include "sparenode/storage/temporary_file_writer.hpp"
 
 namespace sparenode::http
@@ -44,8 +46,11 @@ class RequestBodyIngestor final
     /// @param[in] head Validated body framing selected by the HTTP parser.
     /// @param[in] limits Decoded payload and chunk metadata boundaries.
     /// @param[in] file_factory Injected storage factory; empty selects native temporary storage.
-    RequestBodyIngestor(const HttpRequestHead &head, const HttpRequestParserLimits &limits,
-                        storage::TemporaryFileFactory file_factory = {});
+    /// @param[in] storage_mode Destination used for decoded payload bytes.
+    RequestBodyIngestor(
+        const HttpRequestHead &head, const HttpRequestParserLimits &limits,
+        storage::TemporaryFileFactory file_factory = {},
+        RequestBodyStorageMode storage_mode = RequestBodyStorageMode::temporary_file);
 
     /// @brief Stops an idle I/O worker or leaves a stalled one owning its artifact.
     ~RequestBodyIngestor();
@@ -84,6 +89,14 @@ class RequestBodyIngestor final
         return complete() ? artifact_ : nullptr;
     }
 
+    /// @brief Shares a completed payload retained only in memory.
+    /// @return Immutable body owner, or null for file-backed and incomplete bodies.
+    [[nodiscard]] std::shared_ptr<const std::vector<std::byte>> memory_body() const noexcept
+    {
+        return complete() && storage_mode_ == RequestBodyStorageMode::memory ? memory_body_
+                                                                             : nullptr;
+    }
+
   private:
     /// @brief Converts one decoder failure without losing protocol detail.
     /// @param[in] error Terminal decoder failure.
@@ -114,8 +127,10 @@ class RequestBodyIngestor final
     /// @return The same failure for immediate propagation.
     [[nodiscard]] RequestBodyIngestionError fail(const RequestBodyIngestionError &error) noexcept;
 
-    HttpBodyDecoder decoder_; ///< Existing framing state shared by both body modes.
-    storage::TemporaryFileFactory file_factory_; ///< Injected temporary-storage factory.
+    HttpBodyDecoder decoder_;             ///< Existing framing state shared by both body modes.
+    RequestBodyStorageMode storage_mode_; ///< Selected lifetime for decoded payload bytes.
+    storage::TemporaryFileFactory file_factory_;          ///< Injected temporary-storage factory.
+    std::shared_ptr<std::vector<std::byte>> memory_body_; ///< Optional sensitive memory payload.
     std::shared_ptr<const storage::TemporaryFile> artifact_; ///< Completed nonempty artifact.
     std::unique_ptr<storage::TemporaryFileWriter> writer_;   ///< Bounded isolated storage writer.
     std::uint64_t body_size_{}; ///< Successfully persisted decoded bytes.

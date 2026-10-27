@@ -51,15 +51,22 @@ configure_file(
     @ONLY
 )
 
-add_library(sparenode_foundation INTERFACE)
+add_library(sparenode_foundation STATIC
+    src/foundation/memory/secure_erase.cpp
+    src/foundation/text/utf8.cpp
+)
 
-target_compile_features(sparenode_foundation INTERFACE
+target_compile_features(sparenode_foundation PUBLIC
     cxx_std_23
 )
 
-target_include_directories(sparenode_foundation INTERFACE
+target_include_directories(sparenode_foundation PUBLIC
     "${PROJECT_SOURCE_DIR}/include"
 )
+
+sparenode_enable_compiler_warnings(sparenode_foundation)
+sparenode_enable_cppcheck(sparenode_foundation)
+sparenode_enable_static_analysis(sparenode_foundation)
 
 add_library(sparenode_logging STATIC
     src/logging/console_log_sink.cpp
@@ -376,11 +383,13 @@ sparenode_enable_cppcheck(sparenode_session_sodium)
 sparenode_enable_static_analysis(sparenode_session_sodium)
 
 add_library(sparenode_authentication_api STATIC
+    src/authentication/api/authentication_api.cpp
     src/authentication/api/session_authentication_policy.cpp
 )
 
 target_link_libraries(sparenode_authentication_api PUBLIC
     sparenode_api_core
+    sparenode_session_application
     sparenode_session_core
 )
 
@@ -542,6 +551,7 @@ sparenode_register_architecture(sparenode_session_application DEPENDS
 sparenode_register_architecture(sparenode_session_sodium DEPENDS sparenode_session_core)
 sparenode_register_architecture(sparenode_authentication_api DEPENDS
     sparenode_api_core
+    sparenode_session_application
     sparenode_session_core
 )
 sparenode_register_architecture(sparenode_command_line DEPENDS sparenode_foundation)

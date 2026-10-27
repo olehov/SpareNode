@@ -43,9 +43,11 @@ class SessionAuthenticationService final
     /// @brief Verifies credentials and creates a fresh session for the resulting principal.
     /// @param[in] login_identifier Untrusted bounded login identifier.
     /// @param[in,out] password Owned plaintext password consumed by authentication.
+    /// @param[in] previous_session Optional credential invalidated before replacement.
     /// @return Opaque session credential, generic invalid credentials, or unavailable service.
     [[nodiscard]] Result<std::string, SessionLoginErrorCode>
-    login(std::string_view login_identifier, authentication::SensitivePassword &&password) const;
+    login(std::string_view login_identifier, authentication::SensitivePassword &&password,
+          std::string_view previous_session = {}) const;
 
     /// @brief Invalidates the submitted session credential when it is still active.
     /// @param[in] credential Opaque credential presented by the client cookie.

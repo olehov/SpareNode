@@ -230,9 +230,10 @@ void append_escaped_path(std::ostringstream &output, const std::filesystem::path
 } // namespace
 
 /// @brief Stores concrete runtime settings and process-wide dependencies.
-RuntimePlan::RuntimePlan(application::runtime::AppConfig config,
-                         application::SessionAuthenticationService session_authentication,
-                         const logging::LogSeverity process_log_severity) noexcept
+RuntimePlan::RuntimePlan(
+    application::runtime::AppConfig config,
+    std::shared_ptr<const application::SessionAuthenticationService> session_authentication,
+    const logging::LogSeverity process_log_severity) noexcept
     : config_(std::move(config)), session_authentication_(std::move(session_authentication)),
       process_log_severity_(process_log_severity)
 {
@@ -247,10 +248,10 @@ const application::runtime::AppConfig &RuntimePlan::config() const noexcept
 /// @brief Exposes the process-wide authentication service.
 const authentication::AuthenticationService &RuntimePlan::authentication() const noexcept
 {
-    return session_authentication_.authentication();
+    return session_authentication_->authentication();
 }
 
-const application::SessionAuthenticationService &
+const std::shared_ptr<const application::SessionAuthenticationService> &
 RuntimePlan::session_authentication() const noexcept
 {
     return session_authentication_;
@@ -258,7 +259,7 @@ RuntimePlan::session_authentication() const noexcept
 
 const std::shared_ptr<session::SessionStore> &RuntimePlan::sessions() const noexcept
 {
-    return session_authentication_.sessions();
+    return session_authentication_->sessions();
 }
 
 /// @brief Returns the threshold used for process lifecycle messages.
@@ -332,8 +333,11 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
             return unexpected(RuntimeBootstrapError{
                 RuntimeBootstrapErrorCode::session_initialization_failed, {}, {}, {}, {}, {}});
         }
+        auto shared_session_authentication =
+            std::make_shared<const application::SessionAuthenticationService>(
+                std::move(session_authentication).value());
         return RuntimePlan(application::runtime::AppConfig(std::move(runtime_servers)),
-                           std::move(session_authentication).value(),
+                           std::move(shared_session_authentication),
                            process_log_severity.value_or(logging::LogSeverity::info));
     }
     catch (const std::bad_alloc &)

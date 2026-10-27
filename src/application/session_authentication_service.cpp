@@ -25,7 +25,8 @@ SessionAuthenticationService::SessionAuthenticationService(
 
 Result<std::string, SessionLoginErrorCode>
 SessionAuthenticationService::login(const std::string_view login_identifier,
-                                    authentication::SensitivePassword &&password) const
+                                    authentication::SensitivePassword &&password,
+                                    const std::string_view previous_session) const
 {
     auto authenticated = authentication_.authenticate(login_identifier, std::move(password));
     if (!authenticated)
@@ -34,6 +35,14 @@ SessionAuthenticationService::login(const std::string_view login_identifier,
                                   authentication::AuthenticationErrorCode::invalid_credentials
                               ? SessionLoginErrorCode::invalid_credentials
                               : SessionLoginErrorCode::unavailable);
+    }
+    if (!previous_session.empty())
+    {
+        auto invalidated = sessions_->invalidate(previous_session);
+        if (!invalidated)
+        {
+            return unexpected(SessionLoginErrorCode::unavailable);
+        }
     }
     auto credential = sessions_->create_session(std::move(authenticated->principal));
     if (!credential)

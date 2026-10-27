@@ -11,6 +11,20 @@ namespace sparenode::http
 namespace
 {
 
+/// @brief Erases a sensitive in-memory request body before releasing its allocation.
+void delete_sensitive_body(std::vector<std::byte> *body) noexcept
+{
+    if (body != nullptr)
+    {
+        volatile std::byte *current = body->data();
+        for (std::size_t index = 0; index < body->size(); ++index)
+        {
+            current[index] = std::byte{};
+        }
+        delete body;
+    }
+}
+
 /// @brief Converts active policy state into a terminal ingestion error when interrupted.
 [[nodiscard]] std::optional<RequestBodyIngestionError>
 interruption(const storage::TemporaryFileIoOptions &options) noexcept
@@ -32,9 +46,16 @@ interruption(const storage::TemporaryFileIoOptions &options) noexcept
 /// @brief Initializes framing and retains the injected temporary-storage factory.
 RequestBodyIngestor::RequestBodyIngestor(const HttpRequestHead &head,
                                          const HttpRequestParserLimits &limits,
-                                         storage::TemporaryFileFactory file_factory)
-    : decoder_(head, limits), file_factory_(std::move(file_factory))
+                                         storage::TemporaryFileFactory file_factory,
+                                         const RequestBodyStorageMode storage_mode)
+    : decoder_(head, limits), storage_mode_(storage_mode), file_factory_(std::move(file_factory))
 {
+    if (storage_mode_ == RequestBodyStorageMode::memory)
+    {
+        memory_body_ = std::shared_ptr<std::vector<std::byte>>(new std::vector<std::byte>,
+                                                               delete_sensitive_body);
+        memory_body_->reserve(limits.max_body_bytes);
+    }
     finalized_ = decoder_.complete();
 }
 
@@ -127,6 +148,20 @@ RequestBodyIngestor::persist(const std::span<const std::byte> output,
     if (const auto interrupted = interruption(options); interrupted.has_value())
     {
         return unexpected(fail(interrupted.value()));
+    }
+    if (storage_mode_ == RequestBodyStorageMode::memory)
+    {
+        try
+        {
+            memory_body_->insert(memory_body_->end(), output.begin(), output.end());
+            body_size_ += output.size();
+            return {};
+        }
+        catch (const std::bad_alloc &)
+        {
+            return unexpected(fail(RequestBodyIngestionError{
+                RequestBodyIngestionErrorCode::resource_failure, {}, {}}));
+        }
     }
     if (auto created = ensure_artifact(); !created)
     {

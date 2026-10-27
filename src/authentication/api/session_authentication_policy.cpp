@@ -15,12 +15,6 @@ namespace sparenode::authentication::api
 namespace
 {
 
-struct CookieCredential
-{
-    std::string_view value; ///< Borrowed opaque credential when exactly one is present.
-    bool malformed{};       ///< Duplicate or syntactically ambiguous cookie input.
-};
-
 /// @brief Compares an HTTP field name without locale-dependent case conversion.
 [[nodiscard]] bool ascii_case_insensitive_equal(const std::string_view left,
                                                 const std::string_view right) noexcept
@@ -51,9 +45,9 @@ struct CookieCredential
 }
 
 /// @brief Extracts exactly one unquoted session credential from Cookie fields.
-[[nodiscard]] CookieCredential cookie_field_credential(std::string_view remaining) noexcept
+[[nodiscard]] SessionCookieCredential cookie_field_credential(std::string_view remaining) noexcept
 {
-    CookieCredential result;
+    SessionCookieCredential result;
     while (!remaining.empty())
     {
         const auto delimiter = remaining.find(';');
@@ -82,10 +76,11 @@ struct CookieCredential
 }
 
 /// @brief Rejects ambiguous multiple Cookie fields before selecting the session credential.
-[[nodiscard]] CookieCredential session_credential(const http::HttpRequestView &request) noexcept
+[[nodiscard]] SessionCookieCredential
+extract_session_cookie_credential(const http::HttpRequestView &request) noexcept
 {
     bool found_cookie_field{};
-    CookieCredential result;
+    SessionCookieCredential result;
     for (const auto &field : request.fields())
     {
         if (!ascii_case_insensitive_equal(field.name, "cookie"))
@@ -144,6 +139,11 @@ struct CookieCredential
 
 } // namespace
 
+SessionCookieCredential session_cookie_credential(const http::HttpRequestView &request) noexcept
+{
+    return extract_session_cookie_credential(request);
+}
+
 http::api::ApiRequestDecorator
 make_session_authentication_policy(std::shared_ptr<session::SessionStore> sessions)
 {
@@ -157,7 +157,7 @@ make_session_authentication_policy(std::shared_ptr<session::SessionStore> sessio
                 {
                     return authentication_unavailable();
                 }
-                const auto credential = session_credential(context.request);
+                const auto credential = session_cookie_credential(context.request);
                 if (credential.malformed || credential.value.empty())
                 {
                     return authentication_required();
