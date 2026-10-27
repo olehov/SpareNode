@@ -83,7 +83,7 @@ RequestExpectation BufferedRequest::take_expectation()
 
 /// @brief Parses metadata once complete, then feeds all subsequent bytes to the body decoder.
 Result<void, BufferedRequestError>
-BufferedRequest::feed(const std::span<const std::byte> input,
+BufferedRequest::feed(const std::span<std::byte> input,
                       const storage::TemporaryFileIoOptions &options)
 {
     return feed_with_body_options(input, [&options] { return options; });
@@ -91,9 +91,10 @@ BufferedRequest::feed(const std::span<const std::byte> input,
 
 /// @brief Defers the file deadline provider until validated metadata reaches body ingestion.
 Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
-    const std::span<const std::byte> input,
+    const std::span<std::byte> input,
     const std::function<storage::TemporaryFileIoOptions()> &options_provider)
 {
+    const SensitiveByteEraser erase_input(input);
     if (head_.has_value())
     {
         return feed_body(input, options_provider());

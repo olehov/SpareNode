@@ -39,19 +39,19 @@ class BufferedRequest final
     {
     }
 
-    /// @brief Adds wire bytes, retaining metadata and streaming decoded payload to disk.
-    /// @param[in] input Fresh receive bytes; trailing pipelined bytes are ignored after completion.
+    /// @brief Adds wire bytes, retaining metadata and streaming decoded payload to its sink.
+    /// @param[in,out] input Fresh receive bytes, securely erased before this call returns.
     /// @param[in] options Cancellation and deadline observed by body filesystem operations.
     /// @return Success or a structured terminal parse/body error.
     [[nodiscard]] Result<void, BufferedRequestError>
-    feed(std::span<const std::byte> input, const storage::TemporaryFileIoOptions &options = {});
+    feed(std::span<std::byte> input, const storage::TemporaryFileIoOptions &options = {});
 
     /// @brief Resolves the body policy only after a complete request head is available.
-    /// @param[in] input Fresh receive bytes, possibly containing the head and first body bytes.
+    /// @param[in,out] input Fresh receive bytes, securely erased before this call returns.
     /// @param[in] options_provider Supplies the latest policy at the body boundary.
     /// @return Success or a structured parse/body error.
     [[nodiscard]] Result<void, BufferedRequestError> feed_with_body_options(
-        std::span<const std::byte> input,
+        std::span<std::byte> input,
         const std::function<storage::TemporaryFileIoOptions()> &options_provider);
 
     /// @brief Validates peer EOF and completes temporary-file cleanup on failure.
