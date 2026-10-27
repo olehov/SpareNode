@@ -1,6 +1,7 @@
 #include "sparenode/http/transport/detail/buffered_request.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <string_view>
 
 #include "sparenode/foundation/memory/secure_erase.hpp"
@@ -62,6 +63,38 @@ BufferedRequest::~BufferedRequest()
     erase_metadata();
 }
 
+void BufferedRequest::append_metadata(const std::span<const std::byte> input)
+{
+    if (input.size() > metadata_.max_size() - metadata_.size())
+    {
+        throw std::length_error("HTTP request metadata exceeds vector capacity");
+    }
+    const auto required = metadata_.size() + input.size();
+    if (required <= metadata_.capacity())
+    {
+        metadata_.insert(metadata_.end(), input.begin(), input.end());
+        return;
+    }
+
+    auto replacement_capacity = (std::max)(metadata_.capacity(), input.size());
+    while (replacement_capacity < required)
+    {
+        if (replacement_capacity > metadata_.max_size() - replacement_capacity)
+        {
+            replacement_capacity = required;
+            break;
+        }
+        replacement_capacity += replacement_capacity;
+    }
+
+    std::vector<std::byte> replacement;
+    replacement.reserve(replacement_capacity);
+    replacement.insert(replacement.end(), metadata_.begin(), metadata_.end());
+    replacement.insert(replacement.end(), input.begin(), input.end());
+    memory::secure_erase(metadata_);
+    metadata_.swap(replacement);
+}
+
 void BufferedRequest::erase_metadata() noexcept
 {
     memory::secure_erase(metadata_);
@@ -110,7 +143,7 @@ Result<void, BufferedRequestError> BufferedRequest::feed_with_body_options(
     {
         return feed_body(input, options_provider());
     }
-    metadata_.insert(metadata_.end(), input.begin(), input.end());
+    append_metadata(input);
     auto parsed = parse_http_request_head(metadata_, limits_);
     if (!parsed)
     {

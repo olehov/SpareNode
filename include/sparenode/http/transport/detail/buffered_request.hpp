@@ -104,6 +104,10 @@ class BufferedRequest final
     [[nodiscard]] RequestExpectation take_expectation();
 
   private:
+    /// @brief Appends receive bytes without releasing an unerased previous allocation.
+    /// @param[in] input Fresh bytes copied into metadata storage.
+    void append_metadata(std::span<const std::byte> input);
+
     /// @brief Securely erases and logically releases all accumulated metadata bytes.
     void erase_metadata() noexcept;
 
