@@ -16,11 +16,6 @@ std::span<const std::byte> bytes(const std::string_view text)
 {
     return std::as_bytes(std::span(text.data(), text.size()));
 }
-/// @brief Borrows mutable request fixture storage that BufferedRequest will erase.
-std::span<std::byte> writable_bytes(std::string &text)
-{
-    return std::as_writable_bytes(std::span(text.data(), text.size()));
-}
 /// @brief Copies decoded output into a test-owned string.
 std::string text(const std::span<const std::byte> data)
 {
@@ -251,12 +246,16 @@ TEST_CASE("Buffered request resolves body policy only after complete headers",
     };
     std::string head_fragment = "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n";
     REQUIRE(
-        request.feed_with_body_options(writable_bytes(head_fragment), body_options).has_value());
+        request
+            .feed_with_body_options(std::as_writable_bytes(std::span(head_fragment)), body_options)
+            .has_value());
     CHECK(body_policy_calls == 0);
     CHECK_FALSE(request.reading_body());
     std::string body_fragment = "\r\nx";
     REQUIRE(
-        request.feed_with_body_options(writable_bytes(body_fragment), body_options).has_value());
+        request
+            .feed_with_body_options(std::as_writable_bytes(std::span(body_fragment)), body_options)
+            .has_value());
     CHECK(std::ranges::all_of(body_fragment, [](const char byte) { return byte == '\0'; }));
     CHECK(body_policy_calls == 1);
     REQUIRE(request.complete());
@@ -292,7 +291,7 @@ TEST_CASE("Buffered request applies metadata-selected in-memory body storage",
         });
     std::string source = "POST /login HTTP/1.1\r\nHost: local\r\nContent-Length: 6\r\n\r\nsecret";
 
-    REQUIRE(request.feed(writable_bytes(source)).has_value());
+    REQUIRE(request.feed(std::as_writable_bytes(std::span(source))).has_value());
     CHECK(std::ranges::all_of(source, [](const char byte) { return byte == '\0'; }));
     REQUIRE(request.complete());
     const auto view = request.request();
@@ -300,4 +299,18 @@ TEST_CASE("Buffered request applies metadata-selected in-memory body storage",
     CHECK_FALSE(view.temporary_body());
     CHECK(std::string_view(reinterpret_cast<const char *>(view.body().data()),
                            view.body().size()) == "secret");
+}
+
+TEST_CASE("Buffered request erases accumulated bytes after metadata rejection",
+          "[http][body][session][security]")
+{
+    sparenode::http::detail::BufferedRequest request({});
+    std::string source = "POST /login HTTP/1.1\r\nHost: local\r\nBad Header: value\r\n"
+                         "Content-Length: 6\r\n\r\nsecret";
+
+    const auto result = request.feed(std::as_writable_bytes(std::span(source)));
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(request.empty());
+    CHECK(std::ranges::all_of(source, [](const char byte) { return byte == '\0'; }));
 }
