@@ -21,3 +21,19 @@ TEST_CASE("JSON response factory owns canonical validated response state", "[htt
     CHECK(std::string(reinterpret_cast<const char *>(body.data()), body.size()) ==
           "{\"error\":\"denied\"}");
 }
+
+TEST_CASE("JSON response factory preserves response validation failures", "[http][api]")
+{
+    const std::string oversized_body(sparenode::http::HttpResponse::maximum_memory_body_bytes + 1,
+                                     'x');
+
+    const auto response = sparenode::http::api::make_json_response(
+        sparenode::http::HttpStatusCode::ok, oversized_body);
+
+    REQUIRE_FALSE(response);
+    CHECK(response.error().code ==
+          sparenode::http::HttpRouteErrorCode::response_validation_failure);
+    CHECK(
+        response.error().detail ==
+        static_cast<int>(sparenode::http::HttpResponseValidationErrorCode::memory_body_too_large));
+}
