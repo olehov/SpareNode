@@ -9,7 +9,7 @@ TEST_CASE("JSON response factory owns canonical validated response state", "[htt
 {
     auto response = sparenode::http::api::make_json_response(
         sparenode::http::HttpStatusCode::unauthorized, "{\"error\":\"denied\"}",
-        {{"WWW-Authenticate", "SpareNodeSession"}});
+        {{"content-type", "text/html"}, {"WWW-Authenticate", "SpareNodeSession"}});
 
     REQUIRE(response);
     CHECK(response->reason_phrase() == "Unauthorized");

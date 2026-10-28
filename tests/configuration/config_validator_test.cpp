@@ -312,6 +312,11 @@ TEST_CASE("Configuration validator enforces authentication transport boundaries"
             directory.path(), "bind \"::\";\ntransport_mode \"trusted_proxy_https\";\n"
                               "trusted_proxy \"::1\";\n"));
         CHECK(contains_error(wildcard, ConfigValidationErrorCode::unsafe_transport_bind));
+
+        const auto mapped_wildcard = require_validation_errors(make_configuration(
+            directory.path(), "bind \"::ffff:0.0.0.0\";\ntransport_mode \"trusted_proxy_https\";\n"
+                              "trusted_proxy \"::1\";\n"));
+        CHECK(contains_error(mapped_wildcard, ConfigValidationErrorCode::unsafe_transport_bind));
     }
 
     SECTION("trusted proxy is rejected in direct modes")

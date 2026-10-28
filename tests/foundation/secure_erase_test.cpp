@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <span>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,4 +23,10 @@ TEST_CASE("Secure erase supports mutable character storage", "[foundation][secur
     sparenode::memory::secure_erase(characters);
 
     CHECK(std::ranges::all_of(characters, [](const char value) { return value == '\0'; }));
+
+    sparenode::memory::secure_erase(std::span<char>{});
+
+    std::array bounded{'a', 'b', 'c', 'd'};
+    sparenode::memory::secure_erase(std::span{bounded}.subspan(1, 2));
+    CHECK(bounded == std::array{'a', '\0', '\0', 'd'});
 }

@@ -16,9 +16,14 @@ TEST_CASE("Interruption policy gives cancellation priority over expiry",
           InterruptionStatus::none);
     CHECK(sparenode::concurrency::interruption_status({}, now, now) ==
           InterruptionStatus::deadline_exceeded);
+    const auto future_deadline = now + std::chrono::seconds{1};
+    CHECK(sparenode::concurrency::interruption_status({}, future_deadline, now) ==
+          InterruptionStatus::none);
 
     std::stop_source stop;
     stop.request_stop();
     CHECK(sparenode::concurrency::interruption_status(stop.get_token(), now, now) ==
+          InterruptionStatus::cancelled);
+    CHECK(sparenode::concurrency::interruption_status(stop.get_token(), future_deadline, now) ==
           InterruptionStatus::cancelled);
 }
