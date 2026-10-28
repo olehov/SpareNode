@@ -15,17 +15,10 @@ namespace
 constexpr std::uint16_t minimum_response_status_code = 100;
 constexpr std::uint16_t maximum_response_status_code = 599;
 
-/// @brief Rejects control bytes that could alter HTTP field framing.
-[[nodiscard]] bool valid_field_value(const std::string_view value) noexcept
-{
-    return std::ranges::none_of(value, [](const unsigned char byte)
-                                { return (byte < 0x20U && byte != '\t') || byte == 0x7FU; });
-}
-
 /// @brief Applies the HTTP reason-phrase byte policy.
 [[nodiscard]] bool valid_reason_phrase(const std::string_view value) noexcept
 {
-    return valid_field_value(value);
+    return std::ranges::all_of(value, detail::is_http_field_value_byte);
 }
 
 /// @brief Identifies statuses for which this transport permits no message body.
@@ -55,7 +48,7 @@ validate_header(const HttpResponseHeader &header, const HeaderValidationContext 
         return unexpected(HttpResponseValidationError{
             HttpResponseValidationErrorCode::invalid_header_name, context.index});
     }
-    if (!valid_field_value(header.value))
+    if (!std::ranges::all_of(header.value, detail::is_http_field_value_byte))
     {
         return unexpected(HttpResponseValidationError{
             HttpResponseValidationErrorCode::invalid_header_value, context.index});

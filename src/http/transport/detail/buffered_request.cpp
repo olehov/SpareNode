@@ -38,11 +38,9 @@ class SensitiveByteEraser final
     while (!value.empty())
     {
         const auto comma = value.find(',');
-        auto item = value.substr(0, comma);
-        const auto begin = item.find_first_not_of(" \t");
-        if (begin != std::string_view::npos)
+        const auto item = trim_optional_whitespace(value.substr(0, comma));
+        if (!item.empty())
         {
-            item = item.substr(begin, item.find_last_not_of(" \t") - begin + 1);
             if (!ascii_case_insensitive_equal(item, "100-continue"))
             {
                 return false;

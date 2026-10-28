@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 namespace sparenode::http
 {
@@ -79,5 +80,10 @@ enum class HttpStatusCode : std::uint16_t
 {
     return static_cast<std::uint16_t>(status);
 }
+
+/// @brief Returns the canonical HTTP reason phrase for one supported status.
+/// @param[in] status Typed HTTP response status.
+/// @return Static reason phrase, or `Unknown Status` for an unrecognized enum value.
+[[nodiscard]] std::string_view http_reason_phrase(HttpStatusCode status) noexcept;
 
 } // namespace sparenode::http

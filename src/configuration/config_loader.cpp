@@ -7,29 +7,12 @@
 #include <string>
 #include <utility>
 
+#include "sparenode/foundation/text/diagnostic_escape.hpp"
+
 namespace sparenode::configuration
 {
 namespace
 {
-
-/// Uppercase digits used to render one control byte as `\\xNN`.
-constexpr std::string_view hexadecimal_digits = "0123456789ABCDEF";
-
-/// @brief Appends a path while escaping bytes that can alter terminal output.
-/// @param[in,out] output Destination receiving the safe path representation.
-/// @param[in] path Configuration source path that may contain untrusted bytes.
-void append_escaped_path(std::ostringstream &output, const std::filesystem::path &path)
-{
-    for (const unsigned char byte : path.generic_string())
-    {
-        if (byte < 0x20U || byte == 0x7FU)
-        {
-            output << "\\x" << hexadecimal_digits[byte >> 4U] << hexadecimal_digits[byte & 0x0FU];
-            continue;
-        }
-        output << static_cast<char>(byte);
-    }
-}
 
 /// @brief Reads enough bytes to preserve the lexer's configured size boundary.
 /// @param[in] source_path File selected by the application user.
@@ -62,7 +45,7 @@ read_config_source(const std::filesystem::path &source_path)
 void append_diagnostic(std::ostringstream &output, const std::filesystem::path &path,
                        const SourceLocation &location, const char *message)
 {
-    append_escaped_path(output, path);
+    text::append_safe_diagnostic(output, path.generic_string(), text::DiagnosticEscapeStyle::path);
     output << ':' << location.line << ':' << location.column << ": error: " << message;
 }
 
@@ -75,7 +58,7 @@ void append_diagnostic(std::ostringstream &output, const std::filesystem::path &
 {
     std::ostringstream output;
     output << "error: " << to_string(failure.code) << " '";
-    append_escaped_path(output, path);
+    text::append_safe_diagnostic(output, path.generic_string(), text::DiagnosticEscapeStyle::path);
     output << '\'';
     return output.str();
 }

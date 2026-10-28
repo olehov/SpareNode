@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "sparenode/foundation/text/numeric_ip_address.hpp"
+
 namespace sparenode::http::detail
 {
 namespace
@@ -16,9 +18,6 @@ namespace
 constexpr std::size_t maximum_hostname_bytes = 253;
 constexpr std::size_t maximum_hostname_label_bytes = 63;
 constexpr std::uint32_t maximum_port = 65535;
-constexpr std::uint32_t maximum_ipv4_octet = 255;
-constexpr std::size_t ipv6_group_count = 8;
-constexpr std::size_t ipv4_ipv6_group_count = 2;
 
 /// @brief Checks one ASCII byte allowed at a DNS label boundary.
 [[nodiscard]] constexpr bool is_hostname_boundary(const char byte) noexcept
@@ -89,39 +88,6 @@ constexpr std::size_t ipv4_ipv6_group_count = 2;
     return true;
 }
 
-/// @brief Validates strict four-octet dotted-decimal IPv4 text.
-[[nodiscard]] bool is_valid_ipv4(const std::string_view address) noexcept
-{
-    if (address.empty() || address.front() == '.' || address.back() == '.')
-    {
-        return false;
-    }
-    std::size_t octet_start = 0;
-    std::size_t octet_count = 0;
-    while (octet_start < address.size())
-    {
-        const std::size_t dot = address.find('.', octet_start);
-        const std::size_t octet_end = dot == std::string_view::npos ? address.size() : dot;
-        const std::string_view octet = address.substr(octet_start, octet_end - octet_start);
-        std::uint32_t value = 0;
-        if (octet.size() > 1 && octet.front() == '0')
-        {
-            return false;
-        }
-        if (!parse_decimal(octet, maximum_ipv4_octet, value))
-        {
-            return false;
-        }
-        ++octet_count;
-        if (dot == std::string_view::npos)
-        {
-            break;
-        }
-        octet_start = dot + 1;
-    }
-    return octet_count == 4;
-}
-
 /// @brief Reports whether a dotted candidate must be treated as numeric IPv4.
 [[nodiscard]] bool looks_like_ipv4(const std::string_view host) noexcept
 {
@@ -131,81 +97,6 @@ constexpr std::size_t ipv4_ipv6_group_count = 2;
     }
     return std::ranges::all_of(host,
                                [](const char byte) { return is_ascii_digit(byte) || byte == '.'; });
-}
-
-/// @brief Returns the IPv6 slot width of one valid hexadecimal or embedded-IPv4 group.
-[[nodiscard]] std::size_t ipv6_group_width(const std::string_view group, const bool may_be_ipv4,
-                                           const bool is_last_group) noexcept
-{
-    if (group.empty())
-    {
-        return 0;
-    }
-    if (group.contains('.'))
-    {
-        return may_be_ipv4 && is_last_group && is_valid_ipv4(group) ? ipv4_ipv6_group_count : 0;
-    }
-    if (group.size() > 4 || !std::ranges::all_of(group, is_ascii_hexadecimal_digit))
-    {
-        return 0;
-    }
-    return 1;
-}
-
-/// @brief Counts validated IPv6 groups on one side of an optional compression marker.
-[[nodiscard]] bool count_ipv6_groups(const std::string_view side, const bool may_end_with_ipv4,
-                                     std::size_t &group_count) noexcept
-{
-    if (side.empty())
-    {
-        return true;
-    }
-    std::size_t group_start = 0;
-    while (group_start < side.size())
-    {
-        const std::size_t colon = side.find(':', group_start);
-        const std::size_t group_end = colon == std::string_view::npos ? side.size() : colon;
-        const std::string_view group = side.substr(group_start, group_end - group_start);
-        const std::size_t width =
-            ipv6_group_width(group, may_end_with_ipv4, colon == std::string_view::npos);
-        if (width == 0)
-        {
-            return false;
-        }
-        group_count += width;
-        if (colon == std::string_view::npos)
-        {
-            return true;
-        }
-        group_start = colon + 1;
-    }
-    return false;
-}
-
-/// @brief Validates an IPv6 literal without its required HTTP brackets.
-[[nodiscard]] bool is_valid_ipv6(const std::string_view address) noexcept
-{
-    if (address.empty())
-    {
-        return false;
-    }
-    const std::size_t compression = address.find("::");
-    const bool compressed = compression != std::string_view::npos;
-    if (compressed && address.find("::", compression + 2) != std::string_view::npos)
-    {
-        return false;
-    }
-
-    const std::string_view left = compressed ? address.substr(0, compression) : address;
-    const std::string_view right =
-        compressed ? address.substr(compression + 2) : std::string_view{};
-    std::size_t group_count = 0;
-    if (!count_ipv6_groups(left, !compressed, group_count) ||
-        !count_ipv6_groups(right, true, group_count))
-    {
-        return false;
-    }
-    return compressed ? group_count < ipv6_group_count : group_count == ipv6_group_count;
 }
 
 /// @brief Validates an optional decimal TCP port representable by 16 bits.
@@ -220,7 +111,7 @@ constexpr std::size_t ipv4_ipv6_group_count = 2;
 {
     const std::size_t closing_bracket = authority.find(']');
     if (closing_bracket == std::string_view::npos || closing_bracket == 1 ||
-        !is_valid_ipv6(authority.substr(1, closing_bracket - 1)))
+        !text::ip::is_valid_ipv6_address(authority.substr(1, closing_bracket - 1)))
     {
         return false;
     }
@@ -258,7 +149,7 @@ bool is_valid_host_authority(const std::string_view authority) noexcept
     {
         return false;
     }
-    return looks_like_ipv4(host) ? is_valid_ipv4(host) : is_valid_hostname(host);
+    return looks_like_ipv4(host) ? text::ip::is_valid_ipv4_address(host) : is_valid_hostname(host);
 }
 
 } // namespace sparenode::http::detail

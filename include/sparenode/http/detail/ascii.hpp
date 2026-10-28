@@ -64,4 +64,30 @@ namespace sparenode::http::detail
     return punctuation.find(byte) != std::string_view::npos;
 }
 
+/// @brief Checks whether one byte is permitted inside an HTTP field value.
+/// @param[in] byte Byte to classify under the HTTP field-value control-byte policy.
+/// @return `true` for horizontal tab, visible ASCII, or an opaque non-ASCII byte.
+[[nodiscard]] constexpr bool is_http_field_value_byte(const unsigned char byte) noexcept
+{
+    constexpr unsigned char first_visible_ascii_byte = 0x20U;
+    constexpr unsigned char delete_control_byte = 0x7FU;
+    return byte == '\t' || (byte >= first_visible_ascii_byte && byte != delete_control_byte);
+}
+
+/// @brief Removes HTTP optional whitespace from both ends of a value.
+/// @param[in] value Value whose surrounding SP and HTAB bytes are ignored.
+/// @return Borrowed view without leading or trailing HTTP optional whitespace.
+[[nodiscard]] constexpr std::string_view trim_optional_whitespace(std::string_view value) noexcept
+{
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+    {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+    {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
 } // namespace sparenode::http::detail

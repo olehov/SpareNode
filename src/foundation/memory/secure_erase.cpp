@@ -12,4 +12,9 @@ void secure_erase(const std::span<std::byte> bytes) noexcept
     }
 }
 
+void secure_erase(const std::span<char> characters) noexcept
+{
+    secure_erase(std::as_writable_bytes(characters));
+}
+
 } // namespace sparenode::memory

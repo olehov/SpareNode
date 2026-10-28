@@ -16,6 +16,7 @@
 #include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/foundation/text/hexadecimal.hpp"
 #include "sparenode/foundation/text/utf8.hpp"
+#include "sparenode/http/api/json_response.hpp"
 #include "sparenode/http/detail/ascii.hpp"
 #include "sparenode/http/http_status_code.hpp"
 #include "sparenode/http/response/http_response.hpp"
@@ -291,19 +292,6 @@ class LoginJsonParser final
     std::size_t position_{}; ///< Next unconsumed payload byte.
 };
 
-[[nodiscard]] std::string_view trim_optional_whitespace(std::string_view value) noexcept
-{
-    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
-    {
-        value.remove_prefix(1);
-    }
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
-    {
-        value.remove_suffix(1);
-    }
-    return value;
-}
-
 /// @brief Accepts exactly one JSON media type with an optional UTF-8 charset parameter.
 [[nodiscard]] bool has_json_content_type(const http::HttpRequestView &request) noexcept
 {
@@ -325,7 +313,7 @@ class LoginJsonParser final
         return false;
     }
     const auto separator = value->find(';');
-    const auto media_type = trim_optional_whitespace(value->substr(0, separator));
+    const auto media_type = http::detail::trim_optional_whitespace(value->substr(0, separator));
     if (!http::detail::ascii_case_insensitive_equal(media_type, "application/json"))
     {
         return false;
@@ -334,61 +322,40 @@ class LoginJsonParser final
     {
         return true;
     }
-    auto parameter = trim_optional_whitespace(value->substr(separator + 1));
+    auto parameter = http::detail::trim_optional_whitespace(value->substr(separator + 1));
     const auto equals = parameter.find('=');
     if (equals == std::string_view::npos || parameter.find(';') != std::string_view::npos)
     {
         return false;
     }
-    const auto name = trim_optional_whitespace(parameter.substr(0, equals));
-    const auto charset = trim_optional_whitespace(parameter.substr(equals + 1));
+    const auto name = http::detail::trim_optional_whitespace(parameter.substr(0, equals));
+    const auto charset = http::detail::trim_optional_whitespace(parameter.substr(equals + 1));
     return http::detail::ascii_case_insensitive_equal(name, "charset") &&
            http::detail::ascii_case_insensitive_equal(charset, "utf-8");
 }
 
-[[nodiscard]] std::vector<std::byte> response_body(const std::string_view text)
-{
-    const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
-    return {bytes.begin(), bytes.end()};
-}
-
-[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
-json_response(const http::HttpStatusCode status, std::string reason, const std::string_view body)
-{
-    auto response = http::HttpResponse::create(
-        status, std::move(reason), {{"Content-Type", "application/json; charset=utf-8"}},
-        response_body(body));
-    if (!response)
-    {
-        return unexpected(
-            http::HttpRouteError{http::HttpRouteErrorCode::response_validation_failure,
-                                 static_cast<int>(response.error().code)});
-    }
-    return std::move(response).value();
-}
-
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> malformed_login()
 {
-    return json_response(http::HttpStatusCode::bad_request, "Bad Request",
-                         "{\"error\":\"invalid_login_request\"}");
+    return http::api::make_json_response(http::HttpStatusCode::bad_request,
+                                         "{\"error\":\"invalid_login_request\"}");
 }
 
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> unsupported_media_type()
 {
-    return json_response(http::HttpStatusCode::unsupported_media_type, "Unsupported Media Type",
-                         "{\"error\":\"unsupported_media_type\"}");
+    return http::api::make_json_response(http::HttpStatusCode::unsupported_media_type,
+                                         "{\"error\":\"unsupported_media_type\"}");
 }
 
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> invalid_credentials()
 {
-    return json_response(http::HttpStatusCode::unauthorized, "Unauthorized",
-                         "{\"error\":\"invalid_credentials\"}");
+    return http::api::make_json_response(http::HttpStatusCode::unauthorized,
+                                         "{\"error\":\"invalid_credentials\"}");
 }
 
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> authentication_unavailable()
 {
-    return json_response(http::HttpStatusCode::service_unavailable, "Service Unavailable",
-                         "{\"error\":\"authentication_unavailable\"}");
+    return http::api::make_json_response(http::HttpStatusCode::service_unavailable,
+                                         "{\"error\":\"authentication_unavailable\"}");
 }
 
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
@@ -423,7 +390,8 @@ login(const http::HttpRequestView &request,
                    : authentication_unavailable();
     }
     auto response = http::HttpResponse::create(
-        http::HttpStatusCode::no_content, "No Content",
+        http::HttpStatusCode::no_content,
+        std::string(http::http_reason_phrase(http::HttpStatusCode::no_content)),
         {{"Set-Cookie",
           "spnode_session=" + std::move(authenticated).value() + "; Path=/; HttpOnly"}},
         {});

@@ -4,7 +4,7 @@
 
 #include "filesystem_error_response.hpp"
 #include "json_writer.hpp"
-#include "response_factory.hpp"
+#include "sparenode/http/api/json_response.hpp"
 #include "sparenode/http/http_status_code.hpp"
 
 namespace sparenode::http::detail
@@ -25,7 +25,7 @@ Result<HttpResponse, HttpRouteError> handle_resource(const application::Filesyst
         if (const auto *listing =
                 std::get_if<std::vector<filesystem::DirectoryListingEntry>>(&resolved))
         {
-            return make_json_response(HttpStatusCode::ok, serialize_listing(*listing));
+            return api::make_json_response(HttpStatusCode::ok, serialize_listing(*listing));
         }
         return handle_file(std::get<filesystem::FileReadStream>(std::move(resolved)), mime_types,
                            requested_path);

@@ -5,18 +5,12 @@
 #include <charconv>
 #include <limits>
 
+#include "sparenode/http/detail/ascii.hpp"
+
 namespace sparenode::http
 {
 namespace
 {
-/// @brief Tests the ASCII HTTP token grammar without locale conversion.
-[[nodiscard]] bool token(const char byte) noexcept
-{
-    return (byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'z') ||
-           (byte >= 'A' && byte <= 'Z') ||
-           std::string_view("!#$%&'*+-.^_`|~").find(byte) != std::string_view::npos;
-}
-
 /// @brief Removes grammar-permitted bad whitespace around extension separators.
 void skip_whitespace(std::string_view &text) noexcept
 {
@@ -29,7 +23,7 @@ void skip_whitespace(std::string_view &text) noexcept
 /// @brief Consumes a nonempty extension token.
 [[nodiscard]] bool take_token(std::string_view &text) noexcept
 {
-    const auto end = std::ranges::find_if_not(text, token);
+    const auto end = std::ranges::find_if_not(text, detail::is_http_token_character);
     const auto count = static_cast<std::size_t>(end - text.begin());
     text.remove_prefix(count);
     return count != 0;
@@ -56,7 +50,7 @@ void skip_whitespace(std::string_view &text) noexcept
             byte = static_cast<unsigned char>(text.front());
             text.remove_prefix(1);
         }
-        if ((byte < 0x20U && byte != '\t') || byte == 0x7FU)
+        if (!detail::is_http_field_value_byte(byte))
         {
             return false;
         }
@@ -101,7 +95,7 @@ void skip_whitespace(std::string_view &text) noexcept
 {
     const auto colon = line.find(':');
     if (colon == 0 || colon == std::string_view::npos ||
-        !std::ranges::all_of(line.substr(0, colon), token))
+        !std::ranges::all_of(line.substr(0, colon), detail::is_http_token_character))
     {
         return false;
     }
@@ -120,8 +114,7 @@ void skip_whitespace(std::string_view &text) noexcept
     {
         return false;
     }
-    return std::ranges::none_of(line.substr(colon + 1), [](const unsigned char byte)
-                                { return (byte < 0x20U && byte != '\t') || byte == 0x7FU; });
+    return std::ranges::all_of(line.substr(colon + 1), detail::is_http_field_value_byte);
 }
 } // namespace
 

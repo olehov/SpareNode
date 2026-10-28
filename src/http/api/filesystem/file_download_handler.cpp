@@ -35,11 +35,12 @@ make_file_response(filesystem::FileReadStream stream, const std::string_view con
                                 : HttpBodyReadErrorDomain::filesystem;
         return unexpected(HttpBodyReadError{domain, static_cast<int>(error.code)});
     };
-    auto response = HttpResponse::create_streaming(HttpStatusCode::ok, "OK",
-                                                   {{"Content-Type", std::string(content_type)},
-                                                    {"Content-Disposition", "inline"},
-                                                    {"X-Content-Type-Options", "nosniff"}},
-                                                   content_length, std::move(reader));
+    auto response = HttpResponse::create_streaming(
+        HttpStatusCode::ok, std::string(http_reason_phrase(HttpStatusCode::ok)),
+        {{"Content-Type", std::string(content_type)},
+         {"Content-Disposition", "inline"},
+         {"X-Content-Type-Options", "nosniff"}},
+        content_length, std::move(reader));
     if (!response)
     {
         return unexpected(HttpRouteError{HttpRouteErrorCode::response_validation_failure,

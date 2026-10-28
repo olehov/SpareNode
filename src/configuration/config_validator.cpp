@@ -10,6 +10,8 @@
 #include <utility>
 #include <variant>
 
+#include "sparenode/foundation/text/numeric_ip_address.hpp"
+
 namespace sparenode::configuration
 {
 namespace
@@ -25,209 +27,18 @@ using directives::ParsedLocationDirective;
 using directives::ParsedServerDirective;
 using directives::ServerDirectiveKind;
 
-/// @brief Stores one parsed numeric address without depending on the network module.
-struct NumericAddress
-{
-    std::array<std::uint8_t, 16> bytes{}; ///< Network-order address bytes.
-    bool ipv4{};                          ///< True when only the first four bytes are significant.
-};
-
-/// @brief Parses one strict dotted-decimal IPv4 address.
-[[nodiscard]] std::optional<std::array<std::uint8_t, 4>>
-parse_ipv4(const std::string_view value) noexcept
-{
-    std::array<std::uint8_t, 4> bytes{};
-    std::size_t begin = 0;
-    for (std::size_t index = 0; index < bytes.size(); ++index)
-    {
-        const auto end = value.find('.', begin);
-        const auto component_end = end == std::string_view::npos ? value.size() : end;
-        const auto component = value.substr(begin, component_end - begin);
-        if (component.empty() || component.size() > 3 ||
-            (component.size() > 1 && component.front() == '0'))
-        {
-            return std::nullopt;
-        }
-        unsigned int number = 0;
-        for (const char digit : component)
-        {
-            if (digit < '0' || digit > '9')
-            {
-                return std::nullopt;
-            }
-            number = number * 10U + static_cast<unsigned int>(digit - '0');
-        }
-        if (number > std::numeric_limits<std::uint8_t>::max())
-        {
-            return std::nullopt;
-        }
-        bytes[index] = static_cast<std::uint8_t>(number);
-        if (index + 1 < bytes.size())
-        {
-            if (end == std::string_view::npos)
-            {
-                return std::nullopt;
-            }
-            begin = end + 1;
-        }
-        else if (end != std::string_view::npos)
-        {
-            return std::nullopt;
-        }
-    }
-    return bytes;
-}
-
-/// @brief Parses one hexadecimal IPv6 group.
-[[nodiscard]] std::optional<std::uint16_t> parse_ipv6_word(const std::string_view value) noexcept
-{
-    if (value.empty() || value.size() > 4)
-    {
-        return std::nullopt;
-    }
-    std::uint16_t word = 0;
-    for (const char digit : value)
-    {
-        unsigned int nibble = 0;
-        if (digit >= '0' && digit <= '9')
-        {
-            nibble = static_cast<unsigned int>(digit - '0');
-        }
-        else if (digit >= 'a' && digit <= 'f')
-        {
-            nibble = static_cast<unsigned int>(digit - 'a') + 10U;
-        }
-        else if (digit >= 'A' && digit <= 'F')
-        {
-            nibble = static_cast<unsigned int>(digit - 'A') + 10U;
-        }
-        else
-        {
-            return std::nullopt;
-        }
-        word = static_cast<std::uint16_t>((word << 4U) | nibble);
-    }
-    return word;
-}
-
-/// @brief Appends IPv6 words from one side of an optional compression marker.
-[[nodiscard]] bool append_ipv6_words(const std::string_view sequence,
-                                     std::vector<std::uint16_t> &words, const bool allow_ipv4_tail)
-{
-    if (sequence.empty())
-    {
-        return true;
-    }
-    std::size_t begin = 0;
-    while (begin <= sequence.size())
-    {
-        const auto end = sequence.find(':', begin);
-        const auto component_end = end == std::string_view::npos ? sequence.size() : end;
-        const auto component = sequence.substr(begin, component_end - begin);
-        if (component.contains('.'))
-        {
-            if (!allow_ipv4_tail || end != std::string_view::npos)
-            {
-                return false;
-            }
-            const auto ipv4 = parse_ipv4(component);
-            if (!ipv4)
-            {
-                return false;
-            }
-            words.push_back(static_cast<std::uint16_t>(((*ipv4)[0] << 8U) | (*ipv4)[1]));
-            words.push_back(static_cast<std::uint16_t>(((*ipv4)[2] << 8U) | (*ipv4)[3]));
-            return true;
-        }
-        const auto word = parse_ipv6_word(component);
-        if (!word)
-        {
-            return false;
-        }
-        words.push_back(*word);
-        if (end == std::string_view::npos)
-        {
-            break;
-        }
-        begin = end + 1;
-    }
-    return true;
-}
-
-/// @brief Parses one numeric IPv4 or IPv6 address into implementation-independent bytes.
-[[nodiscard]] std::optional<NumericAddress> parse_numeric_ip_address(const std::string_view value)
-{
-    if (const auto ipv4 = parse_ipv4(value))
-    {
-        NumericAddress result;
-        result.ipv4 = true;
-        std::ranges::copy(*ipv4, result.bytes.begin());
-        return result;
-    }
-
-    const auto compression = value.find("::");
-    if (compression != std::string_view::npos &&
-        value.find("::", compression + 2) != std::string_view::npos)
-    {
-        return std::nullopt;
-    }
-    std::vector<std::uint16_t> left;
-    std::vector<std::uint16_t> right;
-    const bool compressed = compression != std::string_view::npos;
-    const auto left_text = compressed ? value.substr(0, compression) : value;
-    const auto right_text = compressed ? value.substr(compression + 2) : std::string_view{};
-    if (!append_ipv6_words(left_text, left, !compressed) ||
-        !append_ipv6_words(right_text, right, true))
-    {
-        return std::nullopt;
-    }
-    const auto word_count = left.size() + right.size();
-    if ((!compressed && word_count != 8) || (compressed && word_count >= 8))
-    {
-        return std::nullopt;
-    }
-
-    NumericAddress result;
-    const auto store_word = [&result](const std::size_t index, const std::uint16_t word)
-    {
-        result.bytes[index * 2] = static_cast<std::uint8_t>(word >> 8U);
-        result.bytes[index * 2 + 1] = static_cast<std::uint8_t>(word & 0xFFU);
-    };
-    for (std::size_t index = 0; index < left.size(); ++index)
-    {
-        store_word(index, left[index]);
-    }
-    for (std::size_t index = 0; index < right.size(); ++index)
-    {
-        store_word(8 - right.size() + index, right[index]);
-    }
-    return result;
-}
-
 /// @brief Reports whether text identifies an IPv4 or IPv6 loopback address.
 [[nodiscard]] bool is_loopback_ip_address(const std::string_view value)
 {
-    const auto parsed = parse_numeric_ip_address(value);
-    if (!parsed)
-    {
-        return false;
-    }
-    if (parsed->ipv4)
-    {
-        return parsed->bytes.front() == 127;
-    }
-    return std::ranges::all_of(parsed->bytes.begin(), parsed->bytes.end() - 1,
-                               [](const std::uint8_t byte) { return byte == 0; }) &&
-           parsed->bytes.back() == 1;
+    const auto parsed = text::ip::parse_numeric_address(value);
+    return parsed && text::ip::is_loopback_address(*parsed);
 }
 
 /// @brief Reports whether text identifies an all-interface wildcard address.
 [[nodiscard]] bool is_unspecified_ip_address(const std::string_view value)
 {
-    const auto parsed = parse_numeric_ip_address(value);
-    const auto size = parsed && parsed->ipv4 ? std::size_t{4} : std::size_t{16};
-    return parsed && std::ranges::all_of(parsed->bytes.begin(), parsed->bytes.begin() + size,
-                                         [](const std::uint8_t byte) { return byte == 0; });
+    const auto parsed = text::ip::parse_numeric_address(value);
+    return parsed && text::ip::is_unspecified_address(*parsed);
 }
 
 /// @brief Converts one validated log-level spelling into a configuration-owned value.
@@ -453,7 +264,7 @@ class ValidationState final
         trusted_proxy_directive_ = &directive;
         const auto &address = std::get<std::string>(directive.value.scalar);
         server_.trusted_proxy = address;
-        if (!parse_numeric_ip_address(address))
+        if (!text::ip::parse_numeric_address(address))
         {
             add_server_error(ConfigValidationErrorCode::invalid_trusted_proxy, directive,
                              directive.value.location);
@@ -493,7 +304,7 @@ class ValidationState final
         bind_address_ = address;
         server_.bind_address = address;
         bind_directive_ = &directive;
-        if (!parse_numeric_ip_address(address))
+        if (!text::ip::parse_numeric_address(address))
         {
             add_server_error(ConfigValidationErrorCode::invalid_bind_address, directive,
                              directive.value.location);

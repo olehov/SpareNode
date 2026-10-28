@@ -53,6 +53,8 @@ configure_file(
 
 add_library(sparenode_foundation STATIC
     src/foundation/memory/secure_erase.cpp
+    src/foundation/text/diagnostic_escape.cpp
+    src/foundation/text/numeric_ip_address.cpp
     src/foundation/text/utf8.cpp
 )
 
@@ -127,6 +129,7 @@ add_library(sparenode_filesystem STATIC
     src/filesystem/directory_creator.cpp
     src/filesystem/directory_listing.cpp
     src/filesystem/filesystem_entry_remover.cpp
+    src/filesystem/file_read_stream.cpp
     src/filesystem/safe_path.cpp
     src/filesystem/shared_root.cpp
     src/filesystem/upload_finalizer.cpp
@@ -195,6 +198,7 @@ sparenode_enable_cppcheck(sparenode_configuration)
 sparenode_enable_static_analysis(sparenode_configuration)
 
 add_library(sparenode_http_core STATIC
+    src/http/http_status_code.cpp
     src/http/mime_type_registry.cpp
     src/http/request/http_request.cpp
     src/http/request/http_request_parser.cpp
@@ -217,6 +221,7 @@ sparenode_enable_static_analysis(sparenode_http_core)
 
 add_library(sparenode_api_core STATIC
     src/http/api/api_router_builder.cpp
+    src/http/api/json_response.cpp
     src/http/api/protected_route_policy.cpp
 )
 
@@ -251,7 +256,6 @@ add_library(sparenode_filesystem_api STATIC
     src/http/api/filesystem/file_download_handler.cpp
     src/http/api/filesystem/filesystem_error_response.cpp
     src/http/api/filesystem/json_writer.cpp
-    src/http/api/filesystem/response_factory.cpp
     src/http/api/filesystem/upload_handler.cpp
 )
 

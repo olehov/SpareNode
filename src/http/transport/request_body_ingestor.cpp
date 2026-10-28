@@ -4,6 +4,8 @@
 #include <chrono>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
+#include "sparenode/foundation/memory/secure_erase.hpp"
 #include "sparenode/http/request/detail/body_decode_buffer.hpp"
 
 namespace sparenode::http
@@ -16,11 +18,7 @@ void delete_sensitive_body(std::vector<std::byte> *body) noexcept
 {
     if (body != nullptr)
     {
-        volatile std::byte *current = body->data();
-        for (std::size_t index = 0; index < body->size(); ++index)
-        {
-            current[index] = std::byte{};
-        }
+        memory::secure_erase(*body);
         delete body;
     }
 }
@@ -29,14 +27,14 @@ void delete_sensitive_body(std::vector<std::byte> *body) noexcept
 [[nodiscard]] std::optional<RequestBodyIngestionError>
 interruption(const storage::TemporaryFileIoOptions &options) noexcept
 {
-    if (options.stop_token.stop_requested())
+    switch (concurrency::interruption_status(options.stop_token, options.deadline))
     {
+    case concurrency::InterruptionStatus::cancelled:
         return RequestBodyIngestionError{RequestBodyIngestionErrorCode::cancelled, {}, {}};
-    }
-    if (options.deadline.has_value() &&
-        std::chrono::steady_clock::now() >= options.deadline.value())
-    {
+    case concurrency::InterruptionStatus::deadline_exceeded:
         return RequestBodyIngestionError{RequestBodyIngestionErrorCode::deadline_exceeded, {}, {}};
+    case concurrency::InterruptionStatus::none:
+        return std::nullopt;
     }
     return std::nullopt;
 }

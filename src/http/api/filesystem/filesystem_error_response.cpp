@@ -5,8 +5,8 @@
 #include <utility>
 
 #include "json_writer.hpp"
-#include "response_factory.hpp"
 #include "sparenode/filesystem/safe_path.hpp"
+#include "sparenode/http/api/json_response.hpp"
 #include "sparenode/http/http_status_code.hpp"
 
 namespace sparenode::http::detail
@@ -179,7 +179,7 @@ public_error(const filesystem::FilesystemEntryRemovalError &error) noexcept
     std::string body("{\"error\":");
     append_json_string(body, identifier);
     body.push_back('}');
-    return make_json_response(status, body);
+    return api::make_json_response(status, body);
 }
 
 } // namespace

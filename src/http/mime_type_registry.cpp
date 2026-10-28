@@ -8,6 +8,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include "sparenode/http/detail/ascii.hpp"
+
 namespace sparenode::http
 {
 namespace
@@ -28,26 +30,6 @@ constexpr std::array active_extensions{
     std::string_view{".xml"},  std::string_view{".xsl"}, std::string_view{".xslt"},
 };
 
-/// @brief Reports whether one ASCII byte is valid in an HTTP token.
-/// @param[in] byte Byte to classify without locale-dependent rules.
-/// @return `true` for an ASCII alphanumeric or permitted token punctuation byte.
-[[nodiscard]] bool is_token_character(const unsigned char byte) noexcept
-{
-    constexpr std::string_view punctuation = "!#$%&'*+-.^_`|~";
-    const bool alpha_numeric = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') ||
-                               (byte >= 'a' && byte <= 'z');
-    return alpha_numeric || punctuation.contains(static_cast<char>(byte));
-}
-
-/// @brief Converts one ASCII uppercase byte to lowercase.
-/// @param[in] byte Byte to normalize without locale-dependent rules.
-/// @return Lowercase ASCII byte, or the original byte when no conversion is needed.
-[[nodiscard]] constexpr char ascii_lower(const unsigned char byte) noexcept
-{
-    return byte >= 'A' && byte <= 'Z' ? static_cast<char>(byte + ('a' - 'A'))
-                                      : static_cast<char>(byte);
-}
-
 /// @brief Validates one bounded parameter-free `type/subtype` value.
 /// @param[in] value Media type to validate.
 /// @return `true` when both sides of its single slash are valid HTTP tokens.
@@ -63,8 +45,8 @@ constexpr std::array active_extensions{
     {
         return false;
     }
-    return std::ranges::all_of(value, [](const unsigned char byte)
-                               { return byte == '/' || is_token_character(byte); });
+    return std::ranges::all_of(value, [](const char byte)
+                               { return byte == '/' || detail::is_http_token_character(byte); });
 }
 
 /// @brief Normalizes one configured extension to lowercase with a leading dot.
@@ -89,7 +71,7 @@ constexpr std::array active_extensions{
         return false;
     }
     std::ranges::transform(extension, extension.begin(),
-                           [](const unsigned char byte) { return ascii_lower(byte); });
+                           [](const char byte) { return detail::ascii_lower(byte); });
     extension.insert(extension.begin(), '.');
     return true;
 }
@@ -146,7 +128,7 @@ MimeTypeRegistry::create(std::vector<MimeTypeMapping> mappings)
                     MimeTypeRegistryError{MimeTypeRegistryErrorCode::invalid_media_type, index});
             }
             std::ranges::transform(mapping.media_type, mapping.media_type.begin(),
-                                   [](const unsigned char byte) { return ascii_lower(byte); });
+                                   [](const char byte) { return detail::ascii_lower(byte); });
             if (!extensions.insert(mapping.extension).second)
             {
                 return unexpected(
@@ -180,7 +162,7 @@ std::string_view MimeTypeRegistry::content_type_for_path(const std::string_view 
     }
     std::array<char, maximum_extension_bytes + 1> normalized{};
     std::ranges::transform(path.substr(dot), normalized.begin(),
-                           [](const unsigned char byte) { return ascii_lower(byte); });
+                           [](const char byte) { return detail::ascii_lower(byte); });
     const std::string_view extension(normalized.data(), extension_length);
     if (is_active_extension(extension))
     {

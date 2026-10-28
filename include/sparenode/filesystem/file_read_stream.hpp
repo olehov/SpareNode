@@ -74,10 +74,13 @@ class FileReadStream final
     struct Implementation;
 
     /// @brief Takes ownership of a platform-specific opened file.
-    /// @param[in] implementation Stable native handle and captured metadata.
-    explicit FileReadStream(std::unique_ptr<Implementation> implementation) noexcept;
+    /// @param[in] implementation Stable platform-native handle.
+    /// @param[in] size File length captured from that opened handle.
+    explicit FileReadStream(std::unique_ptr<Implementation> implementation,
+                            std::uint64_t size) noexcept;
 
-    std::unique_ptr<Implementation> implementation_; ///< Platform-specific handle and file size.
+    std::unique_ptr<Implementation> implementation_; ///< Platform-specific stable handle.
+    std::uint64_t size_{};                           ///< Post-open captured file length.
 };
 
 /// @brief Returns stable text for one file-read failure category.

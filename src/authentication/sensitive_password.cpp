@@ -10,7 +10,7 @@ namespace sparenode::authentication
 
 void erase_sensitive_bytes(const std::span<char> bytes) noexcept
 {
-    memory::secure_erase(std::as_writable_bytes(bytes));
+    memory::secure_erase(bytes);
 }
 
 SensitivePassword::SensitivePassword(const std::string_view password)

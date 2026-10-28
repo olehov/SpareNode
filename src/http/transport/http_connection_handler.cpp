@@ -133,43 +133,13 @@ request_error_status(const detail::BufferedRequestError &error) noexcept
     return HttpStatusCode::internal_server_error;
 }
 
-/// @brief Returns the canonical reason phrase for a connection-generated status.
-/// @param[in] status Status selected by parsing or routing failure handling.
-/// @return Static ASCII reason phrase.
-[[nodiscard]] std::string_view reason_phrase(const HttpStatusCode status) noexcept
-{
-    switch (status)
-    {
-    case HttpStatusCode::bad_request:
-        return "Bad Request";
-    case HttpStatusCode::forbidden:
-        return "Forbidden";
-    case HttpStatusCode::expectation_failed:
-        return "Expectation Failed";
-    case HttpStatusCode::content_too_large:
-        return "Content Too Large";
-    case HttpStatusCode::uri_too_long:
-        return "URI Too Long";
-    case HttpStatusCode::request_header_fields_too_large:
-        return "Request Header Fields Too Large";
-    case HttpStatusCode::internal_server_error:
-        return "Internal Server Error";
-    case HttpStatusCode::not_implemented:
-        return "Not Implemented";
-    case HttpStatusCode::http_version_not_supported:
-        return "HTTP Version Not Supported";
-    default:
-        return "Error";
-    }
-}
-
 /// @brief Creates one empty response for a connection-owned failure boundary.
 /// @param[in] status Standard failure status.
 /// @return Valid bounded response or a stable internal session error.
 [[nodiscard]] Result<HttpResponse, network::NetworkError>
 make_error_response(const HttpStatusCode status)
 {
-    auto response = HttpResponse::create(status, std::string(reason_phrase(status)), {}, {});
+    auto response = HttpResponse::create(status, std::string(http_reason_phrase(status)), {}, {});
     if (!response)
     {
         return unexpected(network::NetworkError{

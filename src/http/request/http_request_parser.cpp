@@ -254,31 +254,6 @@ parse_request_line(const std::string_view line, detail::ParsedRequestTarget &tar
     return method_result;
 }
 
-/// @brief Removes HTTP optional whitespace from both ends of a header value.
-/// @param[in] value Untrimmed field value.
-/// @return Borrowed view containing no leading or trailing spaces or horizontal tabs.
-[[nodiscard]] std::string_view trim_optional_whitespace(std::string_view value) noexcept
-{
-    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
-    {
-        value.remove_prefix(1);
-    }
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
-    {
-        value.remove_suffix(1);
-    }
-    return value;
-}
-
-/// @brief Rejects control bytes forbidden inside a parsed HTTP field value.
-/// @param[in] value Trimmed header value to validate.
-/// @return `true` when the value contains only permitted bytes.
-[[nodiscard]] bool valid_header_value(const std::string_view value) noexcept
-{
-    return std::ranges::none_of(value, [](const unsigned char byte)
-                                { return (byte < 0x20U && byte != '\t') || byte == 0x7FU; });
-}
-
 /// @brief Validates and separates one non-empty HTTP header line.
 /// @param[in] line Header line excluding its CRLF terminator.
 /// @param[in] line_start Source offset at which the header line begins.
@@ -305,8 +280,8 @@ parse_header_field(const std::string_view line, const std::size_t line_start)
     }
     const std::string_view untrimmed_value = line.substr(colon + 1);
     const std::size_t leading_whitespace = untrimmed_value.find_first_not_of(" \t");
-    const std::string_view value = trim_optional_whitespace(untrimmed_value);
-    if (!valid_header_value(value))
+    const std::string_view value = detail::trim_optional_whitespace(untrimmed_value);
+    if (!std::ranges::all_of(value, detail::is_http_field_value_byte))
     {
         return unexpected(HttpRequestParseError{HttpRequestParseErrorCode::malformed_header,
                                                 line_start + colon + 1});

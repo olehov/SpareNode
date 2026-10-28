@@ -3,7 +3,7 @@
 #include <new>
 
 #include "filesystem_error_response.hpp"
-#include "response_factory.hpp"
+#include "sparenode/http/api/json_response.hpp"
 #include "sparenode/http/http_status_code.hpp"
 
 namespace sparenode::http::detail
@@ -23,7 +23,7 @@ Result<HttpResponse, HttpRouteError> handle_upload(const application::Filesystem
         {
             return make_public_error_response(uploaded.error());
         }
-        return make_json_response(HttpStatusCode::created, "{\"status\":\"created\"}");
+        return api::make_json_response(HttpStatusCode::created, "{\"status\":\"created\"}");
     }
     catch (const std::bad_alloc &)
     {
