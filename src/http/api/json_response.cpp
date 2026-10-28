@@ -1,10 +1,13 @@
 #include "sparenode/http/api/json_response.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "sparenode/http/detail/ascii.hpp"
 
 namespace sparenode::http::api
 {
@@ -15,6 +18,8 @@ make_json_response(const HttpStatusCode status, const std::string_view body,
 {
     const auto bytes = std::as_bytes(std::span(body.data(), body.size()));
     std::vector<std::byte> owned_body(bytes.begin(), bytes.end());
+    std::erase_if(additional_headers, [](const HttpResponseHeader &header)
+                  { return detail::ascii_case_insensitive_equal(header.name, "Content-Type"); });
     additional_headers.insert(
         additional_headers.begin(),
         HttpResponseHeader{"Content-Type", "application/json; charset=utf-8"});

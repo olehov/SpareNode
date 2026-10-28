@@ -81,6 +81,20 @@ parse_ipv4(const std::string_view value) noexcept
     return word;
 }
 
+/// @brief Reports whether an IPv6 value carries the RFC IPv4-mapped prefix.
+[[nodiscard]] bool is_ipv4_mapped_address(const NumericAddress &address) noexcept
+{
+    constexpr std::size_t zero_prefix_bytes = 10;
+    constexpr std::size_t marker_first_index = 10;
+    constexpr std::size_t marker_second_index = 11;
+    constexpr std::uint8_t marker_byte = 0xFFU;
+    return !address.ipv4 &&
+           std::ranges::all_of(address.bytes.begin(), address.bytes.begin() + zero_prefix_bytes,
+                               [](const std::uint8_t byte) { return byte == 0; }) &&
+           address.bytes[marker_first_index] == marker_byte &&
+           address.bytes[marker_second_index] == marker_byte;
+}
+
 /// @brief Appends IPv6 words from one side of an optional compression marker.
 [[nodiscard]] bool append_ipv6_words(const std::string_view sequence,
                                      std::array<std::uint16_t, 8> &words, std::size_t &word_count,
@@ -217,8 +231,13 @@ bool is_loopback_address(const NumericAddress &address) noexcept
 
 bool is_unspecified_address(const NumericAddress &address) noexcept
 {
-    const auto size = address.ipv4 ? std::size_t{4} : address.bytes.size();
-    return std::ranges::all_of(address.bytes.begin(), address.bytes.begin() + size,
+    constexpr std::size_t ipv4_byte_count = 4;
+    constexpr std::size_t mapped_ipv4_offset = 12;
+    const bool ipv4_mapped = is_ipv4_mapped_address(address);
+    const auto begin =
+        ipv4_mapped ? address.bytes.begin() + mapped_ipv4_offset : address.bytes.begin();
+    const auto size = address.ipv4 || ipv4_mapped ? ipv4_byte_count : address.bytes.size();
+    return std::ranges::all_of(begin, begin + size,
                                [](const std::uint8_t byte) { return byte == 0; });
 }
 
