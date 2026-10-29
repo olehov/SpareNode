@@ -19,6 +19,7 @@ namespace sparenode::application
 enum class SessionLoginErrorCode : std::uint8_t
 {
     invalid_credentials, ///< Login is unknown or the password does not match.
+    throttled,           ///< Process-wide failed-attempt cooldown is active.
     unavailable          ///< Authentication or session infrastructure failed closed.
 };
 

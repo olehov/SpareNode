@@ -293,6 +293,7 @@ sparenode_enable_cppcheck(sparenode_http_transport)
 sparenode_enable_static_analysis(sparenode_http_transport)
 
 add_library(sparenode_authentication_core STATIC
+    src/authentication/detail/authentication_rate_limiter.cpp
     src/authentication/authentication_service.cpp
     src/authentication/sensitive_password.cpp
 )

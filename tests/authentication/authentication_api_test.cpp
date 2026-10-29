@@ -231,6 +231,24 @@ TEST_CASE("Authentication API does not distinguish invalid credentials", "[authe
     CHECK(body_text(unknown) == body_text(incorrect));
 }
 
+TEST_CASE("Authentication API reports a bounded failed-login cooldown", "[authentication][api]")
+{
+    const auto fixture = make_fixture();
+    const auto router = make_router(fixture);
+    constexpr std::string_view incorrect = R"({"login":"admin","password":"incorrect"})";
+
+    const sparenode::authentication::AuthenticationRateLimitPolicy policy;
+    for (std::size_t attempt = 0; attempt < policy.maximum_failures; ++attempt)
+    {
+        const auto response = dispatch_login(router, incorrect);
+        REQUIRE(response.status_code() == sparenode::http::HttpStatusCode::unauthorized);
+    }
+
+    const auto throttled = dispatch_login(router, R"({"login":"admin","password":"password"})");
+    CHECK(throttled.status_code() == sparenode::http::HttpStatusCode::too_many_requests);
+    CHECK(body_text(throttled) == R"({"error":"authentication_throttled"})");
+}
+
 TEST_CASE("Authentication API rejects malformed input before verification", "[authentication][api]")
 {
     const auto fixture = make_fixture();
