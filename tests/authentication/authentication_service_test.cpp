@@ -221,7 +221,13 @@ TEST_CASE("Authentication service throttles bounded failures and recovers after 
     REQUIRE_FALSE(throttled);
     CHECK(throttled.error() == Error::throttled);
 
-    *now += std::chrono::seconds{30};
+    *now += std::chrono::seconds{30} - std::chrono::steady_clock::duration{1};
+    const auto still_throttled =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE_FALSE(still_throttled);
+    CHECK(still_throttled.error() == Error::throttled);
+
+    *now += std::chrono::steady_clock::duration{1};
     const auto recovered =
         service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
     REQUIRE(recovered);
@@ -299,4 +305,30 @@ TEST_CASE("Authentication service applies one failure threshold to a concurrent 
 
     CHECK(std::ranges::count(outcomes, Error::invalid_credentials) == failure_limit);
     CHECK(std::ranges::count(outcomes, Error::throttled) == attempt_count - failure_limit);
+}
+
+TEST_CASE("Authentication cooldown deadline saturates at the monotonic clock boundary",
+          "[authentication][service][rate-limit]")
+{
+    using Error = sparenode::authentication::AuthenticationErrorCode;
+    auto now = std::make_shared<std::chrono::steady_clock::time_point>(
+        std::chrono::steady_clock::time_point::max() - std::chrono::seconds{1});
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+    auto service_result = sparenode::authentication::AuthenticationService::create(
+        provider, verifier, {.maximum_failures = 1, .cooldown = std::chrono::seconds{30}},
+        [now] { return *now; });
+    REQUIRE(service_result);
+    const auto service = std::move(service_result).value();
+
+    const auto rejected =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("incorrect"));
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error() == Error::invalid_credentials);
+
+    const auto throttled =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE_FALSE(throttled);
+    CHECK(throttled.error() == Error::throttled);
 }
