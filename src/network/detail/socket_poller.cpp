@@ -25,6 +25,7 @@ inline constexpr short native_writable_event = POLLWRNORM;
 
 /// @brief Calls the Windows polling API for a portable entry collection.
 /// @param[in,out] entries Native descriptors populated with readiness results.
+/// @param[in] timeout_milliseconds Maximum native wait duration in milliseconds.
 /// @return Number of ready descriptors, or the native failure sentinel.
 [[nodiscard]] int poll_native_entries(std::vector<NativePollEntry> &entries,
                                       const int timeout_milliseconds) noexcept
@@ -49,6 +50,7 @@ inline constexpr short native_writable_event = POLLOUT;
 
 /// @brief Calls the POSIX polling API for a portable entry collection.
 /// @param[in,out] entries Native descriptors populated with readiness results.
+/// @param[in] timeout_milliseconds Maximum native wait duration in milliseconds.
 /// @return Number of ready descriptors, or the native failure sentinel.
 [[nodiscard]] int poll_native_entries(std::vector<NativePollEntry> &entries,
                                       const int timeout_milliseconds) noexcept

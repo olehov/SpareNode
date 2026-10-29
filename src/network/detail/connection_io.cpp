@@ -23,7 +23,7 @@ namespace
 /// @tparam Transfer Nullary callable that performs one native transfer attempt.
 /// @param[in] context Borrowed socket and transfer collaborators.
 /// @param[in] request Readiness interest and public operation metadata.
-/// @param[in] stop_token Token observed while waiting for readiness.
+/// @param[in] options Cancellation and deadline policy observed while waiting for readiness.
 /// @param[in] transfer Transfer callable invoked after any non-cancelled wait,
 /// including socket-error and hangup statuses, so the native call reports the outcome.
 /// @return Transferred byte count, or a structured network error.
