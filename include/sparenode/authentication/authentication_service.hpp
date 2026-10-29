@@ -68,6 +68,7 @@ class AuthenticationService final
     class SharedState;
 
     /// @brief Retains synchronized process-wide verification and rate-limit state.
+    /// @param[in,out] state Fully initialized shared state transferred into the service.
     explicit AuthenticationService(std::shared_ptr<SharedState> state) noexcept;
 
     std::shared_ptr<SharedState> state_; ///< Shared by every copied application-service adapter.

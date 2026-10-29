@@ -21,6 +21,11 @@ class AuthenticationService::SharedState final
 {
   public:
     /// @brief Stores validated dependencies and fixed-size limiter state.
+    /// @param[in,out] provider Credential source transferred into shared state.
+    /// @param[in,out] verifier Password verifier transferred into shared state.
+    /// @param[in,out] dummy_verifier Unknown-login verifier transferred into shared state.
+    /// @param[in] rate_limit_policy Fixed failure threshold and automatic cooldown.
+    /// @param[in,out] clock Monotonic time source transferred into shared state.
     SharedState(std::shared_ptr<const CredentialProvider> provider,
                 std::shared_ptr<const PasswordVerifier> verifier, std::string dummy_verifier,
                 const AuthenticationRateLimitPolicy rate_limit_policy,

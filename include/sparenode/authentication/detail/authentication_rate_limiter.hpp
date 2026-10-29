@@ -14,6 +14,7 @@ class AuthenticationRateLimiter final
 {
   public:
     /// @brief Creates a limiter from a policy already validated by its owning service.
+    /// @param[in] policy Fixed failure threshold and automatic cooldown.
     explicit AuthenticationRateLimiter(AuthenticationRateLimitPolicy policy) noexcept;
 
     /// @brief Allows an attempt unless an active cooldown has not yet elapsed.
