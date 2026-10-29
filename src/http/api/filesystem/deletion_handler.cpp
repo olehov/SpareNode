@@ -3,7 +3,7 @@
 #include <new>
 
 #include "filesystem_error_response.hpp"
-#include "response_factory.hpp"
+#include "sparenode/http/api/json_response.hpp"
 #include "sparenode/http/http_status_code.hpp"
 
 namespace sparenode::http::detail
@@ -20,7 +20,7 @@ Result<HttpResponse, HttpRouteError> handle_deletion(const application::Filesyst
         {
             return make_public_error_response(removed.error());
         }
-        return make_json_response(HttpStatusCode::ok, "{\"status\":\"deleted\"}");
+        return api::make_json_response(HttpStatusCode::ok, "{\"status\":\"deleted\"}");
     }
     catch (const std::bad_alloc &)
     {

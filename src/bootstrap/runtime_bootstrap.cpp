@@ -12,6 +12,7 @@
 #include "sparenode/application/runtime/server_config.hpp"
 #include "sparenode/authentication/sodium_password_verifier.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
+#include "sparenode/foundation/text/diagnostic_escape.hpp"
 #include "sparenode/http/request/http_request_timeouts.hpp"
 #include "sparenode/http/transport/http_transport_policy.hpp"
 #include "sparenode/logging/log_severity.hpp"
@@ -22,9 +23,6 @@ namespace sparenode::bootstrap
 {
 namespace
 {
-
-/// Uppercase digits used to render one control byte as `\\xNN`.
-constexpr std::string_view hexadecimal_digits = "0123456789ABCDEF";
 
 /// @brief Converts decoded UTF-8 path text into the host representation.
 [[nodiscard]] std::filesystem::path path_from_utf8(const std::string &value)
@@ -213,20 +211,6 @@ build_session_authentication(authentication::AuthenticationService authenticatio
     return std::move(service).value();
 }
 
-/// @brief Appends a path while escaping bytes that can alter terminal output.
-void append_escaped_path(std::ostringstream &output, const std::filesystem::path &path)
-{
-    for (const unsigned char byte : path.generic_string())
-    {
-        if (byte < 0x20U || byte == 0x7FU)
-        {
-            output << "\\x" << hexadecimal_digits[byte >> 4U] << hexadecimal_digits[byte & 0x0FU];
-            continue;
-        }
-        output << static_cast<char>(byte);
-    }
-}
-
 } // namespace
 
 /// @brief Stores concrete runtime settings and process-wide dependencies.
@@ -357,14 +341,16 @@ std::string format_runtime_bootstrap_error(const RuntimeBootstrapError &error)
     std::ostringstream output;
     if (error.mime_types_error)
     {
-        append_escaped_path(output, error.source_path);
+        text::append_safe_diagnostic(output, error.source_path.generic_string(),
+                                     text::DiagnosticEscapeStyle::path);
         output << ':' << error.mime_types_error->line
                << ":1: error: " << to_string(error.mime_types_error->code);
         return output.str();
     }
     if (error.shared_root_error)
     {
-        append_escaped_path(output, error.source_path);
+        text::append_safe_diagnostic(output, error.source_path.generic_string(),
+                                     text::DiagnosticEscapeStyle::path);
         output << ':' << error.location.line << ':' << error.location.column
                << ": error: " << filesystem::to_string(error.shared_root_error->code);
         return output.str();

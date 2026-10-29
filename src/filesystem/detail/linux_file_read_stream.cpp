@@ -54,11 +54,11 @@ open_descriptor(const std::filesystem::path &path, const int flags)
 struct FileReadStream::Implementation
 {
     FileDescriptor descriptor; ///< Descriptor used for every incremental read.
-    std::uint64_t size{};      ///< Length captured with fstat after opening.
 };
 
-FileReadStream::FileReadStream(std::unique_ptr<Implementation> implementation) noexcept
-    : implementation_(std::move(implementation))
+FileReadStream::FileReadStream(std::unique_ptr<Implementation> implementation,
+                               const std::uint64_t size) noexcept
+    : implementation_(std::move(implementation)), size_(size)
 {
 }
 
@@ -129,9 +129,10 @@ Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &sha
         {
             return unexpected(system_failure(last_posix_error()));
         }
-        auto implementation = std::make_unique<Implementation>(Implementation{
-            std::move(file).value(), static_cast<std::uint64_t>(information.st_size)});
-        return FileReadStream(std::move(implementation));
+        const auto size = static_cast<std::uint64_t>(information.st_size);
+        auto implementation =
+            std::make_unique<Implementation>(Implementation{std::move(file).value()});
+        return FileReadStream(std::move(implementation), size);
     }
     catch (const std::bad_alloc &)
     {
@@ -142,11 +143,6 @@ Result<FileReadStream, FileReadError> FileReadStream::open(const SharedRoot &sha
     {
         return unexpected(system_failure(error.code()));
     }
-}
-
-std::uint64_t FileReadStream::size() const noexcept
-{
-    return implementation_->size;
 }
 
 /// @brief Reads the next bounded block from the owned POSIX descriptor.
@@ -179,30 +175,6 @@ Result<std::size_t, FileReadError> FileReadStream::read(const std::span<std::byt
             return unexpected(FileReadError{FileReadErrorCode::cancelled, {}, std::nullopt});
         }
     }
-}
-
-const char *to_string(const FileReadErrorCode code) noexcept
-{
-    switch (code)
-    {
-    case FileReadErrorCode::invalid_path:
-        return "file path is invalid";
-    case FileReadErrorCode::not_found:
-        return "file does not exist";
-    case FileReadErrorCode::not_regular_file:
-        return "requested path is not a regular file";
-    case FileReadErrorCode::permission_denied:
-        return "file access was denied";
-    case FileReadErrorCode::outside_shared_root:
-        return "file is outside the shared root";
-    case FileReadErrorCode::filesystem_failure:
-        return "file read failed";
-    case FileReadErrorCode::cancelled:
-        return "file read was cancelled";
-    case FileReadErrorCode::resource_allocation_failed:
-        return "file stream memory allocation failed";
-    }
-    return "unknown file read error";
 }
 
 } // namespace sparenode::filesystem

@@ -22,6 +22,7 @@
 #include <winternl.h>
 
 #include "sparenode/storage/detail/temporary_name.hpp"
+#include "upload_finalization_policy.hpp"
 #include "upload_stage_name.hpp"
 #include "windows_handle.hpp"
 
@@ -29,10 +30,6 @@ namespace sparenode::filesystem::detail
 {
 namespace
 {
-
-/// One bounded copy buffer; stage creation and rename remain handle-relative.
-constexpr std::size_t copy_buffer_bytes = 64 * 1024;
-constexpr std::size_t maximum_stage_attempts = 100;
 
 /// @brief Removes an unpublished sibling by handle, avoiding path re-resolution.
 struct StageCleanup
@@ -59,25 +56,10 @@ struct StageCleanup
     return {code, {}, {static_cast<int>(native_error), std::system_category()}};
 }
 
-/// @brief Gives cancellation priority over an expired deadline.
-[[nodiscard]] std::optional<UploadFinalizationError>
-interruption(const storage::TemporaryFileIoOptions &options) noexcept
-{
-    if (options.stop_token.stop_requested())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::cancelled};
-    }
-    if (options.deadline && std::chrono::steady_clock::now() >= options.deadline.value())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::deadline_exceeded};
-    }
-    return std::nullopt;
-}
-
 /// @brief Exclusively creates a sibling from the retained directory handle.
 [[nodiscard]] Result<UniqueWindowsHandle, UploadFinalizationError> create_stage(const HANDLE parent)
 {
-    for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
+    for (std::size_t attempt = 0; attempt < maximum_upload_stage_attempts; ++attempt)
     {
         const auto name = std::filesystem::path(std::string(upload_stage_prefix) +
                                                 storage::detail::temporary_name_suffix() + ".tmp")
@@ -119,11 +101,11 @@ interruption(const storage::TemporaryFileIoOptions &options) noexcept
 copy_source(const HANDLE source, const HANDLE stage, const std::uint64_t expected_bytes,
             const storage::TemporaryFileIoOptions &options)
 {
-    std::array<std::byte, copy_buffer_bytes> buffer{};
+    std::array<std::byte, upload_copy_buffer_bytes> buffer{};
     std::uint64_t copied = 0;
     while (copied < expected_bytes)
     {
-        if (const auto stopped = interruption(options); stopped)
+        if (const auto stopped = upload_interruption(options); stopped)
         {
             return unexpected(stopped.value());
         }
@@ -143,7 +125,7 @@ copy_source(const HANDLE source, const HANDLE stage, const std::uint64_t expecte
         DWORD offset = 0;
         while (offset < received)
         {
-            if (const auto stopped = interruption(options); stopped)
+            if (const auto stopped = upload_interruption(options); stopped)
             {
                 return unexpected(stopped.value());
             }
@@ -257,7 +239,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const storage::Tempo
     {
         return unexpected(copied.error());
     }
-    if (const auto stopped = interruption(options); stopped)
+    if (const auto stopped = upload_interruption(options); stopped)
     {
         return unexpected(stopped.value());
     }
@@ -278,7 +260,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const storage::Tempo
     {
         return unexpected(failure(UploadFinalizationErrorCode::staging_failed, GetLastError()));
     }
-    if (const auto stopped = interruption(options); stopped)
+    if (const auto stopped = upload_interruption(options); stopped)
     {
         return unexpected(stopped.value());
     }

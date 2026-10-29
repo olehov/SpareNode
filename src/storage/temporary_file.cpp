@@ -11,6 +11,8 @@
 #include <system_error>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -70,14 +72,14 @@ constexpr std::uint64_t low_hexadecimal_digit_mask = 0x0FULL;
 [[nodiscard]] std::optional<TemporaryFileError>
 interruption(const TemporaryFileIoOptions &options) noexcept
 {
-    if (options.stop_token.stop_requested())
+    switch (concurrency::interruption_status(options.stop_token, options.deadline))
     {
+    case concurrency::InterruptionStatus::cancelled:
         return TemporaryFileError{TemporaryFileErrorCode::cancelled, 0};
-    }
-    if (options.deadline.has_value() &&
-        std::chrono::steady_clock::now() >= options.deadline.value())
-    {
+    case concurrency::InterruptionStatus::deadline_exceeded:
         return TemporaryFileError{TemporaryFileErrorCode::deadline_exceeded, 0};
+    case concurrency::InterruptionStatus::none:
+        return std::nullopt;
     }
     return std::nullopt;
 }

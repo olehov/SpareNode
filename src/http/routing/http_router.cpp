@@ -119,15 +119,14 @@ constexpr std::size_t percent_encoded_sequence_size = 3;
 
 /// @brief Constructs one router-owned empty response through the validated response API.
 /// @param[in] status_code Standard routing status.
-/// @param[in] reason_phrase Standard routing reason phrase.
 /// @param[in] headers Optional response fields transferred into the response.
 /// @return Valid response or an internal response-validation failure.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-make_routing_response(const HttpStatusCode status_code, std::string reason_phrase,
+make_routing_response(const HttpStatusCode status_code,
                       std::vector<HttpResponseHeader> headers = {})
 {
-    auto response =
-        HttpResponse::create(status_code, std::move(reason_phrase), std::move(headers), {});
+    auto response = HttpResponse::create(status_code, std::string(http_reason_phrase(status_code)),
+                                         std::move(headers), {});
     if (!response)
     {
         return unexpected(HttpRouteError{HttpRouteErrorCode::response_validation_failure, 0});
@@ -229,7 +228,7 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
 {
     if (request.method() == HttpMethod::options && request.target() == "*")
     {
-        return make_routing_response(HttpStatusCode::no_content, "No Content");
+        return make_routing_response(HttpStatusCode::no_content);
     }
     const std::string_view path = request_path(request.target());
     const Route *selected = select_route(request.method(), path);
@@ -258,7 +257,7 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
 
     if (!path_exists)
     {
-        return make_routing_response(HttpStatusCode::not_found, "Not Found");
+        return make_routing_response(HttpStatusCode::not_found);
     }
 
     std::string allow;
@@ -276,8 +275,7 @@ Result<HttpResponse, HttpRouteError> HttpRouter::dispatch(const HttpRequestView 
     }
     std::vector<HttpResponseHeader> headers;
     headers.push_back(HttpResponseHeader{"Allow", std::move(allow)});
-    return make_routing_response(HttpStatusCode::method_not_allowed, "Method Not Allowed",
-                                 std::move(headers));
+    return make_routing_response(HttpStatusCode::method_not_allowed, std::move(headers));
 }
 
 /// @brief Returns the number of registered routes.

@@ -217,6 +217,8 @@ sparenode_enable_static_analysis(sparenode_authentication_api_tests)
 catch_discover_tests(sparenode_authentication_api_tests)
 
 add_executable(sparenode_http_core_tests
+    http/detail/ascii_test.cpp
+    http/http_status_code_test.cpp
     http/request/http_request_parser_test.cpp
     http/routing/http_router_test.cpp
 )
@@ -238,6 +240,7 @@ catch_discover_tests(sparenode_http_core_tests)
 
 add_executable(sparenode_api_core_tests
     http/api/api_router_builder_test.cpp
+    http/api/json_response_test.cpp
 )
 
 target_link_libraries(sparenode_api_core_tests PRIVATE
@@ -414,7 +417,10 @@ sparenode_enable_static_analysis(sparenode_bootstrap_integration_tests)
 catch_discover_tests(sparenode_bootstrap_integration_tests PROPERTIES LABELS "integration")
 
 add_executable(sparenode_foundation_tests
+    foundation/diagnostic_escape_test.cpp
     foundation/hexadecimal_test.cpp
+    foundation/interruption_test.cpp
+    foundation/numeric_ip_address_test.cpp
     foundation/result_test.cpp
     foundation/secure_erase_test.cpp
     foundation/utf8_test.cpp
@@ -423,6 +429,10 @@ add_executable(sparenode_foundation_tests
 target_link_libraries(sparenode_foundation_tests PRIVATE
     Catch2::Catch2WithMain
     sparenode_foundation
+)
+
+target_include_directories(sparenode_foundation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 sparenode_enable_compiler_warnings(sparenode_foundation_tests)

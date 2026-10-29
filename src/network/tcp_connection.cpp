@@ -10,6 +10,7 @@
 #include <stop_token>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
 #include "sparenode/network/detail/connection_io.hpp"
 
 namespace sparenode::network
@@ -84,15 +85,15 @@ TcpConnection::receive_with_options(const std::span<std::byte> buffer,
         return unexpected(
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::validation, 1});
     }
-    if (options.stop_token.stop_requested())
+    switch (concurrency::interruption_status(options.stop_token, options.deadline))
     {
+    case concurrency::InterruptionStatus::cancelled:
         return unexpected(
             NetworkError{NetworkOperation::receive, NetworkErrorDomain::cancellation, 0});
-    }
-    if (options.deadline.has_value() &&
-        std::chrono::steady_clock::now() >= options.deadline.value())
-    {
+    case concurrency::InterruptionStatus::deadline_exceeded:
         return unexpected(NetworkError{NetworkOperation::receive, NetworkErrorDomain::timeout, 0});
+    case concurrency::InterruptionStatus::none:
+        break;
     }
     if (impl_->prefetched_offset < impl_->prefetched.size())
     {

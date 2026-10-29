@@ -10,6 +10,8 @@
 #include <thread>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
+
 namespace sparenode::storage
 {
 namespace
@@ -25,6 +27,22 @@ constexpr std::size_t isolated_payload_bytes = std::size_t{16} * 1024;
 {
     return unexpected(
         TemporaryFileError{TemporaryFileErrorCode::resource_allocation_failed, native_code});
+}
+
+/// @brief Maps shared interruption policy into the temporary-file error domain.
+[[nodiscard]] std::optional<TemporaryFileError>
+interruption(const TemporaryFileIoOptions &options) noexcept
+{
+    switch (concurrency::interruption_status(options.stop_token, options.deadline))
+    {
+    case concurrency::InterruptionStatus::cancelled:
+        return TemporaryFileError{TemporaryFileErrorCode::cancelled, 0};
+    case concurrency::InterruptionStatus::deadline_exceeded:
+        return TemporaryFileError{TemporaryFileErrorCode::deadline_exceeded, 0};
+    case concurrency::InterruptionStatus::none:
+        return std::nullopt;
+    }
+    return std::nullopt;
 }
 
 /// @brief Bounds active native file operations, including those orphaned by timeouts.
@@ -54,14 +72,9 @@ class FileWorkerSlots
         {
             static_cast<void>(available_.wait(lock, options.stop_token, available));
         }
-        if (options.stop_token.stop_requested())
+        if (const auto stopped = interruption(options); stopped)
         {
-            return unexpected(TemporaryFileError{TemporaryFileErrorCode::cancelled, 0});
-        }
-        if (options.deadline.has_value() &&
-            std::chrono::steady_clock::now() >= options.deadline.value())
-        {
-            return unexpected(TemporaryFileError{TemporaryFileErrorCode::deadline_exceeded, 0});
+            return unexpected(stopped.value());
         }
         if (orphaned_ == maximum_workers)
         {
@@ -265,14 +278,9 @@ struct TemporaryFileWriter::FileWorker
         {
             static_cast<void>(state->changed.wait(lock, options.stop_token, finished));
         }
-        if (options.stop_token.stop_requested())
+        if (const auto stopped = interruption(options); stopped)
         {
-            return unexpected(TemporaryFileError{TemporaryFileErrorCode::cancelled, 0});
-        }
-        if (options.deadline.has_value() &&
-            std::chrono::steady_clock::now() >= options.deadline.value())
-        {
-            return unexpected(TemporaryFileError{TemporaryFileErrorCode::deadline_exceeded, 0});
+            return unexpected(stopped.value());
         }
         if (!finished())
         {

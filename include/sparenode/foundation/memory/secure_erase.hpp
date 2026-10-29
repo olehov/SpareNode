@@ -13,4 +13,8 @@ namespace sparenode::memory
 /// @param[in,out] bytes Sensitive bytes to clear while their storage is still alive.
 void secure_erase(std::span<std::byte> bytes) noexcept;
 
+/// @brief Overwrites mutable character storage through the same non-optimizable byte primitive.
+/// @param[in,out] characters Sensitive textual storage to clear while still alive.
+void secure_erase(std::span<char> characters) noexcept;
+
 } // namespace sparenode::memory

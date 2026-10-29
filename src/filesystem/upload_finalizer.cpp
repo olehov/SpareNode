@@ -5,6 +5,7 @@
 #include <system_error>
 #include <utility>
 
+#include "detail/upload_finalization_policy.hpp"
 #include "sparenode/filesystem/detail/directory_entry_reader.hpp"
 
 namespace sparenode::filesystem
@@ -16,15 +17,7 @@ namespace
 [[nodiscard]] std::optional<UploadFinalizationError>
 interruption(const storage::TemporaryFileIoOptions &options) noexcept
 {
-    if (options.stop_token.stop_requested())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::cancelled};
-    }
-    if (options.deadline && std::chrono::steady_clock::now() >= options.deadline.value())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::deadline_exceeded};
-    }
-    return std::nullopt;
+    return detail::upload_interruption(options);
 }
 
 } // namespace

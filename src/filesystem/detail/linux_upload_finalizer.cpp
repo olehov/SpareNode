@@ -18,16 +18,13 @@
 
 #include "posix_file_descriptor.hpp"
 #include "sparenode/storage/detail/temporary_name.hpp"
+#include "upload_finalization_policy.hpp"
 #include "upload_stage_name.hpp"
 
 namespace sparenode::filesystem::detail
 {
 namespace
 {
-
-/// One bounded copy buffer; neither source size nor filename controls memory use.
-constexpr std::size_t copy_buffer_bytes = std::size_t{64} * 1024;
-constexpr std::size_t maximum_stage_attempts = 100;
 
 /// @brief Removes an unpublished sibling even when copying or renaming fails.
 struct StageCleanup
@@ -48,26 +45,11 @@ struct StageCleanup
     return {code, {}, last_posix_error()};
 }
 
-/// @brief Selects cancellation before expiry at every bounded I/O boundary.
-[[nodiscard]] std::optional<UploadFinalizationError>
-interruption(const storage::TemporaryFileIoOptions &options) noexcept
-{
-    if (options.stop_token.stop_requested())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::cancelled};
-    }
-    if (options.deadline && std::chrono::steady_clock::now() >= options.deadline.value())
-    {
-        return UploadFinalizationError{UploadFinalizationErrorCode::deadline_exceeded};
-    }
-    return std::nullopt;
-}
-
 /// @brief Opens an exclusive private sibling relative to the verified parent descriptor.
 [[nodiscard]] Result<std::pair<FileDescriptor, std::string>, UploadFinalizationError>
 create_stage(const int parent)
 {
-    for (std::size_t attempt = 0; attempt < maximum_stage_attempts; ++attempt)
+    for (std::size_t attempt = 0; attempt < maximum_upload_stage_attempts; ++attempt)
     {
         auto name =
             std::string(upload_stage_prefix) + storage::detail::temporary_name_suffix() + ".tmp";
@@ -92,12 +74,12 @@ create_stage(const int parent)
 copy_source(const FileDescriptor &source, const FileDescriptor &stage,
             const storage::TemporaryFile &artifact, const storage::TemporaryFileIoOptions &options)
 {
-    std::array<std::byte, copy_buffer_bytes> buffer{};
+    std::array<std::byte, upload_copy_buffer_bytes> buffer{};
     std::uint64_t copied = 0;
     const auto expected_bytes = artifact.size();
     while (copied < expected_bytes)
     {
-        if (const auto stopped = interruption(options); stopped)
+        if (const auto stopped = upload_interruption(options); stopped)
         {
             return unexpected(stopped.value());
         }
@@ -120,7 +102,7 @@ copy_source(const FileDescriptor &source, const FileDescriptor &stage,
         std::size_t offset = 0;
         while (offset < static_cast<std::size_t>(received))
         {
-            if (const auto stopped = interruption(options); stopped)
+            if (const auto stopped = upload_interruption(options); stopped)
             {
                 return unexpected(stopped.value());
             }
@@ -207,7 +189,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const storage::Tempo
     {
         return copied;
     }
-    if (const auto stopped = interruption(options); stopped)
+    if (const auto stopped = upload_interruption(options); stopped)
     {
         return unexpected(stopped.value());
     }
@@ -215,7 +197,7 @@ publish_confined_upload(const ConfinedDirectory &directory, const storage::Tempo
     {
         return unexpected(failure(UploadFinalizationErrorCode::staging_flush_failed));
     }
-    if (const auto stopped = interruption(options); stopped)
+    if (const auto stopped = upload_interruption(options); stopped)
     {
         return unexpected(stopped.value());
     }

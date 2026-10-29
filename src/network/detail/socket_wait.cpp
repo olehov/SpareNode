@@ -7,6 +7,7 @@
 #include <stop_token>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
 #include "sparenode/network/detail/native_socket_owner.hpp"
 
 namespace sparenode::network::detail
@@ -303,14 +304,14 @@ Result<SocketWaitStatus, NetworkError>
 wait_for_socket_with_options(const SocketWaitContext &context, const SocketWaitRequest request,
                              const NetworkIoOptions &options)
 {
-    if (options.stop_token.stop_requested())
+    switch (concurrency::interruption_status(options.stop_token, options.deadline))
     {
+    case concurrency::InterruptionStatus::cancelled:
         return SocketWaitStatus::cancelled;
-    }
-    if (options.deadline.has_value() &&
-        std::chrono::steady_clock::now() >= options.deadline.value())
-    {
+    case concurrency::InterruptionStatus::deadline_exceeded:
         return SocketWaitStatus::timed_out;
+    case concurrency::InterruptionStatus::none:
+        break;
     }
 
     if (!options.stop_token.stop_possible())

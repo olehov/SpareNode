@@ -32,6 +32,9 @@ template <typename Byte, std::size_t Size> struct SensitiveArray
     SensitiveArray &operator=(const SensitiveArray &) = delete;
     ~SensitiveArray()
     {
+        // This cryptographic adapter deliberately retains libsodium's erasure guarantee;
+        // foundation::secure_erase owns ordinary application buffers without adding a sodium
+        // dependency to lower layers.
         sodium_memzero(bytes.data(), bytes.size() * sizeof(Byte));
     }
 };
