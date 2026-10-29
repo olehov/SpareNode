@@ -31,10 +31,16 @@ SessionAuthenticationService::login(const std::string_view login_identifier,
     auto authenticated = authentication_.authenticate(login_identifier, std::move(password));
     if (!authenticated)
     {
-        return unexpected(authenticated.error() ==
-                                  authentication::AuthenticationErrorCode::invalid_credentials
-                              ? SessionLoginErrorCode::invalid_credentials
-                              : SessionLoginErrorCode::unavailable);
+        switch (authenticated.error())
+        {
+        case authentication::AuthenticationErrorCode::invalid_credentials:
+            return unexpected(SessionLoginErrorCode::invalid_credentials);
+        case authentication::AuthenticationErrorCode::throttled:
+            return unexpected(SessionLoginErrorCode::throttled);
+        case authentication::AuthenticationErrorCode::unavailable:
+            return unexpected(SessionLoginErrorCode::unavailable);
+        }
+        return unexpected(SessionLoginErrorCode::unavailable);
     }
     if (!previous_session.empty())
     {

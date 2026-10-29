@@ -358,6 +358,12 @@ class LoginJsonParser final
                                          "{\"error\":\"authentication_unavailable\"}");
 }
 
+[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> authentication_throttled()
+{
+    return http::api::make_json_response(http::HttpStatusCode::too_many_requests,
+                                         "{\"error\":\"authentication_throttled\"}");
+}
+
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
 login(const http::HttpRequestView &request,
       const application::SessionAuthenticationService &service)
@@ -385,9 +391,16 @@ login(const http::HttpRequestView &request,
         service.login(parsed->login, std::move(parsed->password), previous_session.value);
     if (!authenticated)
     {
-        return authenticated.error() == application::SessionLoginErrorCode::invalid_credentials
-                   ? invalid_credentials()
-                   : authentication_unavailable();
+        switch (authenticated.error())
+        {
+        case application::SessionLoginErrorCode::invalid_credentials:
+            return invalid_credentials();
+        case application::SessionLoginErrorCode::throttled:
+            return authentication_throttled();
+        case application::SessionLoginErrorCode::unavailable:
+            return authentication_unavailable();
+        }
+        return authentication_unavailable();
     }
     auto response = http::HttpResponse::create(
         http::HttpStatusCode::no_content,

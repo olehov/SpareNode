@@ -1,11 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include "sparenode/authentication/authentication_service.hpp"
 
@@ -78,9 +83,9 @@ class TestCredentialProvider final : public sparenode::authentication::Credentia
         return std::optional<sparenode::authentication::CredentialRecord>{credential_};
     }
 
-    void fail() noexcept
+    void fail(const bool value = true) noexcept
     {
-        fail_ = true;
+        fail_ = value;
     }
 
   private:
@@ -113,6 +118,25 @@ TEST_CASE("Authentication service rejects an unavailable verifier", "[authentica
         sparenode::authentication::AuthenticationService::create(provider, failing_verifier);
     REQUIRE_FALSE(failed.has_value());
     CHECK(failed.error() == CreateError::verifier_unavailable);
+}
+
+TEST_CASE("Authentication service rejects an invalid rate limit policy",
+          "[authentication][service][rate-limit]")
+{
+    using CreateError = sparenode::authentication::AuthenticationServiceCreateErrorCode;
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+
+    const auto zero_failures = sparenode::authentication::AuthenticationService::create(
+        provider, verifier, {.maximum_failures = 0, .cooldown = std::chrono::seconds{30}});
+    REQUIRE_FALSE(zero_failures);
+    CHECK(zero_failures.error() == CreateError::invalid_rate_limit_policy);
+
+    const auto zero_cooldown = sparenode::authentication::AuthenticationService::create(
+        provider, verifier, {.maximum_failures = 5, .cooldown = {}});
+    REQUIRE_FALSE(zero_cooldown);
+    CHECK(zero_cooldown.error() == CreateError::invalid_rate_limit_policy);
 }
 
 TEST_CASE("Authentication service verifies provider records and hides account existence",
@@ -168,4 +192,111 @@ TEST_CASE("Authentication service fails closed on malformed provider material",
         "admin", sparenode::authentication::SensitivePassword("owner password"));
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == Error::unavailable);
+}
+
+TEST_CASE("Authentication service throttles bounded failures and recovers after cooldown",
+          "[authentication][service][rate-limit]")
+{
+    using Error = sparenode::authentication::AuthenticationErrorCode;
+    auto now = std::make_shared<std::chrono::steady_clock::time_point>();
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+    auto service_result = sparenode::authentication::AuthenticationService::create(
+        provider, verifier, {.maximum_failures = 2, .cooldown = std::chrono::seconds{30}},
+        [now] { return *now; });
+    REQUIRE(service_result);
+    const auto service = std::move(service_result).value();
+
+    for (const std::string_view login : {"admin", "unknown"})
+    {
+        const auto rejected =
+            service.authenticate(login, sparenode::authentication::SensitivePassword("incorrect"));
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error() == Error::invalid_credentials);
+    }
+
+    const auto throttled =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE_FALSE(throttled);
+    CHECK(throttled.error() == Error::throttled);
+
+    *now += std::chrono::seconds{30};
+    const auto recovered =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE(recovered);
+
+    // A successful verification clears the shared counter before a new failure sequence.
+    const auto first_new_failure =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("incorrect"));
+    REQUIRE_FALSE(first_new_failure);
+    CHECK(first_new_failure.error() == Error::invalid_credentials);
+    const auto success_resets =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE(success_resets);
+    const auto failure_after_reset =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("incorrect"));
+    REQUIRE_FALSE(failure_after_reset);
+    CHECK(failure_after_reset.error() == Error::invalid_credentials);
+}
+
+TEST_CASE("Authentication service does not spend failure budget on unavailable infrastructure",
+          "[authentication][service][rate-limit]")
+{
+    using Error = sparenode::authentication::AuthenticationErrorCode;
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+    auto service_result = sparenode::authentication::AuthenticationService::create(
+        provider, verifier, {.maximum_failures = 1, .cooldown = std::chrono::seconds{30}});
+    REQUIRE(service_result);
+    const auto service = std::move(service_result).value();
+
+    provider->fail();
+    const auto unavailable =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE_FALSE(unavailable);
+    CHECK(unavailable.error() == Error::unavailable);
+
+    provider->fail(false);
+    const auto recovered =
+        service.authenticate("admin", sparenode::authentication::SensitivePassword("password"));
+    REQUIRE(recovered);
+}
+
+TEST_CASE("Authentication service applies one failure threshold to a concurrent burst",
+          "[authentication][service][rate-limit][concurrency]")
+{
+    using Error = sparenode::authentication::AuthenticationErrorCode;
+    constexpr std::size_t attempt_count = 8;
+    constexpr std::size_t failure_limit = 2;
+    const auto verifier = std::make_shared<TestPasswordVerifier>();
+    const auto provider = std::make_shared<TestCredentialProvider>(
+        sparenode::authentication::CredentialRecord{"owner", "admin", "test:password"});
+    auto service_result = sparenode::authentication::AuthenticationService::create(
+        provider, verifier,
+        {.maximum_failures = failure_limit, .cooldown = std::chrono::seconds{30}});
+    REQUIRE(service_result);
+    const auto service = std::move(service_result).value();
+
+    std::array<Error, attempt_count> outcomes{};
+    std::vector<std::thread> attempts;
+    attempts.reserve(attempt_count);
+    for (std::size_t index = 0; index < attempt_count; ++index)
+    {
+        attempts.emplace_back(
+            [&service, &outcomes, index]
+            {
+                const auto result = service.authenticate(
+                    "admin", sparenode::authentication::SensitivePassword("incorrect"));
+                outcomes[index] = result ? Error::unavailable : result.error();
+            });
+    }
+    for (auto &attempt : attempts)
+    {
+        attempt.join();
+    }
+
+    CHECK(std::ranges::count(outcomes, Error::invalid_credentials) == failure_limit);
+    CHECK(std::ranges::count(outcomes, Error::throttled) == attempt_count - failure_limit);
 }
