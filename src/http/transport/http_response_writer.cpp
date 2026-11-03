@@ -104,13 +104,13 @@ class BodyReleaseGuard final
 }
 
 /// @brief Repeats bounded connection writes until one complete span is delivered.
-[[nodiscard]] Result<void, HttpResponseWriteError> send_all(network::TcpConnection &connection,
-                                                            std::span<const std::byte> bytes,
-                                                            const std::stop_token &stop_token)
+[[nodiscard]] Result<void, HttpResponseWriteError>
+send_all(network::TcpConnection &connection, std::span<const std::byte> bytes,
+         const network::NetworkIoOptions &options)
 {
     while (!bytes.empty())
     {
-        auto sent = connection.send(bytes, stop_token);
+        auto sent = connection.send_with_options(bytes, options);
         if (!sent)
         {
             return unexpected(HttpResponseWriteError{HttpResponseWriteErrorCode::network_failure,
@@ -129,7 +129,7 @@ class BodyReleaseGuard final
 /// @brief Pulls fixed-size chunks until the declared body length is transmitted.
 [[nodiscard]] Result<void, HttpResponseWriteError>
 write_streaming_body(network::TcpConnection &connection, HttpResponse &response,
-                     const std::stop_token &stop_token)
+                     const network::NetworkIoOptions &options)
 {
     std::array<std::byte, stream_buffer_size> buffer{};
     std::uint64_t remaining = response.content_length();
@@ -142,7 +142,7 @@ write_streaming_body(network::TcpConnection &connection, HttpResponse &response,
         try
         {
             produced = HttpResponseWriterAccess::read_body(
-                response, std::span(buffer).first(requested), stop_token);
+                response, std::span(buffer).first(requested), options.stop_token);
         }
         catch (...)
         {
@@ -165,7 +165,7 @@ write_streaming_body(network::TcpConnection &connection, HttpResponse &response,
             return unexpected(HttpResponseWriteError{HttpResponseWriteErrorCode::body_ended_early,
                                                      std::nullopt, std::nullopt});
         }
-        if (auto sent = send_all(connection, std::span(buffer).first(produced.value()), stop_token);
+        if (auto sent = send_all(connection, std::span(buffer).first(produced.value()), options);
             !sent)
         {
             return sent;
@@ -214,7 +214,7 @@ std::string serialize_http_response_head(const HttpResponse &response)
 /// @brief Transmits a response head followed by its memory or streaming body.
 Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection &connection,
                                                          HttpResponse &response,
-                                                         const std::stop_token &stop_token,
+                                                         const network::NetworkIoOptions &options,
                                                          const HttpMethod request_method)
 {
     const BodyReleaseGuard body_release(response, request_method != HttpMethod::head &&
@@ -223,7 +223,7 @@ Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection 
     {
         const std::string head = serialize_http_response_head(response);
         const auto head_bytes = std::as_bytes(std::span(head.data(), head.size()));
-        if (auto sent = send_all(connection, head_bytes, stop_token); !sent)
+        if (auto sent = send_all(connection, head_bytes, options); !sent)
         {
             return sent;
         }
@@ -233,9 +233,9 @@ Result<void, HttpResponseWriteError> write_http_response(network::TcpConnection 
         }
         if (response.is_streaming())
         {
-            return write_streaming_body(connection, response, stop_token);
+            return write_streaming_body(connection, response, options);
         }
-        return send_all(connection, response.memory_body(), stop_token);
+        return send_all(connection, response.memory_body(), options);
     }
     catch (const std::bad_alloc &)
     {

@@ -17,7 +17,7 @@ Result<HttpResponse, HttpRouteError> handle_resource(const application::Filesyst
 {
     try
     {
-        const auto file_options = request.temporary_file_options();
+        const auto file_options = request.response_file_options();
         auto resource =
             service.read(requested_path, {file_options.stop_token, file_options.deadline});
         if (!resource)

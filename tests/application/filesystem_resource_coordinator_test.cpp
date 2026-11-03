@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <latch>
+#include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 #include "sparenode/application/filesystem_resource_coordinator.hpp"
@@ -99,6 +104,82 @@ TEST_CASE("Resource coordinator releases ownership through every moved RAII leas
 
     CHECK(coordinator.acquire(root, "file.txt",
                               sparenode::application::FilesystemResourceAccessMode::shared_read));
+}
+
+TEST_CASE("Resource coordinator normalizes equivalent resource path spellings",
+          "[application][filesystem-coordinator][identity]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-coordinator-aliases");
+    const auto root = make_root(directory);
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    auto occupied = coordinator.acquire(
+        root, "mutation", sparenode::application::FilesystemResourceAccessMode::exclusive_mutation);
+    REQUIRE(occupied);
+
+    for (const std::string_view alias : {"./mutation", "a/../mutation", "mutation/"})
+    {
+        const auto conflict = coordinator.acquire(
+            root, alias, sparenode::application::FilesystemResourceAccessMode::exclusive_mutation);
+        REQUIRE_FALSE(conflict);
+        CHECK(conflict.error().code ==
+              sparenode::application::FilesystemResourceAccessErrorCode::conflict);
+    }
+}
+
+TEST_CASE("Resource coordinator follows the host path case policy",
+          "[application][filesystem-coordinator][identity]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-coordinator-case");
+    const auto root = make_root(directory);
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    auto occupied = coordinator.acquire(
+        root, "File.txt", sparenode::application::FilesystemResourceAccessMode::exclusive_mutation);
+    REQUIRE(occupied);
+
+    const auto differently_cased = coordinator.acquire(
+        root, "file.txt", sparenode::application::FilesystemResourceAccessMode::exclusive_mutation);
+#ifdef _WIN32
+    REQUIRE_FALSE(differently_cased);
+    CHECK(differently_cased.error().code ==
+          sparenode::application::FilesystemResourceAccessErrorCode::conflict);
+#else
+    CHECK(differently_cased);
+#endif
+}
+
+TEST_CASE("Simultaneous exclusive acquisitions grant exactly one retained lease",
+          "[application][filesystem-coordinator][concurrency]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-coordinator-concurrent");
+    const auto root = make_root(directory);
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    constexpr std::size_t caller_count = 8;
+    std::array<std::optional<sparenode::application::FilesystemResourceLease>, caller_count> leases;
+    std::latch ready(caller_count);
+    std::latch start(1);
+    std::vector<std::jthread> callers;
+    callers.reserve(caller_count);
+    for (std::size_t index = 0; index < caller_count; ++index)
+    {
+        callers.emplace_back(
+            [&, index]
+            {
+                ready.count_down();
+                start.wait();
+                auto acquired = coordinator.acquire(
+                    root, "resource",
+                    sparenode::application::FilesystemResourceAccessMode::exclusive_mutation);
+                if (acquired)
+                {
+                    leases[index].emplace(std::move(acquired).value());
+                }
+            });
+    }
+    ready.wait();
+    start.count_down();
+    callers.clear();
+
+    CHECK(std::ranges::count_if(leases, [](const auto &lease) { return lease.has_value(); }) == 1);
 }
 
 TEST_CASE("Resource coordinator observes cancellation and deadlines without retaining claims",

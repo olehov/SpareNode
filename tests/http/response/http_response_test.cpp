@@ -93,12 +93,14 @@ struct TimedResponseWrite
 {
     auto pair = sparenode::test::create_connected_tcp_pair();
     std::stop_source writer_stop_source;
-    auto writer = std::async(std::launch::async,
-                             [&pair, &response, &writer_stop_source]
-                             {
-                                 return sparenode::http::write_http_response(
-                                     pair.server, response, writer_stop_source.get_token());
-                             });
+    auto writer =
+        std::async(std::launch::async,
+                   [&pair, &response, &writer_stop_source]
+                   {
+                       return sparenode::http::write_http_response(
+                           pair.server, response,
+                           {.stop_token = writer_stop_source.get_token(), .deadline = {}});
+                   });
     auto received = receive_exact_within(pair.client, expected_wire_bytes, timeout);
     if (!received.has_value())
     {
@@ -484,13 +486,43 @@ TEST_CASE("HTTP response writer preserves cancellation before transmission",
     std::stop_source stop_source;
     REQUIRE(stop_source.request_stop());
 
-    const auto result =
-        sparenode::http::write_http_response(pair.server, response, stop_source.get_token());
+    const auto result = sparenode::http::write_http_response(
+        pair.server, response, {.stop_token = stop_source.get_token(), .deadline = {}});
 
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
     const auto &network_error = sparenode::test::require_optional(result.error().network_error);
     CHECK(network_error.domain == sparenode::network::NetworkErrorDomain::cancellation);
+}
+
+TEST_CASE("HTTP response writer releases a stream when its write deadline has expired",
+          "[http][response][streaming][timeout]")
+{
+    auto resource = std::make_shared<int>(1);
+    const std::weak_ptr<int> resource_lifetime = resource;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [resource = std::move(resource)](std::span<std::byte> destination, const std::stop_token &)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            static_cast<void>(resource);
+            destination.front() = std::byte{0x01};
+            return 1;
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+
+    const auto result = sparenode::http::write_http_response(
+        pair.server, response,
+        {.stop_token = {}, .deadline = (std::chrono::steady_clock::time_point::min)()});
+
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == sparenode::http::HttpResponseWriteErrorCode::network_failure);
+    const auto &network_error = sparenode::test::require_optional(result.error().network_error);
+    CHECK(network_error.domain == sparenode::network::NetworkErrorDomain::timeout);
+    CHECK(resource_lifetime.expired());
+    CHECK_FALSE(response.is_streaming());
 }
 
 TEST_CASE("HTTP response error descriptions cover every category", "[http][response]")

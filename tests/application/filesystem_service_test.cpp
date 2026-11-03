@@ -341,7 +341,7 @@ TEST_CASE("Cancelled and expired streamed reads release ownership with their RAI
     CHECK(mutator.remove("cancelled.txt", 0));
 
     {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         auto opened = reader.read("expired.txt", {{}, deadline});
         REQUIRE(opened);
         auto resource = std::move(opened).value();

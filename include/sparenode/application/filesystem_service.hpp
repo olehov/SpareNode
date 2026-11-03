@@ -140,13 +140,13 @@ class FilesystemFileRead final
     /// @brief Combines an opened file with coordinated and request-lifetime ownership.
     /// @param[in] stream Stable root-confined native file stream.
     /// @param[in] lease Shared claim retained until streaming ends.
-    /// @param[in] options Original request cancellation and deadline policy.
+    /// @param[in] options Response-streaming cancellation and deadline policy.
     FilesystemFileRead(filesystem::FileReadStream stream, FilesystemResourceLease lease,
                        FilesystemResourceAccessOptions options) noexcept;
 
     FilesystemResourceLease lease_;           ///< Released after the stream closes.
     filesystem::FileReadStream stream_;       ///< Closed before releasing the shared claim.
-    FilesystemResourceAccessOptions options_; ///< Request lifetime policy for the stream.
+    FilesystemResourceAccessOptions options_; ///< Response lifetime policy for the stream.
 };
 
 /// @brief Represents either directory metadata or a coordinated stable file stream.
@@ -175,7 +175,7 @@ class FilesystemService final
 
     /// @brief Resolves a directory listing or stable file stream after one read-policy check.
     /// @param[in] requested_path URL-encoded path relative to the service root.
-    /// @param[in] options Cancellation and deadline retained by a streamed file read.
+    /// @param[in] options Cancellation and response deadline retained by a streamed file read.
     /// @return Resolved resource or a transport-neutral application failure.
     [[nodiscard]] Result<FilesystemReadResource, FilesystemReadError>
     read(std::string_view requested_path,
