@@ -349,7 +349,8 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpApplication &
         return send_error_response(connection, HttpStatusCode::internal_server_error, stop_token,
                                    config);
     }
-    const auto response_options = request.response_file_options();
+    // Start the transmission budget only after application dispatch has completed.
+    const auto response_options = file_options_for(stop_token, config.response_timeout);
     if (auto written = write_http_response(connection, response.value(),
                                            network_options(response_options), request.method());
         !written)
@@ -399,13 +400,13 @@ publication_file_options(const HttpConnectionRunContext &context) noexcept
     return file_options_for(context.stop_token, context.config.timeouts.body);
 }
 
-/// @brief Starts a response-specific budget independent of request-body publication.
-/// @param[in] context Active connection and its validated response timeout.
-/// @return Connection cancellation paired with the response-write deadline.
+/// @brief Keeps connection cancellation active while application dispatch prepares a response.
+/// @param[in] context Active connection whose cancellation source remains authoritative.
+/// @return Cancellation-only policy; transmission establishes its own deadline afterward.
 [[nodiscard]] storage::TemporaryFileIoOptions
 response_file_options(const HttpConnectionRunContext &context) noexcept
 {
-    return file_options_for(context.stop_token, context.config.response_timeout);
+    return {.stop_token = context.stop_token, .deadline = std::nullopt};
 }
 
 /// @brief Combines the current phase deadline with the optional shorter provider deadline.

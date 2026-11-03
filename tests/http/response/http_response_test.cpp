@@ -151,7 +151,7 @@ TEST_CASE("HTTP response validates status fields and managed framing", "[http][r
         HttpStatusCode::no_content, "No Content", {}, bytes_of("x"));
     const auto forbidden_stream = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::reset_content, "Reset Content", {}, 0,
-        [](std::span<std::byte>, const std::stop_token &)
+        [](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { return 0; });
 
     REQUIRE_FALSE(invalid_status.has_value());
@@ -226,6 +226,32 @@ TEST_CASE("HTTP response writer sends an in-memory response completely",
     CHECK(receive_exact(pair.client, expected.size()) == expected);
 }
 
+TEST_CASE("HTTP response writer shares its transmission deadline with the body source",
+          "[http][response][streaming][timeout]")
+{
+    std::optional<std::chrono::steady_clock::time_point> observed_deadline;
+    auto response_result = sparenode::http::HttpResponse::create_streaming(
+        HttpStatusCode::ok, "OK", {}, 1,
+        [&observed_deadline](const std::span<std::byte> destination,
+                             const sparenode::http::HttpBodyReadOptions &options)
+            -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+        {
+            observed_deadline = options.deadline;
+            destination.front() = std::byte{0x01};
+            return 1;
+        });
+    REQUIRE(response_result);
+    auto response = std::move(response_result).value();
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes{1};
+
+    const auto result = sparenode::http::write_http_response(
+        pair.server, response, {.stop_token = {}, .deadline = deadline});
+
+    REQUIRE(result);
+    CHECK(sparenode::test::require_optional(observed_deadline) == deadline);
+}
+
 TEST_CASE("HTTP response writer streams through a fixed caller-bounded destination",
           "[http][response][streaming]")
 {
@@ -234,8 +260,8 @@ TEST_CASE("HTTP response writer streams through a fixed caller-bounded destinati
     std::size_t largest_destination = 0;
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, payload.size(),
-        [&payload, &source_offset, &largest_destination](const std::span<std::byte> destination,
-                                                         const std::stop_token &)
+        [&payload, &source_offset, &largest_destination](
+            const std::span<std::byte> destination, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         {
             largest_destination = (std::max)(largest_destination, destination.size());
@@ -277,11 +303,12 @@ TEST_CASE("HTTP response writer incrementally transfers an owned file stream",
     std::size_t largest_destination = 0;
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, payload.size(),
-        [input = std::move(input), &largest_destination](const std::span<std::byte> destination,
-                                                         const std::stop_token &stop_token) mutable
+        [input = std::move(input),
+         &largest_destination](const std::span<std::byte> destination,
+                               const sparenode::http::HttpBodyReadOptions &options) mutable
         -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         {
-            if (stop_token.stop_requested())
+            if (options.stop_token.stop_requested())
             {
                 return sparenode::unexpected(sparenode::http::HttpBodyReadError{
                     sparenode::http::HttpBodyReadErrorDomain::cancellation, 0});
@@ -321,8 +348,8 @@ TEST_CASE("HTTP response writer bounds multi-gigabyte streams and releases inter
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}},
         representation_bytes,
-        [resource = std::move(resource), &reads,
-         &largest_destination](const std::span<std::byte> destination, const std::stop_token &)
+        [resource = std::move(resource), &reads, &largest_destination](
+            const std::span<std::byte> destination, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         {
             static_cast<void>(resource);
@@ -366,7 +393,7 @@ TEST_CASE("HTTP response writer preserves body source failures", "[http][respons
         sparenode::http::HttpBodyReadErrorDomain::filesystem, 17};
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {}, 1,
-        [expected_error](std::span<std::byte>, const std::stop_token &)
+        [expected_error](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         { return sparenode::unexpected(expected_error); });
     REQUIRE(response_result.has_value());
@@ -386,7 +413,7 @@ TEST_CASE("HTTP response writer rejects an early streaming EOF", "[http][respons
 {
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {}, 1,
-        [](std::span<std::byte>, const std::stop_token &)
+        [](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { return 0; });
     REQUIRE(response_result.has_value());
     auto response = std::move(response_result).value();
@@ -402,7 +429,7 @@ TEST_CASE("HTTP response writer rejects an invalid body source count", "[http][r
 {
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {}, 1,
-        [](const std::span<std::byte> destination, const std::stop_token &)
+        [](const std::span<std::byte> destination, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         { return destination.size() + 1; });
     REQUIRE(response_result.has_value());
@@ -441,7 +468,7 @@ TEST_CASE("HTTP response writer releases a streaming resource after client disco
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {{"Content-Type", "application/octet-stream"}}, large_body_size,
         [resource = std::move(resource)](const std::span<std::byte> destination,
-                                         const std::stop_token &)
+                                         const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         {
             static_cast<void>(resource);
@@ -465,7 +492,7 @@ TEST_CASE("HTTP response writer contains body source exceptions", "[http][respon
 {
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {}, 1,
-        [](std::span<std::byte>, const std::stop_token &)
+        [](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError> { throw 17; });
     REQUIRE(response_result.has_value());
     auto response = std::move(response_result).value();
@@ -502,7 +529,8 @@ TEST_CASE("HTTP response writer releases a stream when its write deadline has ex
     const std::weak_ptr<int> resource_lifetime = resource;
     auto response_result = sparenode::http::HttpResponse::create_streaming(
         HttpStatusCode::ok, "OK", {}, 1,
-        [resource = std::move(resource)](std::span<std::byte> destination, const std::stop_token &)
+        [resource = std::move(resource)](std::span<std::byte> destination,
+                                         const sparenode::http::HttpBodyReadOptions &)
             -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
         {
             static_cast<void>(resource);

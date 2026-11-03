@@ -129,10 +129,10 @@ class FilesystemFileRead final
     [[nodiscard]] std::uint64_t size() const noexcept;
     /// @brief Reads one bounded chunk while retaining coordinated shared ownership.
     /// @param[out] destination Caller-bounded output storage.
-    /// @param[in] stop_token Current streaming-operation cancellation token.
+    /// @param[in] options Current streaming-operation cancellation and deadline policy.
     /// @return Produced bytes, end of input, or a stable file-read failure.
     [[nodiscard]] Result<std::size_t, filesystem::FileReadError>
-    read(std::span<std::byte> destination, const std::stop_token &stop_token);
+    read(std::span<std::byte> destination, const FilesystemResourceAccessOptions &options);
 
   private:
     friend class FilesystemService;

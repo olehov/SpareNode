@@ -73,7 +73,7 @@ TEST_CASE("Filesystem service resolves directory and file reads without HTTP",
     auto resource = std::move(file_result).value();
     auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
     std::array<std::byte, 16> output{};
-    const auto read = stream.read(output, std::stop_token{});
+    const auto read = stream.read(output, {});
     REQUIRE(read);
     CHECK(std::string(reinterpret_cast<const char *>(output.data()), read.value()) == "content");
 }

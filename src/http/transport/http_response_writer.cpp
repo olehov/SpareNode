@@ -21,13 +21,14 @@ class HttpResponseWriterAccess final
     /// @brief Advances the private stateful reader owned by a streaming response.
     /// @param[in,out] response Response whose reader will advance.
     /// @param[out] destination Caller-bounded storage receiving the next chunk.
-    /// @param[in] stop_token Token observed by the body source.
+    /// @param[in] options Transmission policy observed by the body source.
     /// @return Produced byte count or the body-source failure.
     [[nodiscard]] static Result<std::size_t, HttpBodyReadError>
     read_body(HttpResponse &response, const std::span<std::byte> destination,
-              const std::stop_token &stop_token)
+              const network::NetworkIoOptions &options)
     {
-        return response.body_reader_(destination, stop_token);
+        return response.body_reader_(
+            destination, {.stop_token = options.stop_token, .deadline = options.deadline});
     }
 
     /// @brief Releases a consumed or failed streaming source immediately.
@@ -142,7 +143,7 @@ write_streaming_body(network::TcpConnection &connection, HttpResponse &response,
         try
         {
             produced = HttpResponseWriterAccess::read_body(
-                response, std::span(buffer).first(requested), options.stop_token);
+                response, std::span(buffer).first(requested), options);
         }
         catch (...)
         {

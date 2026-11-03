@@ -115,16 +115,18 @@ std::uint64_t FilesystemFileRead::size() const noexcept
 }
 
 Result<std::size_t, filesystem::FileReadError>
-FilesystemFileRead::read(const std::span<std::byte> destination, const std::stop_token &stop_token)
+FilesystemFileRead::read(const std::span<std::byte> destination,
+                         const FilesystemResourceAccessOptions &options)
 {
-    if (stop_token.stop_requested() ||
+    if (concurrency::interruption_status(options.stop_token, options.deadline) !=
+            concurrency::InterruptionStatus::none ||
         concurrency::interruption_status(options_.stop_token, options_.deadline) !=
             concurrency::InterruptionStatus::none)
     {
         return unexpected(
             filesystem::FileReadError{filesystem::FileReadErrorCode::cancelled, {}, {}});
     }
-    return stream_.read(destination, stop_token);
+    return stream_.read(destination, options.stop_token);
 }
 
 FilesystemService::FilesystemService(filesystem::SharedRoot root,

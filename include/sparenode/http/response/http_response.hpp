@@ -1,8 +1,10 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -37,12 +39,19 @@ struct HttpBodyReadError
     int code{};                       ///< Producer-defined portable or native code.
 };
 
+/// @brief Carries the transmission cancellation and deadline into a streaming body source.
+struct HttpBodyReadOptions
+{
+    std::stop_token stop_token{}; ///< Cancels body production with the connection write.
+    std::optional<std::chrono::steady_clock::time_point> deadline{}; ///< Shared write deadline.
+};
+
 /// @brief Produces at most one caller-bounded chunk of a streaming response body.
 ///
 /// A zero-byte success means end of input. A positive success must not exceed the
 /// supplied destination size. The callable owns any cursor state it requires.
 using HttpBodyReader = std::move_only_function<Result<std::size_t, HttpBodyReadError>(
-    std::span<std::byte> destination, const std::stop_token &stop_token)>;
+    std::span<std::byte> destination, const HttpBodyReadOptions &options)>;
 
 /// @brief Identifies an invalid response rejected before transmission begins.
 enum class HttpResponseValidationErrorCode : std::uint8_t

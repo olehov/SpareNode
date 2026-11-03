@@ -607,7 +607,7 @@ TEST_CASE("HTTP session gives body publication a fresh bounded deadline",
     CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
 }
 
-TEST_CASE("HTTP session separates body publication and response streaming deadlines",
+TEST_CASE("HTTP session defers its response deadline until transmission",
           "[http][session][response][timeout]")
 {
     auto pair = sparenode::test::create_connected_tcp_pair();
@@ -620,16 +620,12 @@ TEST_CASE("HTTP session separates body publication and response streaming deadli
                                       const auto publication = request.temporary_file_options();
                                       const auto response = request.response_file_options();
                                       REQUIRE(publication.deadline.has_value());
-                                      REQUIRE(response.deadline.has_value());
+                                      CHECK_FALSE(response.deadline.has_value());
                                       const auto now = std::chrono::steady_clock::now();
                                       const auto publication_remaining =
                                           publication.deadline.value() - now;
-                                      const auto response_remaining =
-                                          response.deadline.value() - now;
                                       CHECK(publication_remaining > std::chrono::minutes{4});
                                       CHECK(publication_remaining <= std::chrono::minutes{5});
-                                      CHECK(response_remaining > std::chrono::minutes{6});
-                                      CHECK(response_remaining <= std::chrono::minutes{7});
                                       CHECK(response.stop_token == stop.get_token());
                                       return ok_response();
                                   }));
@@ -1258,7 +1254,7 @@ TEST_CASE("HEAD never invokes the streaming body producer", "[http][session][hea
             auto response = sparenode::http::HttpResponse::create_streaming(
                 sparenode::http::HttpStatusCode::ok, "OK",
                 {{"Content-Type", "application/octet-stream"}}, representation_bytes,
-                [&](std::span<std::byte>, const std::stop_token &)
+                [&](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
                     -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
                 {
                     ++body_reads;
