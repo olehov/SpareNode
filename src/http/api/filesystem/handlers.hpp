@@ -14,12 +14,12 @@ namespace sparenode::http::detail
 /// @brief Handles one exact or wildcard directory-listing or inline-file route.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
 handle_resource(const application::FilesystemService &service, const MimeTypeRegistry &mime_types,
-                std::string_view requested_path);
+                const HttpRequestView &request, std::string_view requested_path);
 
 /// @brief Converts one opened file and request path into a streaming response.
-[[nodiscard]] Result<HttpResponse, HttpRouteError> handle_file(filesystem::FileReadStream stream,
-                                                               const MimeTypeRegistry &mime_types,
-                                                               std::string_view requested_path);
+[[nodiscard]] Result<HttpResponse, HttpRouteError>
+handle_file(application::FilesystemFileRead stream, const MimeTypeRegistry &mime_types,
+            std::string_view requested_path);
 
 /// @brief Publishes one complete decoded request body under a confined destination path.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>

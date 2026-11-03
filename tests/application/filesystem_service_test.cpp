@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 
 #include "sparenode/application/filesystem_service.hpp"
@@ -30,11 +32,12 @@ namespace
 [[nodiscard]] sparenode::application::FilesystemService
 make_service(const sparenode::test::TemporaryDirectory &directory,
              const sparenode::filesystem::LocationPermissions permissions =
-                 sparenode::filesystem::LocationPermissions())
+                 sparenode::filesystem::LocationPermissions(),
+             const sparenode::application::FilesystemResourceCoordinator &coordinator = {})
 {
     auto root = sparenode::filesystem::SharedRoot::create(directory.path());
     REQUIRE(root);
-    return {std::move(root).value(), permissions};
+    return {std::move(root).value(), permissions, coordinator};
 }
 
 /// @brief Creates one immutable file-backed upload artifact containing the supplied payload.
@@ -68,7 +71,7 @@ TEST_CASE("Filesystem service resolves directory and file reads without HTTP",
     auto file_result = service.read("document.txt");
     REQUIRE(file_result);
     auto resource = std::move(file_result).value();
-    auto stream = std::get<sparenode::filesystem::FileReadStream>(std::move(resource));
+    auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
     std::array<std::byte, 16> output{};
     const auto read = stream.read(output, std::stop_token{});
     REQUIRE(read);
@@ -210,4 +213,143 @@ TEST_CASE("Filesystem service retains lower-level details for failed confined op
           sparenode::application::FilesystemRemovalErrorCode::filesystem_removal_failed);
     CHECK(std::holds_alternative<sparenode::filesystem::FilesystemEntryRemovalError>(
         remove.error().detail));
+}
+
+TEST_CASE("Filesystem service retains a shared claim for the full streamed file lifetime",
+          "[application][filesystem-service][coordination]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-coordination");
+    REQUIRE(std::ofstream(directory.path() / "document.txt", std::ios::binary) << "content");
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    const auto reader = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+    const auto mutator = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+
+    {
+        auto opened = reader.read("document.txt");
+        REQUIRE(opened);
+        auto resource = std::move(opened).value();
+        const auto stream =
+            std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
+        CHECK(stream.size() == 7);
+
+        const auto blocked = mutator.remove("document.txt", 0);
+        REQUIRE_FALSE(blocked);
+        CHECK(blocked.error().code ==
+              sparenode::application::FilesystemRemovalErrorCode::coordination_failed);
+        REQUIRE(std::holds_alternative<sparenode::application::FilesystemResourceAccessError>(
+            blocked.error().detail));
+        CHECK(
+            std::get<sparenode::application::FilesystemResourceAccessError>(blocked.error().detail)
+                .code == sparenode::application::FilesystemResourceAccessErrorCode::conflict);
+    }
+
+    CHECK(mutator.remove("document.txt", 0));
+}
+
+TEST_CASE("Filesystem service releases exclusive ownership after a filesystem failure",
+          "[application][filesystem-service][coordination][failure]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-failed-coordination");
+    REQUIRE(std::filesystem::create_directory(directory.path() / "existing"));
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    const auto service = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+
+    const auto failed = service.create_directory("existing", 0);
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().code ==
+          sparenode::application::FilesystemDirectoryCreationErrorCode::directory_creation_failed);
+
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
+    REQUIRE(root);
+    CHECK(coordinator.acquire(
+        root.value(), "existing",
+        sparenode::application::FilesystemResourceAccessMode::exclusive_mutation));
+}
+
+TEST_CASE("Filesystem service applies one coordination contract to every mutation",
+          "[application][filesystem-service][coordination][mutation]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-mutation-contract");
+    REQUIRE(std::ofstream(directory.path() / "remove.txt", std::ios::binary) << "content");
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
+    REQUIRE(root);
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    const auto service = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+    constexpr std::string_view payload = "content";
+
+    {
+        auto occupied =
+            coordinator.acquire(root.value(), "upload.txt",
+                                sparenode::application::FilesystemResourceAccessMode::shared_read);
+        REQUIRE(occupied);
+        const auto upload =
+            service.upload("upload.txt", {as_bytes(payload), payload.size(), {}, {}});
+        REQUIRE_FALSE(upload);
+        CHECK(upload.error().code ==
+              sparenode::application::FilesystemUploadErrorCode::coordination_failed);
+    }
+    {
+        auto occupied =
+            coordinator.acquire(root.value(), "directory",
+                                sparenode::application::FilesystemResourceAccessMode::shared_read);
+        REQUIRE(occupied);
+        const auto create = service.create_directory("directory", 0);
+        REQUIRE_FALSE(create);
+        CHECK(create.error().code ==
+              sparenode::application::FilesystemDirectoryCreationErrorCode::coordination_failed);
+    }
+    {
+        auto occupied =
+            coordinator.acquire(root.value(), "remove.txt",
+                                sparenode::application::FilesystemResourceAccessMode::shared_read);
+        REQUIRE(occupied);
+        const auto remove = service.remove("remove.txt", 0);
+        REQUIRE_FALSE(remove);
+        CHECK(remove.error().code ==
+              sparenode::application::FilesystemRemovalErrorCode::coordination_failed);
+    }
+}
+
+TEST_CASE("Cancelled and expired streamed reads release ownership with their RAII resource",
+          "[application][filesystem-service][coordination][interruption]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-service-read-interruption");
+    REQUIRE(std::ofstream(directory.path() / "cancelled.txt", std::ios::binary) << "content");
+    REQUIRE(std::ofstream(directory.path() / "expired.txt", std::ios::binary) << "content");
+    const sparenode::application::FilesystemResourceCoordinator coordinator;
+    const auto reader = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+    const auto mutator = make_service(
+        directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
+    std::array<std::byte, 16> output{};
+
+    {
+        std::stop_source cancellation;
+        auto opened = reader.read("cancelled.txt", {cancellation.get_token(), {}});
+        REQUIRE(opened);
+        auto resource = std::move(opened).value();
+        auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
+        cancellation.request_stop();
+        const auto interrupted = stream.read(output, {});
+        REQUIRE_FALSE(interrupted);
+        CHECK(interrupted.error().code == sparenode::filesystem::FileReadErrorCode::cancelled);
+    }
+    CHECK(mutator.remove("cancelled.txt", 0));
+
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+        auto opened = reader.read("expired.txt", {{}, deadline});
+        REQUIRE(opened);
+        auto resource = std::move(opened).value();
+        auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
+        std::this_thread::sleep_until(deadline);
+        const auto interrupted = stream.read(output, {});
+        REQUIRE_FALSE(interrupted);
+        CHECK(interrupted.error().code == sparenode::filesystem::FileReadErrorCode::cancelled);
+    }
+    CHECK(mutator.remove("expired.txt", 0));
 }

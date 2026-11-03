@@ -235,6 +235,7 @@ sparenode_enable_cppcheck(sparenode_api_core)
 sparenode_enable_static_analysis(sparenode_api_core)
 
 add_library(sparenode_filesystem_application STATIC
+    src/application/filesystem_resource_coordinator.cpp
     src/application/filesystem_service.cpp
 )
 

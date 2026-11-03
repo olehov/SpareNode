@@ -622,3 +622,30 @@ TEST_CASE("Filesystem API registers every operation as protected", "[http][files
               sparenode::http::HttpStatusCode::forbidden);
     }
 }
+
+TEST_CASE("Filesystem API maps an active resource conflict to 423 Locked",
+          "[http][filesystem-api][coordination]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-coordination");
+    REQUIRE(std::ofstream(directory.path() / "document.txt", std::ios::binary) << "content");
+    auto root = sparenode::filesystem::SharedRoot::create(directory.path());
+    REQUIRE(root);
+    const auto coordinator = sparenode::application::FilesystemResourceCoordinator();
+    auto active_read =
+        coordinator.acquire(root.value(), "document.txt",
+                            sparenode::application::FilesystemResourceAccessMode::shared_read);
+    REQUIRE(active_read);
+
+    std::vector<sparenode::http::FilesystemApiLocation> locations;
+    locations.push_back(
+        {"/api/Documents",
+         sparenode::application::FilesystemService(
+             std::move(root).value(), sparenode::filesystem::LocationPermissions{true, true, true},
+             coordinator)});
+    auto router = sparenode::http::make_filesystem_api_router({std::move(locations), {}});
+    REQUIRE(router);
+
+    const auto response = dispatch_delete(router.value(), "/api/Documents/document.txt");
+    CHECK(response.status_code() == sparenode::http::HttpStatusCode::locked);
+    CHECK(body_text(response) == "{\"error\":\"resource_locked\"}");
+}

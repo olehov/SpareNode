@@ -16,7 +16,10 @@ Result<HttpResponse, HttpRouteError> handle_deletion(const application::Filesyst
 {
     try
     {
-        if (auto removed = service.remove(requested_path, request.body_size()); !removed)
+        const auto file_options = request.temporary_file_options();
+        if (auto removed = service.remove(requested_path, request.body_size(),
+                                          {file_options.stop_token, file_options.deadline});
+            !removed)
         {
             return make_public_error_response(removed.error());
         }

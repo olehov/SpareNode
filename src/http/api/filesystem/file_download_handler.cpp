@@ -17,7 +17,7 @@ namespace
 
 /// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-make_file_response(filesystem::FileReadStream stream, const std::string_view content_type)
+make_file_response(application::FilesystemFileRead stream, const std::string_view content_type)
 {
     const auto content_length = stream.size();
     HttpBodyReader reader = [stream = std::move(stream)](const std::span<std::byte> destination,
@@ -51,7 +51,7 @@ make_file_response(filesystem::FileReadStream stream, const std::string_view con
 
 } // namespace
 
-Result<HttpResponse, HttpRouteError> handle_file(filesystem::FileReadStream stream,
+Result<HttpResponse, HttpRouteError> handle_file(application::FilesystemFileRead stream,
                                                  const MimeTypeRegistry &mime_types,
                                                  const std::string_view requested_path)
 {
