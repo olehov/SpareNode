@@ -652,6 +652,7 @@ TEST_CASE("HTTP session defers its response deadline until transmission",
     pair.client.shutdown_send();
     const auto result = sparenode::http::handle_http_connection(
         std::move(pair.server), application_for(router), stop.get_token(), config);
+    const auto handler_returned_at = std::chrono::steady_clock::now();
 
     REQUIRE(result);
     CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
@@ -659,7 +660,7 @@ TEST_CASE("HTTP session defers its response deadline until transmission",
     const auto response_deadline = sparenode::test::require_optional(observed_response_deadline);
     const auto deadline_offset = response_deadline - dispatch_end;
     CHECK(deadline_offset >= config.response_timeout);
-    CHECK(deadline_offset < config.response_timeout + std::chrono::seconds{1});
+    CHECK(response_deadline <= handler_returned_at + config.response_timeout);
 }
 
 TEST_CASE("HTTP connection handler runs through the TCP dispatcher",
