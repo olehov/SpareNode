@@ -24,6 +24,9 @@ $repositoryRoot = (git rev-parse --show-toplevel).Trim()
 Set-Location $repositoryRoot
 $wslRepositoryRoot = (wsl.exe wslpath -a $repositoryRoot).Trim()
 wsl.exe sh -lc "cd '$wslRepositoryRoot' && doxygen tools/function-map/Doxyfile"
+if ($LASTEXITCODE -ne 0) {
+    throw "Doxygen failed with exit code $LASTEXITCODE"
+}
 powershell -ExecutionPolicy Bypass -File tools/function-map/generate_project_function_map.ps1
 ```
 
