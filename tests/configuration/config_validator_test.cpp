@@ -76,8 +76,8 @@ require_validation_errors(const std::string_view input)
 TEST_CASE("Configuration timeout directives enforce bounds and singleton semantics",
           "[configuration][validator][timeout]")
 {
-    const std::string directive =
-        GENERATE("header_timeout_ms", "body_timeout_ms", "request_timeout_ms");
+    const std::string directive = GENERATE("header_timeout_ms", "body_timeout_ms",
+                                           "request_timeout_ms", "response_timeout_ms");
     const sparenode::test::TemporaryDirectory directory("sparenode-timeout-validator");
     SECTION("inclusive valid boundaries")
     {

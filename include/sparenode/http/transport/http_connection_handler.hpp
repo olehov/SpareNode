@@ -44,7 +44,9 @@ struct HttpConnectionHandlerConfig
         body_storage_policy_selector{}; ///< Optional metadata-driven body storage policy.
     std::size_t receive_chunk_bytes{std::size_t{16} * 1024}; ///< Maximum bytes per receive.
     HttpRequestTimeouts timeouts{}; ///< Header/body inactivity and total receive budgets.
-    HttpRequestDeadlineProvider deadline_provider;       ///< Optional earlier per-read deadline.
+    HttpRequestDeadlineProvider deadline_provider; ///< Optional earlier per-read deadline.
+    std::chrono::milliseconds response_timeout{
+        std::chrono::minutes{5}};                        ///< Absolute response transmission budget.
     std::size_t max_drain_bytes{std::size_t{64} * 1024}; ///< Maximum extra socket bytes discarded.
     std::chrono::milliseconds drain_timeout{100};        ///< Absolute post-response drain budget.
     HttpTransportPolicy transport_policy{}; ///< Direct/LAN/proxy request trust boundary.

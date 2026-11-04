@@ -15,6 +15,15 @@ struct HttpRequestViewAccess
         request.transport_ = std::move(context);
     }
 
+    /// @brief Attaches the response-streaming cancellation and deadline policy.
+    /// @param[in,out] request Complete request receiving the response policy.
+    /// @param[in] options Connection-owned response lifetime.
+    static void set_response_file_options(HttpRequestView &request,
+                                          storage::TemporaryFileIoOptions options)
+    {
+        request.response_file_options_ = std::move(options);
+    }
+
     /// @brief Combines validated metadata with complete decoded body storage.
     /// @param[in] head Validated metadata whose source remains alive.
     /// @param[in] body Complete payload borrowed for the request lifetime.

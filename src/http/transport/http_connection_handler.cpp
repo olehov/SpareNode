@@ -162,6 +162,30 @@ make_error_response(const HttpStatusCode status)
             response_writer_error_detail_base + static_cast<int>(error.code)};
 }
 
+/// @brief Starts one absolute I/O budget without overflowing the monotonic clock.
+/// @param[in] stop_token Cancellation shared with the connection worker.
+/// @param[in] timeout Positive duration allowed for the operation.
+/// @return Cancellation and a saturated absolute deadline.
+[[nodiscard]] storage::TemporaryFileIoOptions
+file_options_for(const std::stop_token &stop_token,
+                 const std::chrono::milliseconds timeout) noexcept
+{
+    const auto now = std::chrono::steady_clock::now();
+    const auto budget = std::chrono::duration_cast<network::NetworkDeadline::duration>(timeout);
+    const auto remaining = network::NetworkDeadline::max() - now;
+    const auto deadline = budget > remaining ? network::NetworkDeadline::max() : now + budget;
+    return {.stop_token = stop_token, .deadline = deadline};
+}
+
+/// @brief Adapts one shared interruption policy to the network I/O contract.
+/// @param[in] options Cancellation and absolute deadline to preserve.
+/// @return Equivalent options accepted by connection send operations.
+[[nodiscard]] network::NetworkIoOptions
+network_options(const storage::TemporaryFileIoOptions &options) noexcept
+{
+    return {.stop_token = options.stop_token, .deadline = options.deadline};
+}
+
 /// @brief Half-closes output and discards peer input within fixed byte and time budgets.
 /// @param[in,out] connection Connection whose final response has already been sent.
 /// @param[in] stop_token Cancellation observed even while input remains continuously readable.
@@ -230,7 +254,10 @@ send_error_response(network::TcpConnection &connection, const HttpStatusCode sta
     {
         return unexpected(response.error());
     }
-    if (auto written = write_http_response(connection, response.value(), stop_token); !written)
+    const auto response_options = file_options_for(stop_token, config.response_timeout);
+    if (auto written =
+            write_http_response(connection, response.value(), network_options(response_options));
+        !written)
     {
         return unexpected(map_write_error(written.error()));
     }
@@ -322,8 +349,10 @@ dispatch_and_respond(network::TcpConnection &connection, const HttpApplication &
         return send_error_response(connection, HttpStatusCode::internal_server_error, stop_token,
                                    config);
     }
-    if (auto written =
-            write_http_response(connection, response.value(), stop_token, request.method());
+    // Start the transmission budget only after application dispatch has completed.
+    const auto response_options = file_options_for(stop_token, config.response_timeout);
+    if (auto written = write_http_response(connection, response.value(),
+                                           network_options(response_options), request.method());
         !written)
     {
         return unexpected(map_write_error(written.error()));
@@ -368,12 +397,16 @@ transport_error_status(const HttpTransportErrorCode code) noexcept
 [[nodiscard]] storage::TemporaryFileIoOptions
 publication_file_options(const HttpConnectionRunContext &context) noexcept
 {
-    const auto now = std::chrono::steady_clock::now();
-    const auto budget = std::chrono::duration_cast<network::NetworkDeadline::duration>(
-        context.config.timeouts.body);
-    const auto remaining = network::NetworkDeadline::max() - now;
-    const auto deadline = budget > remaining ? network::NetworkDeadline::max() : now + budget;
-    return {.stop_token = context.stop_token, .deadline = deadline};
+    return file_options_for(context.stop_token, context.config.timeouts.body);
+}
+
+/// @brief Keeps connection cancellation active while application dispatch prepares a response.
+/// @param[in] context Active connection whose cancellation source remains authoritative.
+/// @return Cancellation-only policy; transmission establishes its own deadline afterward.
+[[nodiscard]] storage::TemporaryFileIoOptions
+response_file_options(const HttpConnectionRunContext &context) noexcept
+{
+    return {.stop_token = context.stop_token, .deadline = std::nullopt};
 }
 
 /// @brief Combines the current phase deadline with the optional shorter provider deadline.
@@ -443,6 +476,8 @@ run_http_connection(network::TcpConnection &connection, const HttpConnectionRunC
             }
             detail::HttpRequestViewAccess::set_transport(complete_request,
                                                          std::move(transport).value());
+            detail::HttpRequestViewAccess::set_response_file_options(
+                complete_request, response_file_options(context));
             return dispatch_and_respond(connection, context.application, complete_request,
                                         context.stop_token, context.config);
         }
@@ -493,6 +528,8 @@ handle_http_connection(network::TcpConnection connection, const HttpApplication 
     const auto connection_started = connection.accepted_at();
     auto deadline_state = detail::RequestDeadlines::create(config.timeouts, connection_started);
     if (metadata_limit == 0 || config.receive_chunk_bytes == 0 || !deadline_state.has_value() ||
+        config.response_timeout <= std::chrono::milliseconds::zero() ||
+        config.response_timeout > HttpRequestTimeouts::maximum_config_timeout ||
         config.max_drain_bytes == 0 || config.drain_timeout <= std::chrono::milliseconds::zero() ||
         config.drain_timeout > HttpRequestTimeouts::maximum_config_timeout || !application)
     {

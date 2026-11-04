@@ -45,6 +45,7 @@ write_config(const sparenode::test::TemporaryDirectory &directory, const std::st
            "header_timeout_ms 1200;\n"
            "body_timeout_ms 2400;\n"
            "request_timeout_ms 3600;\n"
+           "response_timeout_ms 4800;\n"
            "location \"/api/Documents\" {\n"
            "path \"" +
            shared_root.generic_string() + "\";\nread false;\nwrite true;\ndelete true;\n}\n}";
@@ -96,6 +97,7 @@ TEST_CASE("Configuration loader produces validated primitive settings", "[config
     CHECK(server.header_timeout_ms == 1200);
     CHECK(server.body_timeout_ms == 2400);
     CHECK(server.request_timeout_ms == 3600);
+    CHECK(server.response_timeout_ms == 4800);
     CHECK_FALSE(server.credentials_file.has_value());
     REQUIRE(server.locations.size() == 1);
     CHECK(server.locations.front().root.value == directory.path().generic_string());

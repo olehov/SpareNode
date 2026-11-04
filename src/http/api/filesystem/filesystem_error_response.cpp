@@ -24,6 +24,30 @@ using PublicFailure = std::pair<HttpStatusCode, std::string_view>;
            code == filesystem::SafePathErrorCode::unsupported_reparse_point;
 }
 
+/// @brief Maps one resource-coordination failure to its safe HTTP representation.
+[[nodiscard]] PublicFailure
+public_error(const application::FilesystemResourceAccessError &error) noexcept
+{
+    using enum application::FilesystemResourceAccessErrorCode;
+    switch (error.code)
+    {
+    case invalid_path:
+        return error.path_error && hides_path_detail(error.path_error->code)
+                   ? PublicFailure{HttpStatusCode::not_found, "not_found"}
+                   : PublicFailure{HttpStatusCode::bad_request, "invalid_path"};
+    case conflict:
+        return {HttpStatusCode::locked, "resource_locked"};
+    case cancelled:
+    case deadline_exceeded:
+        return {HttpStatusCode::request_timeout, "operation_interrupted"};
+    case capacity_exceeded:
+        return {HttpStatusCode::service_unavailable, "resource_coordination_unavailable"};
+    case resource_allocation_failed:
+        return {HttpStatusCode::internal_server_error, "internal_error"};
+    }
+    return {HttpStatusCode::internal_server_error, "internal_error"};
+}
+
 /// @brief Maps one directory-listing failure to its safe HTTP representation.
 [[nodiscard]] PublicFailure public_error(const filesystem::DirectoryListingError &error) noexcept
 {
@@ -193,6 +217,9 @@ make_public_error_response(const application::FilesystemReadError &error)
     {
     case forbidden:
         return make_response({HttpStatusCode::forbidden, "read_forbidden"});
+    case coordination_failed:
+        return make_response(
+            public_error(std::get<application::FilesystemResourceAccessError>(error.detail)));
     case directory_listing_failed:
         return make_response(
             public_error(std::get<filesystem::DirectoryListingError>(error.detail)));
@@ -215,6 +242,9 @@ make_public_error_response(const application::FilesystemUploadError &error)
         return make_response({HttpStatusCode::forbidden, "write_forbidden"});
     case invalid_upload:
         return make_response({HttpStatusCode::bad_request, "invalid_upload"});
+    case coordination_failed:
+        return make_response(
+            public_error(std::get<application::FilesystemResourceAccessError>(error.detail)));
     case temporary_file_failed:
         return make_response(public_error(std::get<storage::TemporaryFileError>(error.detail)));
     case upload_finalization_failed:
@@ -237,6 +267,9 @@ make_public_error_response(const application::FilesystemDirectoryCreationError &
         return make_response({HttpStatusCode::forbidden, "write_forbidden"});
     case content_not_allowed:
         return make_response({HttpStatusCode::bad_request, "body_not_allowed"});
+    case coordination_failed:
+        return make_response(
+            public_error(std::get<application::FilesystemResourceAccessError>(error.detail)));
     case directory_creation_failed:
         return make_response(
             public_error(std::get<filesystem::DirectoryCreationError>(error.detail)));
@@ -257,6 +290,9 @@ make_public_error_response(const application::FilesystemRemovalError &error)
         return make_response({HttpStatusCode::forbidden, "delete_forbidden"});
     case content_not_allowed:
         return make_response({HttpStatusCode::bad_request, "body_not_allowed"});
+    case coordination_failed:
+        return make_response(
+            public_error(std::get<application::FilesystemResourceAccessError>(error.detail)));
     case filesystem_removal_failed:
         return make_response(
             public_error(std::get<filesystem::FilesystemEntryRemovalError>(error.detail)));

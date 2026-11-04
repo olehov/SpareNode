@@ -48,10 +48,12 @@ register_read_routes(api::ApiRouterBuilder &builder, const SharedLocation &locat
 {
     return register_location_routes(
         builder, HttpMethod::get, location->api_path,
-        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &)
-        { return detail::handle_resource(location->service, *mime_types, {}); },
-        [location, mime_types](const HttpRequestView &, const HttpRouteParameters &parameters) {
-            return detail::handle_resource(location->service, *mime_types,
+        [location, mime_types](const HttpRequestView &request, const HttpRouteParameters &)
+        { return detail::handle_resource(location->service, *mime_types, request, {}); },
+        [location, mime_types](const HttpRequestView &request,
+                               const HttpRouteParameters &parameters)
+        {
+            return detail::handle_resource(location->service, *mime_types, request,
                                            parameters.wildcard_suffix());
         });
 }

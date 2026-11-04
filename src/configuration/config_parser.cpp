@@ -326,6 +326,7 @@ class ParserState final
             std::pair{std::string_view{"header_timeout_ms"}, Kind::header_timeout_ms},
             std::pair{std::string_view{"body_timeout_ms"}, Kind::body_timeout_ms},
             std::pair{std::string_view{"request_timeout_ms"}, Kind::request_timeout_ms},
+            std::pair{std::string_view{"response_timeout_ms"}, Kind::response_timeout_ms},
             std::pair{std::string_view{"log_level"}, Kind::log_level},
             std::pair{std::string_view{"mime_types_file"}, Kind::mime_types_file},
             std::pair{std::string_view{"credentials_file"}, Kind::credentials_file},
@@ -387,6 +388,7 @@ class ParserState final
         case directives::ServerDirectiveKind::header_timeout_ms:
         case directives::ServerDirectiveKind::body_timeout_ms:
         case directives::ServerDirectiveKind::request_timeout_ms:
+        case directives::ServerDirectiveKind::response_timeout_ms:
             return ConfigParserExpectation::integer_literal;
         case directives::ServerDirectiveKind::multithreading:
             return ConfigParserExpectation::boolean_literal;

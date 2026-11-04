@@ -607,6 +607,62 @@ TEST_CASE("HTTP session gives body publication a fresh bounded deadline",
     CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
 }
 
+TEST_CASE("HTTP session defers its response deadline until transmission",
+          "[http][session][response][timeout]")
+{
+    auto pair = sparenode::test::create_connected_tcp_pair();
+    sparenode::http::HttpRouter router;
+    std::stop_source stop;
+    std::optional<std::chrono::steady_clock::time_point> dispatch_completed_at;
+    std::optional<std::chrono::steady_clock::time_point> observed_response_deadline;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/download",
+        [&](const sparenode::http::HttpRequestView &request,
+            const sparenode::http::HttpRouteParameters &)
+        {
+            const auto publication = request.temporary_file_options();
+            const auto response = request.response_file_options();
+            REQUIRE(publication.deadline.has_value());
+            CHECK_FALSE(response.deadline.has_value());
+            const auto now = std::chrono::steady_clock::now();
+            const auto publication_remaining = publication.deadline.value() - now;
+            CHECK(publication_remaining > std::chrono::minutes{4});
+            CHECK(publication_remaining <= std::chrono::minutes{5});
+            CHECK(response.stop_token == stop.get_token());
+            auto streamed = sparenode::http::HttpResponse::create_streaming(
+                sparenode::http::HttpStatusCode::ok, "OK", {}, 1,
+                [&](const std::span<std::byte> destination,
+                    const sparenode::http::HttpBodyReadOptions &options)
+                    -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+                {
+                    observed_response_deadline = options.deadline;
+                    destination.front() = std::byte{0x01};
+                    return 1;
+                });
+            REQUIRE(streamed);
+            dispatch_completed_at = std::chrono::steady_clock::now();
+            return std::move(streamed).value();
+        }));
+    const sparenode::http::HttpConnectionHandlerConfig config{
+        .timeouts = {.body = std::chrono::minutes{5}},
+        .deadline_provider = {},
+        .response_timeout = std::chrono::minutes{7}};
+
+    send_all(pair.client, "GET /download HTTP/1.1\r\nHost: local\r\n\r\n");
+    pair.client.shutdown_send();
+    const auto result = sparenode::http::handle_http_connection(
+        std::move(pair.server), application_for(router), stop.get_token(), config);
+    const auto handler_returned_at = std::chrono::steady_clock::now();
+
+    REQUIRE(result);
+    CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
+    const auto dispatch_end = sparenode::test::require_optional(dispatch_completed_at);
+    const auto response_deadline = sparenode::test::require_optional(observed_response_deadline);
+    const auto deadline_offset = response_deadline - dispatch_end;
+    CHECK(deadline_offset >= config.response_timeout);
+    CHECK(response_deadline <= handler_returned_at + config.response_timeout);
+}
+
 TEST_CASE("HTTP connection handler runs through the TCP dispatcher",
           "[http][session][integration][dispatcher]")
 {
@@ -1111,16 +1167,22 @@ TEST_CASE("HTTP session rejects invalid close budgets before receiving",
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     sparenode::http::HttpConnectionHandlerConfig config;
-    const auto invalid_policy = GENERATE(0, 1, 2, 3);
+    const auto invalid_policy = GENERATE(0, 1, 2, 3, 4, 5, 6);
     if (invalid_policy == 0)
     {
         config.max_drain_bytes = 0;
     }
-    else
+    else if (invalid_policy <= 3)
     {
         config.drain_timeout = invalid_policy == 1   ? std::chrono::milliseconds{0}
                                : invalid_policy == 2 ? std::chrono::milliseconds{-1}
                                                      : std::chrono::hours{25};
+    }
+    else
+    {
+        config.response_timeout = invalid_policy == 4   ? std::chrono::milliseconds{0}
+                                  : invalid_policy == 5 ? std::chrono::milliseconds{-1}
+                                                        : std::chrono::hours{25};
     }
     const auto result = sparenode::http::handle_http_connection(
         std::move(pair.server), application_for(router), {}, config);
@@ -1212,7 +1274,7 @@ TEST_CASE("HEAD never invokes the streaming body producer", "[http][session][hea
             auto response = sparenode::http::HttpResponse::create_streaming(
                 sparenode::http::HttpStatusCode::ok, "OK",
                 {{"Content-Type", "application/octet-stream"}}, representation_bytes,
-                [&](std::span<std::byte>, const std::stop_token &)
+                [&](std::span<std::byte>, const sparenode::http::HttpBodyReadOptions &)
                     -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
                 {
                     ++body_reads;

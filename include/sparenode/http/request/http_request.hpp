@@ -81,6 +81,10 @@ class HttpRequestView
     /// @return File-operation options active when session body ingestion completed.
     [[nodiscard]] storage::TemporaryFileIoOptions temporary_file_options() const noexcept;
 
+    /// @brief Returns the cancellation and deadline policy for response streaming.
+    /// @return File-operation options bounded by the response-write lifetime.
+    [[nodiscard]] storage::TemporaryFileIoOptions response_file_options() const noexcept;
+
     /// @brief Finds the first header using an ASCII case-insensitive name comparison.
     /// @param[in] name Header field name to locate.
     /// @return Borrowed header value, or an empty view when the field is absent.
@@ -115,6 +119,7 @@ class HttpRequestView
     std::shared_ptr<const std::vector<std::byte>> body_storage_;   ///< Optional decoded-body owner.
     std::shared_ptr<const storage::TemporaryFile> temporary_body_; ///< File-backed payload.
     storage::TemporaryFileIoOptions temporary_file_options_{};     ///< Publication I/O policy.
+    storage::TemporaryFileIoOptions response_file_options_{};      ///< Response streaming policy.
     std::uint64_t body_size_{};             ///< Decoded memory or temporary-file payload bytes.
     HttpRequestTransportContext transport_; ///< Validated peer, scheme, and proxy context.
 };

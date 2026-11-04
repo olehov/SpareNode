@@ -33,8 +33,9 @@ constexpr int listen_backlog = 128;
 constexpr std::size_t pending_connection_limit = 128;
 
 /// @brief Projects the runtime server into the narrow filesystem API composition contract.
-[[nodiscard]] http::FilesystemApiSettings
-make_filesystem_api_settings(const application::runtime::ServerConfig &server)
+[[nodiscard]] http::FilesystemApiSettings make_filesystem_api_settings(
+    const application::runtime::ServerConfig &server,
+    const application::FilesystemResourceCoordinator &filesystem_coordinator)
 {
     http::FilesystemApiSettings settings;
     settings.locations.reserve(server.locations().size());
@@ -42,7 +43,8 @@ make_filesystem_api_settings(const application::runtime::ServerConfig &server)
     {
         settings.locations.push_back(
             {location.api_path(),
-             application::FilesystemService(location.root(), location.permissions())});
+             application::FilesystemService(location.root(), location.permissions(),
+                                            filesystem_coordinator)});
     }
     settings.mime_types = server.mime_types();
     return settings;
@@ -59,7 +61,8 @@ void write_startup_failure(const std::string &diagnostic)
 [[nodiscard]] Result<application::ServerRuntimePlan, const char *> make_server_runtime_plan(
     const application::runtime::ServerConfig &server,
     const std::shared_ptr<logging::LogSink> &console_sink,
-    const std::shared_ptr<const application::SessionAuthenticationService> &session_authentication)
+    const std::shared_ptr<const application::SessionAuthenticationService> &session_authentication,
+    const application::FilesystemResourceCoordinator &filesystem_coordinator)
 {
     const logging::Logger logger(console_sink, server.minimum_log_severity());
     http::api::ProtectedRoutePolicies policies;
@@ -73,8 +76,8 @@ void write_startup_failure(const std::string &diagnostic)
     {
         return unexpected(authentication::api::to_string(authentication.error().code));
     }
-    if (auto filesystem =
-            http::register_filesystem_api_routes(builder, make_filesystem_api_settings(server));
+    if (auto filesystem = http::register_filesystem_api_routes(
+            builder, make_filesystem_api_settings(server, filesystem_coordinator));
         !filesystem)
     {
         return unexpected(http::to_string(filesystem.error().code));
@@ -86,6 +89,7 @@ void write_startup_failure(const std::string &diagnostic)
         .body_storage_policy_selector = authentication::api::authentication_body_storage_policy,
         .timeouts = server.http_timeouts(),
         .deadline_provider = {},
+        .response_timeout = server.response_timeout(),
         .transport_policy = server.transport_policy()};
     auto handler = http::make_http_connection_handler(std::move(http_application), handler_config);
     auto admission = http::make_http_connection_admission(handler_config);
@@ -108,10 +112,12 @@ make_server_runtime_plans(
     const std::shared_ptr<const application::SessionAuthenticationService> &session_authentication)
 {
     std::vector<application::ServerRuntimePlan> plans;
+    const application::FilesystemResourceCoordinator filesystem_coordinator;
     plans.reserve(config.servers().size());
     for (const auto &server : config.servers())
     {
-        auto plan = make_server_runtime_plan(server, console_sink, session_authentication);
+        auto plan = make_server_runtime_plan(server, console_sink, session_authentication,
+                                             filesystem_coordinator);
         if (!plan)
         {
             return unexpected(plan.error());

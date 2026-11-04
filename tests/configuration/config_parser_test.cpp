@@ -45,11 +45,11 @@ require_parser_error(const std::string_view input)
 
 } // namespace
 
-TEST_CASE("Configuration receive timeouts require server-scoped unsigned integers",
+TEST_CASE("Configuration timeouts require server-scoped unsigned integers",
           "[configuration][parser][timeout]")
 {
-    const std::string directive =
-        GENERATE("header_timeout_ms", "body_timeout_ms", "request_timeout_ms");
+    const std::string directive = GENERATE("header_timeout_ms", "body_timeout_ms",
+                                           "request_timeout_ms", "response_timeout_ms");
     SECTION("incorrect scalar syntax")
     {
         const std::string value = GENERATE("true", "\"1000\"", "-1", "1.5", "10ms");

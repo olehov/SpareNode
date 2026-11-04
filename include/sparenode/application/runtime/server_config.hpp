@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <utility>
@@ -26,6 +27,7 @@ class ServerConfig final
     /// @param[in] minimum_log_severity Minimum emitted log severity.
     /// @param[in] locations Validated filesystem locations in configuration order.
     /// @param[in] http_timeouts Validated HTTP receive budgets.
+    /// @param[in] response_timeout Validated absolute response transmission budget.
     /// @param[in] mime_types Validated immutable MIME mappings.
     /// @param[in] transport_policy Validated peer and effective-HTTPS trust boundary.
     /// @param[in] credentials_file Resolved path to the separate owner credential file.
@@ -33,13 +35,15 @@ class ServerConfig final
                  std::size_t worker_threads, logging::LogSeverity minimum_log_severity,
                  std::vector<LocationConfig> locations,
                  http::HttpRequestTimeouts http_timeouts = {},
+                 std::chrono::milliseconds response_timeout = std::chrono::minutes{5},
                  http::MimeTypeRegistry mime_types = {},
                  http::HttpTransportPolicy transport_policy = {},
                  std::filesystem::path credentials_file = {})
         : endpoint_(std::move(endpoint)), multithreading_enabled_(multithreading_enabled),
           worker_threads_(worker_threads), minimum_log_severity_(minimum_log_severity),
           locations_(std::move(locations)), http_timeouts_(http_timeouts),
-          mime_types_(std::move(mime_types)), transport_policy_(std::move(transport_policy)),
+          response_timeout_(response_timeout), mime_types_(std::move(mime_types)),
+          transport_policy_(std::move(transport_policy)),
           credentials_file_(std::move(credentials_file))
     {
     }
@@ -93,6 +97,13 @@ class ServerConfig final
         return http_timeouts_;
     }
 
+    /// @brief Returns the validated absolute response transmission budget.
+    /// @return Configured duration available to send one complete response.
+    [[nodiscard]] std::chrono::milliseconds response_timeout() const noexcept
+    {
+        return response_timeout_;
+    }
+
     /// @brief Returns the configured immutable MIME registry.
     /// @return Registry loaded before server startup.
     [[nodiscard]] const http::MimeTypeRegistry &mime_types() const noexcept
@@ -121,6 +132,7 @@ class ServerConfig final
     logging::LogSeverity minimum_log_severity_;  ///< Minimum emitted log severity.
     std::vector<LocationConfig> locations_;      ///< Validated locations in configuration order.
     http::HttpRequestTimeouts http_timeouts_;    ///< Immutable HTTP receive budgets.
+    std::chrono::milliseconds response_timeout_; ///< Absolute response transmission budget.
     http::MimeTypeRegistry mime_types_;          ///< Immutable response media-type mappings.
     http::HttpTransportPolicy transport_policy_; ///< Immutable network exposure boundary.
     std::filesystem::path credentials_file_;     ///< Separate owner credential source.

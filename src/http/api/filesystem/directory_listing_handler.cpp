@@ -12,11 +12,14 @@ namespace sparenode::http::detail
 
 Result<HttpResponse, HttpRouteError> handle_resource(const application::FilesystemService &service,
                                                      const MimeTypeRegistry &mime_types,
+                                                     const HttpRequestView &request,
                                                      const std::string_view requested_path)
 {
     try
     {
-        auto resource = service.read(requested_path);
+        const auto file_options = request.response_file_options();
+        auto resource =
+            service.read(requested_path, {file_options.stop_token, file_options.deadline});
         if (!resource)
         {
             return make_public_error_response(resource.error());
@@ -27,8 +30,8 @@ Result<HttpResponse, HttpRouteError> handle_resource(const application::Filesyst
         {
             return api::make_json_response(HttpStatusCode::ok, serialize_listing(*listing));
         }
-        return handle_file(std::get<filesystem::FileReadStream>(std::move(resolved)), mime_types,
-                           requested_path);
+        return handle_file(std::get<application::FilesystemFileRead>(std::move(resolved)),
+                           mime_types, requested_path);
     }
     catch (const std::bad_alloc &)
     {

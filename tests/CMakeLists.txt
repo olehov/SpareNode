@@ -259,6 +259,7 @@ sparenode_enable_static_analysis(sparenode_api_core_tests)
 catch_discover_tests(sparenode_api_core_tests)
 
 add_executable(sparenode_filesystem_application_tests
+    application/filesystem_resource_coordinator_test.cpp
     application/filesystem_service_test.cpp
 )
 

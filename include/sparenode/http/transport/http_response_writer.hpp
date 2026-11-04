@@ -46,12 +46,12 @@ struct HttpResponseWriteError
 /// Other methods consume a streaming reader in fixed-size chunks up to Content-Length.
 /// @param[in,out] connection Exclusive connection used for the complete transmission.
 /// @param[in,out] response Response whose streaming reader advances during the call.
-/// @param[in] stop_token Token observed by network and body-source operations.
+/// @param[in] options Cancellation and absolute deadline observed by network writes.
 /// @param[in] request_method HEAD transmits only metadata and never advances a body reader.
 /// @return Success after complete delivery, or a structured terminal failure.
 [[nodiscard]] Result<void, HttpResponseWriteError>
 write_http_response(network::TcpConnection &connection, HttpResponse &response,
-                    const std::stop_token &stop_token = {},
+                    const network::NetworkIoOptions &options = {},
                     HttpMethod request_method = HttpMethod::get);
 
 /// @brief Returns stable text for one response transmission failure.

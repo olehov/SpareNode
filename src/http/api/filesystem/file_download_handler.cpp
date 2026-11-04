@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <span>
-#include <stop_token>
 #include <string>
 #include <utility>
 
@@ -17,14 +16,15 @@ namespace
 
 /// @brief Converts a confined file stream into a fixed-length HTTP body source.
 [[nodiscard]] Result<HttpResponse, HttpRouteError>
-make_file_response(filesystem::FileReadStream stream, const std::string_view content_type)
+make_file_response(application::FilesystemFileRead stream, const std::string_view content_type)
 {
     const auto content_length = stream.size();
     HttpBodyReader reader = [stream = std::move(stream)](const std::span<std::byte> destination,
-                                                         const std::stop_token &stop_token) mutable
+                                                         const HttpBodyReadOptions &options) mutable
         -> Result<std::size_t, HttpBodyReadError>
     {
-        auto chunk = stream.read(destination, stop_token);
+        auto chunk = stream.read(destination,
+                                 {.stop_token = options.stop_token, .deadline = options.deadline});
         if (chunk)
         {
             return chunk.value();
@@ -51,7 +51,7 @@ make_file_response(filesystem::FileReadStream stream, const std::string_view con
 
 } // namespace
 
-Result<HttpResponse, HttpRouteError> handle_file(filesystem::FileReadStream stream,
+Result<HttpResponse, HttpRouteError> handle_file(application::FilesystemFileRead stream,
                                                  const MimeTypeRegistry &mime_types,
                                                  const std::string_view requested_path)
 {

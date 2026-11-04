@@ -4,6 +4,8 @@
 #include <optional>
 #include <utility>
 
+#include "sparenode/foundation/concurrency/interruption.hpp"
+
 namespace sparenode::application
 {
 namespace
@@ -23,16 +25,122 @@ template <typename Error, typename ErrorCode, typename Detail>
     return {code, std::move(detail)};
 }
 
+/// @brief Preserves the established read error contract for an invalid coordinated path.
+[[nodiscard]] FilesystemReadError read_coordination_error(FilesystemResourceAccessError error)
+{
+    if (error.code == FilesystemResourceAccessErrorCode::invalid_path && error.path_error)
+    {
+        return service_error<FilesystemReadError>(
+            FilesystemReadErrorCode::directory_listing_failed,
+            filesystem::DirectoryListingError{
+                filesystem::DirectoryListingErrorCode::invalid_path, {}, error.path_error->code});
+    }
+    return service_error<FilesystemReadError>(FilesystemReadErrorCode::coordination_failed,
+                                              std::move(error));
+}
+
+/// @brief Preserves the established upload error contract for an invalid coordinated path.
+[[nodiscard]] FilesystemUploadError upload_coordination_error(FilesystemResourceAccessError error)
+{
+    if (error.code == FilesystemResourceAccessErrorCode::invalid_path && error.path_error)
+    {
+        return service_error<FilesystemUploadError>(
+            FilesystemUploadErrorCode::upload_finalization_failed,
+            filesystem::UploadFinalizationError{
+                filesystem::UploadFinalizationErrorCode::invalid_destination,
+                std::move(error.path_error),
+                {}});
+    }
+    return service_error<FilesystemUploadError>(FilesystemUploadErrorCode::coordination_failed,
+                                                std::move(error));
+}
+
+/// @brief Preserves the established creation error contract for an invalid coordinated path.
+[[nodiscard]] FilesystemDirectoryCreationError
+creation_coordination_error(FilesystemResourceAccessError error)
+{
+    if (error.code == FilesystemResourceAccessErrorCode::invalid_path && error.path_error)
+    {
+        return service_error<FilesystemDirectoryCreationError>(
+            FilesystemDirectoryCreationErrorCode::directory_creation_failed,
+            filesystem::DirectoryCreationError{
+                filesystem::DirectoryCreationErrorCode::invalid_destination,
+                std::move(error.path_error),
+                {}});
+    }
+    return service_error<FilesystemDirectoryCreationError>(
+        FilesystemDirectoryCreationErrorCode::coordination_failed, std::move(error));
+}
+
+/// @brief Preserves the established removal error contract for an invalid coordinated path.
+[[nodiscard]] FilesystemRemovalError removal_coordination_error(FilesystemResourceAccessError error)
+{
+    if (error.code == FilesystemResourceAccessErrorCode::invalid_path && error.path_error)
+    {
+        return service_error<FilesystemRemovalError>(
+            FilesystemRemovalErrorCode::filesystem_removal_failed,
+            filesystem::FilesystemEntryRemovalError{
+                filesystem::FilesystemEntryRemovalErrorCode::invalid_destination,
+                std::move(error.path_error),
+                {}});
+    }
+    return service_error<FilesystemRemovalError>(FilesystemRemovalErrorCode::coordination_failed,
+                                                 std::move(error));
+}
+
 } // namespace
 
+FilesystemFileRead::FilesystemFileRead(filesystem::FileReadStream stream,
+                                       FilesystemResourceLease lease,
+                                       FilesystemResourceAccessOptions options) noexcept
+    : lease_(std::move(lease)), stream_(std::move(stream)), options_(std::move(options))
+{
+}
+
+FilesystemFileRead &FilesystemFileRead::operator=(FilesystemFileRead &&other) noexcept
+{
+    if (this != &other)
+    {
+        // Close the old descriptor while its claim is still held, then transfer the new claim.
+        stream_ = std::move(other.stream_);
+        lease_ = std::move(other.lease_);
+        options_ = std::move(other.options_);
+    }
+    return *this;
+}
+
+std::uint64_t FilesystemFileRead::size() const noexcept
+{
+    return stream_.size();
+}
+
+Result<std::size_t, filesystem::FileReadError>
+FilesystemFileRead::read(const std::span<std::byte> destination,
+                         const FilesystemResourceAccessOptions &options)
+{
+    if (concurrency::interruption_status(options.stop_token, options.deadline) !=
+            concurrency::InterruptionStatus::none ||
+        concurrency::interruption_status(options_.stop_token, options_.deadline) !=
+            concurrency::InterruptionStatus::none)
+    {
+        return unexpected(
+            filesystem::FileReadError{filesystem::FileReadErrorCode::cancelled, {}, {}});
+    }
+    // Native reads are synchronous: once entered, cancellation cannot preempt them and the shared
+    // lease deliberately remains held until the call returns, blocking overlapping mutations.
+    return stream_.read(destination, options.stop_token);
+}
+
 FilesystemService::FilesystemService(filesystem::SharedRoot root,
-                                     const filesystem::LocationPermissions permissions) noexcept
-    : root_(std::move(root)), permissions_(permissions)
+                                     const filesystem::LocationPermissions permissions,
+                                     FilesystemResourceCoordinator coordinator)
+    : root_(std::move(root)), permissions_(permissions), coordinator_(std::move(coordinator))
 {
 }
 
 Result<FilesystemReadResource, FilesystemReadError>
-FilesystemService::read(const std::string_view requested_path) const
+FilesystemService::read(const std::string_view requested_path,
+                        const FilesystemResourceAccessOptions &options) const
 {
     if (!permissions_.allows_read())
     {
@@ -40,6 +148,12 @@ FilesystemService::read(const std::string_view requested_path) const
     }
     try
     {
+        auto lease = coordinator_.acquire(root_, requested_path,
+                                          FilesystemResourceAccessMode::shared_read, options);
+        if (!lease)
+        {
+            return unexpected(read_coordination_error(std::move(lease).error()));
+        }
         auto listing = filesystem::list_directory(root_, requested_path);
         if (listing)
         {
@@ -59,8 +173,10 @@ FilesystemService::read(const std::string_view requested_path) const
             return unexpected(service_error<FilesystemReadError>(
                 FilesystemReadErrorCode::file_read_failed, file.error()));
         }
-        return FilesystemReadResource(std::in_place_type<filesystem::FileReadStream>,
-                                      std::move(file).value());
+        FilesystemFileRead coordinated_file(std::move(file).value(), std::move(lease).value(),
+                                            options);
+        return FilesystemReadResource(std::in_place_type<FilesystemFileRead>,
+                                      std::move(coordinated_file));
     }
     catch (const std::bad_alloc &)
     {
@@ -80,6 +196,15 @@ FilesystemService::upload(const std::string_view requested_path,
     }
     try
     {
+        const FilesystemResourceAccessOptions access_options{content.options.stop_token,
+                                                             content.options.deadline};
+        auto lease =
+            coordinator_.acquire(root_, requested_path,
+                                 FilesystemResourceAccessMode::exclusive_mutation, access_options);
+        if (!lease)
+        {
+            return unexpected(upload_coordination_error(std::move(lease).error()));
+        }
         std::optional<storage::TemporaryFile> materialized_artifact;
         const storage::TemporaryFile *source = content.artifact.get();
         if (source == nullptr)
@@ -128,7 +253,8 @@ FilesystemService::upload(const std::string_view requested_path,
 
 Result<void, FilesystemDirectoryCreationError>
 FilesystemService::create_directory(const std::string_view requested_path,
-                                    const std::uint64_t content_size) const
+                                    const std::uint64_t content_size,
+                                    const FilesystemResourceAccessOptions &options) const
 {
     if (!permissions_.allows_write())
     {
@@ -142,6 +268,12 @@ FilesystemService::create_directory(const std::string_view requested_path,
     }
     try
     {
+        auto lease = coordinator_.acquire(
+            root_, requested_path, FilesystemResourceAccessMode::exclusive_mutation, options);
+        if (!lease)
+        {
+            return unexpected(creation_coordination_error(std::move(lease).error()));
+        }
         auto created = filesystem::create_directory(root_, requested_path);
         if (!created)
         {
@@ -158,8 +290,8 @@ FilesystemService::create_directory(const std::string_view requested_path,
 }
 
 Result<void, FilesystemRemovalError>
-FilesystemService::remove(const std::string_view requested_path,
-                          const std::uint64_t content_size) const
+FilesystemService::remove(const std::string_view requested_path, const std::uint64_t content_size,
+                          const FilesystemResourceAccessOptions &options) const
 {
     if (!permissions_.allows_delete())
     {
@@ -173,6 +305,12 @@ FilesystemService::remove(const std::string_view requested_path,
     }
     try
     {
+        auto lease = coordinator_.acquire(
+            root_, requested_path, FilesystemResourceAccessMode::exclusive_mutation, options);
+        if (!lease)
+        {
+            return unexpected(removal_coordination_error(std::move(lease).error()));
+        }
         auto removed = filesystem::remove_filesystem_entry(root_, requested_path);
         if (!removed)
         {

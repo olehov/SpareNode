@@ -16,7 +16,11 @@ handle_directory_creation(const application::FilesystemService &service,
 {
     try
     {
-        if (auto created = service.create_directory(requested_path, request.body_size()); !created)
+        const auto file_options = request.temporary_file_options();
+        if (auto created =
+                service.create_directory(requested_path, request.body_size(),
+                                         {file_options.stop_token, file_options.deadline});
+            !created)
         {
             return make_public_error_response(created.error());
         }
