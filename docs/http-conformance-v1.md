@@ -79,7 +79,8 @@ Defaults at the baseline:
 
 Parser/storage settings are C++ configuration boundaries. Persistent server
 configuration exposes `header_timeout_ms`, `body_timeout_ms`, and
-`request_timeout_ms`, each accepting 1 through 86,400,000 milliseconds.
+`request_timeout_ms` for reception plus `response_timeout_ms` for complete response
+transmission. Each accepts 1 through 86,400,000 milliseconds.
 The session retains bounded request metadata and decoded payload plus receive and
 decoder scratch buffers; it still buffers the complete decoded request body.
 Chunk framing is processed once and discarded rather than accumulated with payload.

@@ -126,6 +126,8 @@ FilesystemFileRead::read(const std::span<std::byte> destination,
         return unexpected(
             filesystem::FileReadError{filesystem::FileReadErrorCode::cancelled, {}, {}});
     }
+    // Native reads are synchronous: once entered, cancellation cannot preempt them and the shared
+    // lease deliberately remains held until the call returns, blocking overlapping mutations.
     return stream_.read(destination, options.stop_token);
 }
 

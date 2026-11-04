@@ -27,7 +27,7 @@ enum class ConfigValidationErrorCode : std::uint8_t
     invalid_log_level,            ///< `log_level` is not a supported severity.
     invalid_mime_types_file,      ///< `mime_types_file` is empty.
     invalid_credentials_file,     ///< `credentials_file` is empty.
-    timeout_out_of_range,         ///< A receive timeout is outside 1 through 86400000 milliseconds.
+    timeout_out_of_range,         ///< A server timeout is outside 1 through 86400000 milliseconds.
     invalid_transport_mode,       ///< `transport_mode` is not a supported deployment mode.
     invalid_trusted_proxy,        ///< `trusted_proxy` is not one numeric IP address.
     missing_trusted_proxy,        ///< Proxy HTTPS mode has no trusted proxy address.

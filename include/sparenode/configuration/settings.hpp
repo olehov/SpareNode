@@ -58,6 +58,7 @@ struct ServerSettings
     std::uint64_t header_timeout_ms{10'000};                ///< Header inactivity budget.
     std::uint64_t body_timeout_ms{10'000};                  ///< Body inactivity budget.
     std::uint64_t request_timeout_ms{30'000};               ///< Total request receive budget.
+    std::uint64_t response_timeout_ms{300'000};             ///< Total response send budget.
     ConfiguredTransportMode transport_mode{
         ConfiguredTransportMode::loopback_http};    ///< Configured deployment boundary.
     std::optional<std::string> trusted_proxy;       ///< Numeric trusted proxy when configured.

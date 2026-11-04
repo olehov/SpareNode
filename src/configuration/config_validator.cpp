@@ -232,6 +232,7 @@ class ValidationState final
         case ServerDirectiveKind::header_timeout_ms:
         case ServerDirectiveKind::body_timeout_ms:
         case ServerDirectiveKind::request_timeout_ms:
+        case ServerDirectiveKind::response_timeout_ms:
             validate_timeout(directive);
             break;
         case ServerDirectiveKind::transport_mode:
@@ -291,6 +292,9 @@ class ValidationState final
             break;
         case ServerDirectiveKind::request_timeout_ms:
             server_.request_timeout_ms = value;
+            break;
+        case ServerDirectiveKind::response_timeout_ms:
+            server_.response_timeout_ms = value;
             break;
         default:
             break;
@@ -672,7 +676,7 @@ const char *to_string(const ConfigValidationErrorCode code) noexcept
     case ConfigValidationErrorCode::invalid_credentials_file:
         return "credentials_file must not be empty";
     case ConfigValidationErrorCode::timeout_out_of_range:
-        return "HTTP receive timeout must be between 1 and 86400000 milliseconds";
+        return "HTTP timeout must be between 1 and 86400000 milliseconds";
     case ConfigValidationErrorCode::invalid_transport_mode:
         return "transport_mode is not supported";
     case ConfigValidationErrorCode::invalid_trusted_proxy:

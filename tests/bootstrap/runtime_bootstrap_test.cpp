@@ -96,6 +96,7 @@ TEST_CASE("Runtime bootstrap constructs equivalent default runtime settings",
     CHECK(server.http_timeouts().headers == std::chrono::seconds{10});
     CHECK(server.http_timeouts().body == std::chrono::seconds{10});
     CHECK(server.http_timeouts().total == std::chrono::seconds{30});
+    CHECK(server.response_timeout() == std::chrono::minutes{5});
     CHECK(server.transport_policy().mode == sparenode::http::HttpTransportMode::loopback_http);
     REQUIRE(server.locations().size() == 1);
     CHECK(std::filesystem::equivalent(server.locations().front().root().path(), shared));
@@ -139,6 +140,7 @@ TEST_CASE("Runtime bootstrap resolves external MIME and credential paths",
                        "bind \"::1\";\nport 8443;\nmultithreading true;\nworker_threads 8;\n"
                        "log_level \"warning\";\nheader_timeout_ms 1500;\nbody_timeout_ms 2500;\n"
                        "request_timeout_ms 90000;\ntransport_mode \"trusted_proxy_https\";\n"
+                       "response_timeout_ms 120000;\n"
                        "trusted_proxy \"::1\";\nmime_types_file \"custom.types\";\n"
                        "credentials_file \"secrets/owner.conf\";\n",
                        "read false;\nwrite true;\ndelete true;\n"));
@@ -153,6 +155,7 @@ TEST_CASE("Runtime bootstrap resolves external MIME and credential paths",
     CHECK(server.http_timeouts().headers == std::chrono::milliseconds{1500});
     CHECK(server.http_timeouts().body == std::chrono::milliseconds{2500});
     CHECK(server.http_timeouts().total == std::chrono::seconds{90});
+    CHECK(server.response_timeout() == std::chrono::minutes{2});
     CHECK(server.transport_policy().mode ==
           sparenode::http::HttpTransportMode::trusted_proxy_https);
     CHECK(server.transport_policy().trusted_proxy == std::optional<std::string>{"::1"});

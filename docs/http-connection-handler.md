@@ -103,6 +103,8 @@ steady-clock deadline. `HttpRequestTimeouts` groups header inactivity (10 second
 body inactivity (10 seconds), and total receive time (30 seconds). Runtime server
 settings carry these budgets from the validated `header_timeout_ms`,
 `body_timeout_ms`, and `request_timeout_ms` directives into the application handler.
+The independent `response_timeout_ms` directive supplies one absolute budget that starts only
+after application dispatch completes and covers both streaming body reads and network writes.
 
 Inactivity starts at session entry and renews only after a nonempty receive. The
 body phase begins once the complete header terminator arrives; its inactivity

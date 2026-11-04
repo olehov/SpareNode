@@ -14,10 +14,12 @@ server {
     mime_types_file "mime.types";
     # Keep this regular file outside every directory exposed by a location block.
     credentials_file "credentials.conf";
-    # Receive inactivity and total request budgets, in milliseconds.
+    # Request receive inactivity and total budgets, in milliseconds.
     header_timeout_ms 10000;
     body_timeout_ms 10000;
     request_timeout_ms 30000;
+    # Absolute budget for sending one complete response, including streamed files.
+    response_timeout_ms 300000;
 
     location "/api/Documents" {
         # Replace this placeholder with an existing directory before starting SpareNode.

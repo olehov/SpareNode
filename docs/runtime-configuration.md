@@ -24,6 +24,7 @@ if a later grammar permits multiple server blocks. Each server configuration con
 - the multithreading switch and configured worker count;
 - the minimum `logging::LogSeverity`;
 - grouped `HttpRequestTimeouts` for header/body inactivity and total request reception;
+- an absolute response transmission timeout that starts after application dispatch;
 - an immutable `HttpTransportPolicy` defining the direct-peer and HTTPS trust boundary;
 - an immutable MIME type registry loaded once from the optional external mapping file;
 - an ordered collection of `application::runtime::LocationConfig` values.
@@ -55,6 +56,7 @@ Omitted directives map to these values:
 | header timeout | `10000 ms` |
 | body timeout | `10000 ms` |
 | total request timeout | `30000 ms` |
+| total response timeout | `300000 ms` |
 | read permission | `true` |
 | write permission | `false` |
 | delete permission | `false` |

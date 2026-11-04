@@ -295,8 +295,9 @@ RuntimeBootstrap::build(const configuration::LoadedConfiguration &loaded)
             runtime_servers.emplace_back(
                 network::TcpEndpoint{configured.bind_address, configured.port},
                 configured.multithreading_enabled, configured.worker_threads, log_severity,
-                std::move(locations).value(), timeouts, std::move(mime_types).value(),
-                std::move(transport_policy), credentials_path);
+                std::move(locations).value(), timeouts,
+                std::chrono::milliseconds{configured.response_timeout_ms},
+                std::move(mime_types).value(), std::move(transport_policy), credentials_path);
         }
 
         auto authentication = build_authentication(credentials_path, authentication_roots);

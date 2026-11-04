@@ -613,22 +613,36 @@ TEST_CASE("HTTP session defers its response deadline until transmission",
     auto pair = sparenode::test::create_connected_tcp_pair();
     sparenode::http::HttpRouter router;
     std::stop_source stop;
-    REQUIRE(router.register_route(sparenode::http::HttpMethod::get, "/download",
-                                  [&](const sparenode::http::HttpRequestView &request,
-                                      const sparenode::http::HttpRouteParameters &)
-                                  {
-                                      const auto publication = request.temporary_file_options();
-                                      const auto response = request.response_file_options();
-                                      REQUIRE(publication.deadline.has_value());
-                                      CHECK_FALSE(response.deadline.has_value());
-                                      const auto now = std::chrono::steady_clock::now();
-                                      const auto publication_remaining =
-                                          publication.deadline.value() - now;
-                                      CHECK(publication_remaining > std::chrono::minutes{4});
-                                      CHECK(publication_remaining <= std::chrono::minutes{5});
-                                      CHECK(response.stop_token == stop.get_token());
-                                      return ok_response();
-                                  }));
+    std::optional<std::chrono::steady_clock::time_point> dispatch_completed_at;
+    std::optional<std::chrono::steady_clock::time_point> observed_response_deadline;
+    REQUIRE(router.register_route(
+        sparenode::http::HttpMethod::get, "/download",
+        [&](const sparenode::http::HttpRequestView &request,
+            const sparenode::http::HttpRouteParameters &)
+        {
+            const auto publication = request.temporary_file_options();
+            const auto response = request.response_file_options();
+            REQUIRE(publication.deadline.has_value());
+            CHECK_FALSE(response.deadline.has_value());
+            const auto now = std::chrono::steady_clock::now();
+            const auto publication_remaining = publication.deadline.value() - now;
+            CHECK(publication_remaining > std::chrono::minutes{4});
+            CHECK(publication_remaining <= std::chrono::minutes{5});
+            CHECK(response.stop_token == stop.get_token());
+            auto streamed = sparenode::http::HttpResponse::create_streaming(
+                sparenode::http::HttpStatusCode::ok, "OK", {}, 1,
+                [&](const std::span<std::byte> destination,
+                    const sparenode::http::HttpBodyReadOptions &options)
+                    -> sparenode::Result<std::size_t, sparenode::http::HttpBodyReadError>
+                {
+                    observed_response_deadline = options.deadline;
+                    destination.front() = std::byte{0x01};
+                    return 1;
+                });
+            REQUIRE(streamed);
+            dispatch_completed_at = std::chrono::steady_clock::now();
+            return std::move(streamed).value();
+        }));
     const sparenode::http::HttpConnectionHandlerConfig config{
         .timeouts = {.body = std::chrono::minutes{5}},
         .deadline_provider = {},
@@ -641,6 +655,11 @@ TEST_CASE("HTTP session defers its response deadline until transmission",
 
     REQUIRE(result);
     CHECK(receive_until_closed(pair.client).starts_with("HTTP/1.1 200 OK\r\n"));
+    const auto dispatch_end = sparenode::test::require_optional(dispatch_completed_at);
+    const auto response_deadline = sparenode::test::require_optional(observed_response_deadline);
+    const auto deadline_offset = response_deadline - dispatch_end;
+    CHECK(deadline_offset >= config.response_timeout);
+    CHECK(deadline_offset < config.response_timeout + std::chrono::seconds{1});
 }
 
 TEST_CASE("HTTP connection handler runs through the TCP dispatcher",

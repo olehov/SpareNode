@@ -320,6 +320,8 @@ TEST_CASE("Cancelled and expired streamed reads release ownership with their RAI
     const sparenode::test::TemporaryDirectory directory("sparenode-service-read-interruption");
     REQUIRE(std::ofstream(directory.path() / "cancelled.txt", std::ios::binary) << "content");
     REQUIRE(std::ofstream(directory.path() / "expired.txt", std::ios::binary) << "content");
+    REQUIRE(std::ofstream(directory.path() / "call-cancelled.txt", std::ios::binary) << "content");
+    REQUIRE(std::ofstream(directory.path() / "call-expired.txt", std::ios::binary) << "content");
     const sparenode::application::FilesystemResourceCoordinator coordinator;
     const auto reader = make_service(
         directory, sparenode::filesystem::LocationPermissions{true, true, true}, coordinator);
@@ -352,4 +354,30 @@ TEST_CASE("Cancelled and expired streamed reads release ownership with their RAI
         CHECK(interrupted.error().code == sparenode::filesystem::FileReadErrorCode::cancelled);
     }
     CHECK(mutator.remove("expired.txt", 0));
+
+    {
+        auto opened = reader.read("call-cancelled.txt");
+        REQUIRE(opened);
+        auto resource = std::move(opened).value();
+        auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
+        std::stop_source cancellation;
+        REQUIRE(cancellation.request_stop());
+        const auto interrupted =
+            stream.read(output, {.stop_token = cancellation.get_token(), .deadline = {}});
+        REQUIRE_FALSE(interrupted);
+        CHECK(interrupted.error().code == sparenode::filesystem::FileReadErrorCode::cancelled);
+    }
+    CHECK(mutator.remove("call-cancelled.txt", 0));
+
+    {
+        auto opened = reader.read("call-expired.txt");
+        REQUIRE(opened);
+        auto resource = std::move(opened).value();
+        auto stream = std::get<sparenode::application::FilesystemFileRead>(std::move(resource));
+        const auto interrupted = stream.read(
+            output, {.stop_token = {}, .deadline = (std::chrono::steady_clock::time_point::min)()});
+        REQUIRE_FALSE(interrupted);
+        CHECK(interrupted.error().code == sparenode::filesystem::FileReadErrorCode::cancelled);
+    }
+    CHECK(mutator.remove("call-expired.txt", 0));
 }

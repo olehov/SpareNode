@@ -25,6 +25,7 @@ server {
     header_timeout_ms 10000;
     body_timeout_ms 10000;
     request_timeout_ms 30000;
+    response_timeout_ms 300000;
 
     location "/api/Documents" {
         path "/home/user/Documents";
@@ -78,7 +79,8 @@ identifier = ( ALPHA | "_" ), { ALPHA | DIGIT | "_" | "-" } ;
 
 Version 1 reserves `server`, `location`, `bind`, `port`, `multithreading`,
 `worker_threads`, `log_level`, `header_timeout_ms`, `body_timeout_ms`,
-`request_timeout_ms`, `mime_types_file`, `credentials_file`, `transport_mode`, `trusted_proxy`,
+`request_timeout_ms`, `response_timeout_ms`, `mime_types_file`, `credentials_file`,
+`transport_mode`, `trusted_proxy`,
 `path`,
 `read`, `write`, `delete`, `true`, and `false` according to their grammatical
 positions. Keywords must be written in lowercase.
@@ -142,6 +144,7 @@ server-item              = bind-directive
                          | header-timeout-directive
                          | body-timeout-directive
                          | request-timeout-directive
+                         | response-timeout-directive
                          | transport-mode-directive
                          | trusted-proxy-directive
                          | location-block ;
@@ -156,6 +159,7 @@ credentials-file-directive = "credentials_file", string, ";" ;
 header-timeout-directive = "header_timeout_ms", integer, ";" ;
 body-timeout-directive   = "body_timeout_ms", integer, ";" ;
 request-timeout-directive = "request_timeout_ms", integer, ";" ;
+response-timeout-directive = "response_timeout_ms", integer, ";" ;
 transport-mode-directive = "transport_mode", string, ";" ;
 trusted-proxy-directive  = "trusted_proxy", string, ";" ;
 
@@ -197,6 +201,7 @@ prefix for that filesystem root.
 | `header_timeout_ms` | zero or one | `10000` | Header receive inactivity, 1 through 86400000 milliseconds |
 | `body_timeout_ms` | zero or one | `10000` | Body receive inactivity, 1 through 86400000 milliseconds |
 | `request_timeout_ms` | zero or one | `30000` | Total request receive time, 1 through 86400000 milliseconds |
+| `response_timeout_ms` | zero or one | `300000` | Total response transmission time, 1 through 86400000 milliseconds |
 | `location` | one or more | none | Defines an HTTP prefix and its filesystem root |
 
 Hostnames are not accepted by `bind` in version 1. IPv6 addresses remain quoted

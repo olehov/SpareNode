@@ -89,6 +89,7 @@ void write_startup_failure(const std::string &diagnostic)
         .body_storage_policy_selector = authentication::api::authentication_body_storage_policy,
         .timeouts = server.http_timeouts(),
         .deadline_provider = {},
+        .response_timeout = server.response_timeout(),
         .transport_policy = server.transport_policy()};
     auto handler = http::make_http_connection_handler(std::move(http_application), handler_config);
     auto admission = http::make_http_connection_admission(handler_config);
