@@ -216,6 +216,33 @@ sparenode_enable_static_analysis(sparenode_authentication_api_tests)
 
 catch_discover_tests(sparenode_authentication_api_tests)
 
+add_executable(sparenode_authentication_transport_integration_tests
+    authentication/authentication_api_transport_test.cpp
+)
+
+target_link_libraries(sparenode_authentication_transport_integration_tests PRIVATE
+    Catch2::Catch2WithMain
+    sparenode_authentication_api
+    sparenode_http_transport
+    Threads::Threads
+)
+
+target_include_directories(sparenode_authentication_transport_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(WIN32)
+    target_link_libraries(sparenode_authentication_transport_integration_tests PRIVATE ws2_32)
+endif()
+
+sparenode_enable_compiler_warnings(sparenode_authentication_transport_integration_tests)
+sparenode_enable_cppcheck(sparenode_authentication_transport_integration_tests)
+sparenode_enable_static_analysis(sparenode_authentication_transport_integration_tests)
+
+catch_discover_tests(sparenode_authentication_transport_integration_tests
+    PROPERTIES LABELS "integration"
+)
+
 add_executable(sparenode_http_core_tests
     http/detail/ascii_test.cpp
     http/http_status_code_test.cpp
