@@ -31,6 +31,7 @@ namespace
 class TestCredentialProvider final : public sparenode::authentication::CredentialProvider
 {
   public:
+    /// @brief Returns the deterministic owner only for the expected fixture login.
     [[nodiscard]] sparenode::Result<std::optional<sparenode::authentication::CredentialRecord>,
                                     sparenode::authentication::CredentialProviderError>
     find_by_login(const std::string_view login) const override
@@ -48,6 +49,7 @@ class TestCredentialProvider final : public sparenode::authentication::Credentia
 class TestPasswordVerifier final : public sparenode::authentication::PasswordVerifier
 {
   public:
+    /// @brief Produces the deterministic verifier used by this fixture.
     [[nodiscard]] sparenode::Result<std::string,
                                     sparenode::authentication::PasswordVerifierErrorCode>
     hash(const std::span<const char>) const override
@@ -55,6 +57,7 @@ class TestPasswordVerifier final : public sparenode::authentication::PasswordVer
         return std::string("encoded");
     }
 
+    /// @brief Accepts only the fixture password and deterministic verifier pair.
     [[nodiscard]] sparenode::Result<bool, sparenode::authentication::PasswordVerifierErrorCode>
     verify(const std::span<const char> password,
            const std::string_view encoded_verifier) const noexcept override
@@ -63,6 +66,7 @@ class TestPasswordVerifier final : public sparenode::authentication::PasswordVer
                std::string_view(password.data(), password.size()) == "password";
     }
 
+    /// @brief Treats the fixture verifier as usable for transport-focused tests.
     [[nodiscard]] bool is_usable(const std::string_view) const noexcept override
     {
         return true;
@@ -73,6 +77,7 @@ class TestPasswordVerifier final : public sparenode::authentication::PasswordVer
 class TestSessionCodec final : public sparenode::session::SessionCredentialCodec
 {
   public:
+    /// @brief Generates a unique deterministic credential and its lookup digest.
     [[nodiscard]] sparenode::Result<sparenode::session::GeneratedSessionCredential,
                                     sparenode::session::SessionCredentialErrorCode>
     generate() const override
@@ -81,6 +86,7 @@ class TestSessionCodec final : public sparenode::session::SessionCredentialCodec
         return sparenode::session::GeneratedSessionCredential{value, digest_for(value)};
     }
 
+    /// @brief Converts a submitted fixture credential into its lookup digest.
     [[nodiscard]] sparenode::Result<sparenode::session::SessionCredentialDigest,
                                     sparenode::session::SessionCredentialErrorCode>
     digest(const std::string_view credential) const noexcept override
@@ -251,11 +257,14 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
     CHECK(!invalidated->has_value());
 
     const auto repeated = exchange(router, config, logout_request);
-    const std::string anonymous_request = "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" +
-                                          proxy_headers(proxy) + "Content-Length: 0\r\n\r\n";
+    const std::string anonymous_request =
+        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers(proxy) +
+        "Origin: https://cross-site.example\r\nContent-Length: 0\r\n\r\n";
     const auto anonymous = exchange(router, config, anonymous_request);
     CHECK(repeated == logout_response);
-    CHECK(anonymous == logout_response);
+    CHECK(anonymous.starts_with("HTTP/1.1 204 No Content\r\n"));
+    CHECK(!anonymous.contains("Set-Cookie:"));
+    CHECK(anonymous.ends_with("\r\n\r\n"));
     CHECK(!repeated.contains("session-0"));
     CHECK(!anonymous.contains("session-0"));
 }

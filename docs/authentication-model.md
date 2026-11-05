@@ -219,8 +219,10 @@ Sessions are memory-only in v0.1. Process restart, graceful shutdown, explicit l
 credential-provider replacement invalidates them. Logout invalidates the presented session before
 returning and sends an expired cookie. Repeated logout without a live session remains safe and does
 not restore or prolong a session. Active, repeated, malformed-cookie, and anonymous logout requests
-all receive the same empty success response and expired cookie so the endpoint does not disclose
-whether the submitted session existed.
+all receive the same empty success status and body so the endpoint does not disclose whether the
+submitted session existed. An expired cookie is emitted only when the request supplied one
+syntactically usable session credential; an anonymous cross-site POST therefore cannot clear the
+browser's valid host-only cookie.
 
 Cookie transport is the only browser session mechanism. The cookie is host-only, `HttpOnly`,
 `SameSite=Strict`, scoped to `Path=/`, and non-persistent. Validated HTTPS adds `Secure`; direct

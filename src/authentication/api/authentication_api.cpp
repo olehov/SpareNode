@@ -388,13 +388,20 @@ class LoginJsonParser final
     return value;
 }
 
-/// @brief Creates one empty successful authentication response with a cookie update.
-[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError> cookie_response(std::string cookie)
+/// @brief Creates one empty successful authentication response with an optional cookie update.
+/// @param[in] cookie Cookie update emitted only when the request supplied a usable credential.
+[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
+authentication_response(std::optional<std::string> cookie = std::nullopt)
 {
+    std::vector<http::HttpResponseHeader> headers;
+    if (cookie)
+    {
+        headers.push_back({"Set-Cookie", std::move(cookie).value()});
+    }
     auto response = http::HttpResponse::create(
         http::HttpStatusCode::no_content,
-        std::string(http::http_reason_phrase(http::HttpStatusCode::no_content)),
-        {{"Set-Cookie", std::move(cookie)}}, {});
+        std::string(http::http_reason_phrase(http::HttpStatusCode::no_content)), std::move(headers),
+        {});
     if (!response)
     {
         return unexpected(
@@ -442,7 +449,7 @@ login(const http::HttpRequestView &request,
         }
         return authentication_unavailable();
     }
-    return cookie_response(
+    return authentication_response(
         session_cookie(std::move(authenticated).value(), request.transport().secure));
 }
 
@@ -454,14 +461,14 @@ logout(const http::HttpRequestView &request,
     const auto credential = session_cookie_credential(request);
     if (credential.malformed || credential.value.empty())
     {
-        return cookie_response(expired_session_cookie(request.transport().secure));
+        return authentication_response();
     }
     auto invalidated = service.logout(credential.value);
     if (!invalidated)
     {
         return authentication_unavailable();
     }
-    return cookie_response(expired_session_cookie(request.transport().secure));
+    return authentication_response(expired_session_cookie(request.transport().secure));
 }
 
 } // namespace
