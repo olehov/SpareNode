@@ -364,6 +364,53 @@ class LoginJsonParser final
                                          "{\"error\":\"authentication_throttled\"}");
 }
 
+/// @brief Serializes the host-only session cookie with transport-appropriate defenses.
+[[nodiscard]] std::string session_cookie(const std::string_view credential, const bool secure)
+{
+    std::string value;
+    value.reserve(session_cookie_name.size() + credential.size() + 48);
+    value.append(session_cookie_name);
+    value.push_back('=');
+    value.append(credential);
+    value.append("; Path=/; HttpOnly; SameSite=Strict");
+    if (secure)
+    {
+        value.append("; Secure");
+    }
+    return value;
+}
+
+/// @brief Serializes an immediate host-only session-cookie expiration.
+[[nodiscard]] std::string expired_session_cookie(const bool secure)
+{
+    auto value = session_cookie({}, secure);
+    value.append("; Max-Age=0");
+    return value;
+}
+
+/// @brief Creates one empty successful authentication response with an optional cookie update.
+/// @param[in] cookie Cookie update emitted only when the request supplied a usable credential.
+[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
+authentication_response(std::optional<std::string> cookie = std::nullopt)
+{
+    std::vector<http::HttpResponseHeader> headers;
+    if (cookie)
+    {
+        headers.push_back({"Set-Cookie", std::move(cookie).value()});
+    }
+    auto response = http::HttpResponse::create(
+        http::HttpStatusCode::no_content,
+        std::string(http::http_reason_phrase(http::HttpStatusCode::no_content)), std::move(headers),
+        {});
+    if (!response)
+    {
+        return unexpected(
+            http::HttpRouteError{http::HttpRouteErrorCode::response_validation_failure,
+                                 static_cast<int>(response.error().code)});
+    }
+    return std::move(response).value();
+}
+
 [[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
 login(const http::HttpRequestView &request,
       const application::SessionAuthenticationService &service)
@@ -402,26 +449,33 @@ login(const http::HttpRequestView &request,
         }
         return authentication_unavailable();
     }
-    auto response = http::HttpResponse::create(
-        http::HttpStatusCode::no_content,
-        std::string(http::http_reason_phrase(http::HttpStatusCode::no_content)),
-        {{"Set-Cookie",
-          "spnode_session=" + std::move(authenticated).value() + "; Path=/; HttpOnly"}},
-        {});
-    if (!response)
+    return authentication_response(
+        session_cookie(std::move(authenticated).value(), request.transport().secure));
+}
+
+/// @brief Invalidates the active session and expires its browser credential.
+[[nodiscard]] Result<http::HttpResponse, http::HttpRouteError>
+logout(const http::HttpRequestView &request,
+       const application::SessionAuthenticationService &service)
+{
+    const auto credential = session_cookie_credential(request);
+    if (credential.malformed || credential.value.empty())
     {
-        return unexpected(
-            http::HttpRouteError{http::HttpRouteErrorCode::response_validation_failure,
-                                 static_cast<int>(response.error().code)});
+        return authentication_response();
     }
-    return std::move(response).value();
+    auto invalidated = service.logout(credential.value);
+    if (!invalidated)
+    {
+        return authentication_unavailable();
+    }
+    return authentication_response(expired_session_cookie(request.transport().secure));
 }
 
 } // namespace
 
 Result<void, AuthenticationApiError> register_authentication_api_routes(
     http::api::ApiRouterBuilder &builder,
-    std::shared_ptr<const application::SessionAuthenticationService> service)
+    const std::shared_ptr<const application::SessionAuthenticationService> &service)
 {
     if (!service)
     {
@@ -431,8 +485,7 @@ Result<void, AuthenticationApiError> register_authentication_api_routes(
     {
         auto registered = builder.register_public(
             {http::HttpMethod::post, std::string(login_path),
-             [service = std::move(service)](const http::HttpRequestView &request,
-                                            const http::HttpRouteParameters &)
+             [service](const http::HttpRequestView &request, const http::HttpRouteParameters &)
              {
                  try
                  {
@@ -447,6 +500,24 @@ Result<void, AuthenticationApiError> register_authentication_api_routes(
         {
             return unexpected(AuthenticationApiError{
                 AuthenticationApiErrorCode::route_registration_failed, registered.error()});
+        }
+        auto logout_registered = builder.register_public(
+            {http::HttpMethod::post, std::string(logout_path),
+             [service](const http::HttpRequestView &request, const http::HttpRouteParameters &)
+             {
+                 try
+                 {
+                     return logout(request, *service);
+                 }
+                 catch (const std::bad_alloc &)
+                 {
+                     return authentication_unavailable();
+                 }
+             }});
+        if (!logout_registered)
+        {
+            return unexpected(AuthenticationApiError{
+                AuthenticationApiErrorCode::route_registration_failed, logout_registered.error()});
         }
         return {};
     }

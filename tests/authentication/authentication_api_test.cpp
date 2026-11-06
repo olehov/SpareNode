@@ -14,6 +14,7 @@
 #include "sparenode/authentication/credential_provider.hpp"
 #include "sparenode/authentication/password_verifier.hpp"
 #include "sparenode/http/api/api_router_builder.hpp"
+#include "sparenode/http/request/detail/http_request_view_access.hpp"
 #include "sparenode/http/request/http_request_parser.hpp"
 #include "sparenode/session/session_credential_codec.hpp"
 #include "sparenode/session/session_store.hpp"
@@ -136,23 +137,31 @@ struct Fixture
                 std::move(service).value())};
 }
 
-[[nodiscard]] sparenode::http::HttpRequestView parse_request(const std::string_view source)
+[[nodiscard]] sparenode::http::HttpRequestView parse_request(const std::string_view source,
+                                                             const bool secure = false)
 {
     auto parsed =
         sparenode::http::parse_http_request(std::as_bytes(std::span(source.data(), source.size())));
     REQUIRE(parsed);
     REQUIRE(parsed->is_complete());
-    return sparenode::test::require_optional(parsed->request());
+    auto request = sparenode::test::require_optional(parsed->request());
+    sparenode::http::detail::HttpRequestViewAccess::set_transport(request,
+                                                                  {.peer_address = "127.0.0.1",
+                                                                   .client_address = "127.0.0.1",
+                                                                   .secure = secure,
+                                                                   .trusted_proxy = secure});
+    return request;
 }
 
 [[nodiscard]] sparenode::http::HttpResponse
 dispatch_login(const sparenode::http::HttpRouter &router, const std::string_view body,
-               const std::string_view extra_headers = "Content-Type: application/json\r\n")
+               const std::string_view extra_headers = "Content-Type: application/json\r\n",
+               const bool secure = false)
 {
     const std::string source =
         "POST /api/auth/login HTTP/1.1\r\nHost: localhost\r\n" + std::string(extra_headers) +
         "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string(body);
-    auto response = router.dispatch(parse_request(source));
+    auto response = router.dispatch(parse_request(source, secure));
     REQUIRE(response);
     return std::move(response).value();
 }
@@ -177,7 +186,8 @@ dispatch_login(const sparenode::http::HttpRouter &router, const std::string_view
     auto registered = sparenode::authentication::api::register_authentication_api_routes(
         builder, fixture.service);
     REQUIRE(registered);
-    REQUIRE(builder.public_routes().size() == 1);
+    REQUIRE(builder.public_routes().size() == 2);
+    CHECK(builder.public_routes().back().pattern == sparenode::authentication::api::logout_path);
     CHECK(builder.protected_routes().empty());
     return std::move(builder).build();
 }
@@ -194,6 +204,8 @@ TEST_CASE("Authentication API creates and rotates owner sessions", "[authenticat
     REQUIRE(first.status_code() == sparenode::http::HttpStatusCode::no_content);
     const std::string first_cookie(header_value(first, "Set-Cookie"));
     REQUIRE(first_cookie.starts_with("spnode_session=session-0;"));
+    CHECK(first_cookie.contains("Path=/; HttpOnly; SameSite=Strict"));
+    CHECK_FALSE(first_cookie.contains("Secure"));
 
     const auto rejected =
         dispatch_login(router, R"({"login":"admin","password":"incorrect"})",
@@ -215,6 +227,33 @@ TEST_CASE("Authentication API creates and rotates owner sessions", "[authenticat
     const auto new_session = fixture.sessions->authenticate("session-1");
     REQUIRE(new_session);
     CHECK(sparenode::test::require_optional(new_session.value()).identity == "owner");
+}
+
+TEST_CASE("Authentication API applies secure cookie attributes and invalidates logout",
+          "[authentication][api][logout]")
+{
+    const auto fixture = make_fixture();
+    const auto router = make_router(fixture);
+    constexpr std::string_view credentials = R"({"login":"admin","password":"password"})";
+
+    const auto login_response =
+        dispatch_login(router, credentials, "Content-Type: application/json\r\n", true);
+    REQUIRE(login_response.status_code() == sparenode::http::HttpStatusCode::no_content);
+    const auto login_cookie = header_value(login_response, "Set-Cookie");
+    CHECK(login_cookie == "spnode_session=session-0; Path=/; HttpOnly; SameSite=Strict; Secure");
+
+    const std::string logout_source = "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n"
+                                      "Cookie: spnode_session=session-0\r\n"
+                                      "Content-Length: 0\r\n\r\n";
+    auto logout_response = router.dispatch(parse_request(logout_source, true));
+    REQUIRE(logout_response);
+    CHECK(logout_response->status_code() == sparenode::http::HttpStatusCode::no_content);
+    CHECK(header_value(logout_response.value(), "Set-Cookie") ==
+          "spnode_session=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0");
+
+    const auto invalidated = fixture.sessions->authenticate("session-0");
+    REQUIRE(invalidated);
+    CHECK_FALSE(invalidated->has_value());
 }
 
 TEST_CASE("Authentication API does not distinguish invalid credentials", "[authentication][api]")

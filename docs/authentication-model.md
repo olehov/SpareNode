@@ -158,7 +158,7 @@ body remains in an erasable memory allocation and never enters temporary-file st
    the owner session.
 
 Success returns `204 No Content` and a host-only `spnode_session` cookie scoped to `Path=/` with
-`HttpOnly`. SN-107 owns the final `Secure`, `SameSite`, Origin, and CSRF policy.
+`HttpOnly` and `SameSite=Strict`. Validated HTTPS additionally enables `Secure`.
 
 Malformed input returns `400 Bad Request`. Temporarily unavailable credential infrastructure fails
 closed with `503 Service Unavailable` and the stable
@@ -166,8 +166,8 @@ closed with `503 Service Unavailable` and the stable
 verification, or secret-source failures. Passwords, verifier strings, session identifiers, and
 cookie values are never included in responses or logs.
 
-SN-107 defines login Origin handling and the final cookie attributes. SN-108 defines when the
-transport is sufficiently protected to accept credentials.
+SN-108 defines when the transport is sufficiently protected to accept credentials and when the
+cookie may safely carry `Secure`.
 
 ## Authentication audit logging
 
@@ -218,13 +218,17 @@ values may later become validated server settings without changing session seman
 Sessions are memory-only in v0.1. Process restart, graceful shutdown, explicit logout, or
 credential-provider replacement invalidates them. Logout invalidates the presented session before
 returning and sends an expired cookie. Repeated logout without a live session remains safe and does
-not restore or prolong a session.
+not restore or prolong a session. Active, repeated, malformed-cookie, and anonymous logout requests
+all receive the same empty success status and body so the endpoint does not disclose whether the
+submitted session existed. An expired cookie is emitted only when the request supplied one
+syntactically usable session credential; an anonymous cross-site POST therefore cannot clear the
+browser's valid host-only cookie.
 
-Cookie transport is the only browser session mechanism. The baseline cookie is host-only,
-`HttpOnly`, scoped to `Path=/`, and non-persistent. The final `Secure` and `SameSite` policy,
-cross-site request checks, CSRF evidence, duplicate-cookie handling, and cookie name are defined and
-tested by SN-107 together with the effective-HTTPS rules from SN-108. Session credentials must
-never be placed in browser local storage.
+Cookie transport is the only browser session mechanism. The cookie is host-only, `HttpOnly`,
+`SameSite=Strict`, scoped to `Path=/`, and non-persistent. Validated HTTPS adds `Secure`; direct
+plaintext modes cannot be tricked into that decision with forwarding headers. SN-107 owns the
+remaining cross-site request checks and CSRF evidence. Session credentials must never be placed in
+browser local storage.
 
 ## Request authorization order
 

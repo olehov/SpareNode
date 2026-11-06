@@ -16,6 +16,9 @@ namespace sparenode::authentication::api
 /// @brief Exact public endpoint used to establish an owner session.
 inline constexpr std::string_view login_path = "/api/auth/login";
 
+/// @brief Exact endpoint used to invalidate the active owner session.
+inline constexpr std::string_view logout_path = "/api/auth/logout";
+
 /// @brief Maximum complete JSON credential body retained in request memory.
 inline constexpr std::size_t maximum_login_body_bytes = 4096;
 
@@ -40,7 +43,7 @@ struct AuthenticationApiError
 /// @return Success, or a structured startup failure.
 [[nodiscard]] Result<void, AuthenticationApiError> register_authentication_api_routes(
     http::api::ApiRouterBuilder &builder,
-    std::shared_ptr<const application::SessionAuthenticationService> service);
+    const std::shared_ptr<const application::SessionAuthenticationService> &service);
 
 /// @brief Keeps the exact login credential body in bounded memory instead of temporary storage.
 /// @param[in] head Validated request metadata available before body ingestion.
