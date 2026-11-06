@@ -206,10 +206,10 @@ void send_all(const sparenode::test::TestClientSocket &client, const std::string
     return receive_until_closed(pair.client);
 }
 
-/// @brief Adds the trusted proxy metadata required by the selected transport scenario.
-[[nodiscard]] std::string proxy_headers(const bool proxy)
+/// @brief Adds forwarding metadata whose trust depends on the configured transport policy.
+[[nodiscard]] std::string proxy_headers()
 {
-    return proxy ? "X-Forwarded-Proto: https\r\nX-Forwarded-For: 192.0.2.25\r\n" : "";
+    return "X-Forwarded-Proto: https\r\nX-Forwarded-For: 192.0.2.25\r\n";
 }
 
 } // namespace
@@ -232,7 +232,7 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
 
     constexpr std::string_view body = R"({"login":"admin","password":"password"})";
     const std::string login_request =
-        "POST /api/auth/login HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers(proxy) +
+        "POST /api/auth/login HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
         "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
         "\r\n\r\n" + std::string(body);
     const auto login_response = exchange(router, config, login_request);
@@ -243,7 +243,7 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
     CHECK(login_response.contains(login_cookie));
 
     const std::string logout_request =
-        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers(proxy) +
+        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
         "Cookie: spnode_session=session-0\r\nContent-Length: 0\r\n\r\n";
     const auto logout_response = exchange(router, config, logout_request);
     REQUIRE(logout_response.starts_with("HTTP/1.1 204 No Content\r\n"));
@@ -258,7 +258,7 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
 
     const auto repeated = exchange(router, config, logout_request);
     const std::string anonymous_request =
-        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers(proxy) +
+        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
         "Origin: https://cross-site.example\r\nContent-Length: 0\r\n\r\n";
     const auto anonymous = exchange(router, config, anonymous_request);
     CHECK(repeated == logout_response);
@@ -267,4 +267,13 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
     CHECK(anonymous.ends_with("\r\n\r\n"));
     CHECK(!repeated.contains("session-0"));
     CHECK(!anonymous.contains("session-0"));
+
+    const std::string malformed_request =
+        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
+        "Cookie: spnode_session=session-0; spnode_session=session-0\r\n"
+        "Content-Length: 0\r\n\r\n";
+    const auto malformed = exchange(router, config, malformed_request);
+    CHECK(malformed.starts_with("HTTP/1.1 204 No Content\r\n"));
+    CHECK(!malformed.contains("Set-Cookie:"));
+    CHECK(malformed.ends_with("\r\n\r\n"));
 }
