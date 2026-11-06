@@ -242,6 +242,18 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
         std::string(proxy ? "; Secure\r\n" : "\r\n");
     CHECK(login_response.contains(login_cookie));
 
+    const std::string malformed_request =
+        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
+        "Cookie: spnode_session=session-0; spnode_session=session-0\r\n"
+        "Content-Length: 0\r\n\r\n";
+    const auto malformed = exchange(router, config, malformed_request);
+    CHECK(malformed.starts_with("HTTP/1.1 204 No Content\r\n"));
+    CHECK(!malformed.contains("Set-Cookie:"));
+    CHECK(malformed.ends_with("\r\n\r\n"));
+    const auto preserved = runtime.sessions->authenticate("session-0");
+    REQUIRE(preserved);
+    CHECK(sparenode::test::require_optional(preserved.value()).identity == "owner");
+
     const std::string logout_request =
         "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
         "Cookie: spnode_session=session-0\r\nContent-Length: 0\r\n\r\n";
@@ -267,13 +279,4 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
     CHECK(anonymous.ends_with("\r\n\r\n"));
     CHECK(!repeated.contains("session-0"));
     CHECK(!anonymous.contains("session-0"));
-
-    const std::string malformed_request =
-        "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
-        "Cookie: spnode_session=session-0; spnode_session=session-0\r\n"
-        "Content-Length: 0\r\n\r\n";
-    const auto malformed = exchange(router, config, malformed_request);
-    CHECK(malformed.starts_with("HTTP/1.1 204 No Content\r\n"));
-    CHECK(!malformed.contains("Set-Cookie:"));
-    CHECK(malformed.ends_with("\r\n\r\n"));
 }
