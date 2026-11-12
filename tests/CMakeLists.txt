@@ -197,6 +197,7 @@ catch_discover_tests(sparenode_session_sodium_tests)
 
 add_executable(sparenode_authentication_api_tests
     authentication/authentication_api_test.cpp
+    authentication/origin_csrf_policy_test.cpp
     authentication/session_authentication_policy_test.cpp
 )
 
@@ -311,6 +312,7 @@ add_executable(sparenode_filesystem_api_tests
 
 target_link_libraries(sparenode_filesystem_api_tests PRIVATE
     Catch2::Catch2WithMain
+    sparenode_authentication_api
     sparenode_filesystem_api
 )
 

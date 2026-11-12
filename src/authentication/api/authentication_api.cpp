@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/authentication/api/origin_csrf_policy.hpp"
 #include "sparenode/authentication/api/session_authentication_policy.hpp"
 #include "sparenode/authentication/credential_provider.hpp"
 #include "sparenode/authentication/password_verifier.hpp"
@@ -501,19 +502,20 @@ Result<void, AuthenticationApiError> register_authentication_api_routes(
             return unexpected(AuthenticationApiError{
                 AuthenticationApiErrorCode::route_registration_failed, registered.error()});
         }
+        auto logout_handler = enforce_origin_csrf(
+            [service](const http::HttpRequestView &request, const http::HttpRouteParameters &)
+            {
+                try
+                {
+                    return logout(request, *service);
+                }
+                catch (const std::bad_alloc &)
+                {
+                    return authentication_unavailable();
+                }
+            });
         auto logout_registered = builder.register_public(
-            {http::HttpMethod::post, std::string(logout_path),
-             [service](const http::HttpRequestView &request, const http::HttpRouteParameters &)
-             {
-                 try
-                 {
-                     return logout(request, *service);
-                 }
-                 catch (const std::bad_alloc &)
-                 {
-                     return authentication_unavailable();
-                 }
-             }});
+            {http::HttpMethod::post, std::string(logout_path), std::move(logout_handler)});
         if (!logout_registered)
         {
             return unexpected(AuthenticationApiError{

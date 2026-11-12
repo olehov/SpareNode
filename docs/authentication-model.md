@@ -230,6 +230,32 @@ plaintext modes cannot be tricked into that decision with forwarding headers. SN
 remaining cross-site request checks and CSRF evidence. Session credentials must never be placed in
 browser local storage.
 
+## Browser Origin and CSRF policy
+
+Every authenticated `POST`, `PUT`, or `DELETE` request must carry the exact non-simple header
+`X-SpareNode-CSRF: 1`. Browsers cannot add that header through a cross-site HTML form, and SpareNode
+does not emit permissive credentialed CORS headers that would let cross-origin script add it. The
+marker is stateless and contains no secret, so it must not be treated as an authentication
+credential or logged.
+
+When a browser supplies `Origin`, its scheme, host, and effective port must exactly match the
+validated request scheme and `Host`. HTTP port 80 and HTTPS port 443 are normalized as their
+respective defaults. `null`, malformed, duplicate, cross-scheme, and cross-authority origins are
+rejected. When `Sec-Fetch-Site` is present, it must be the unique value `same-origin`. A missing
+`Origin` remains usable by non-browser clients only when the explicit CSRF marker is present; this
+is the CLI/API fallback and does not weaken browser form protection.
+
+The policy runs after session authentication and before authorization, path decoding,
+coordination, or filesystem mutation. The session-aware public logout route uses the same
+validator without becoming a protected route, preserving identical anonymous and repeated logout
+semantics while preventing cross-site cookie invalidation. Rejections return a generic
+`403 Forbidden` response and do not disclose session or resource state.
+
+File previews retain `X-Content-Type-Options: nosniff`, force configured active HTML, SVG, XML,
+CSS, and script media types to plain text, and add `Content-Security-Policy: sandbox`. The sandbox
+removes same-origin privilege even if a browser or future MIME mapping interprets untrusted file
+content as active content.
+
 ## Request authorization order
 
 Protected handlers follow one common order:
