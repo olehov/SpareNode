@@ -244,6 +244,7 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
 
     const std::string malformed_request =
         "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
+        "X-SpareNode-CSRF: 1\r\n"
         "Cookie: spnode_session=session-0; spnode_session=session-0\r\n"
         "Content-Length: 0\r\n\r\n";
     const auto malformed = exchange(router, config, malformed_request);
@@ -256,6 +257,8 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
 
     const std::string logout_request =
         "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
+        "X-SpareNode-CSRF: 1\r\nOrigin: " +
+        std::string(proxy ? "https://localhost" : "http://localhost") + "\r\n" +
         "Cookie: spnode_session=session-0\r\nContent-Length: 0\r\n\r\n";
     const auto logout_response = exchange(router, config, logout_request);
     REQUIRE(logout_response.starts_with("HTTP/1.1 204 No Content\r\n"));
@@ -271,12 +274,13 @@ TEST_CASE("Logout invalidates sessions through direct HTTP and trusted proxy HTT
     const auto repeated = exchange(router, config, logout_request);
     const std::string anonymous_request =
         "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n" + proxy_headers() +
-        "Origin: https://cross-site.example\r\nContent-Length: 0\r\n\r\n";
+        "X-SpareNode-CSRF: 1\r\nOrigin: https://cross-site.example\r\n"
+        "Content-Length: 0\r\n\r\n";
     const auto anonymous = exchange(router, config, anonymous_request);
     CHECK(repeated == logout_response);
-    CHECK(anonymous.starts_with("HTTP/1.1 204 No Content\r\n"));
+    CHECK(anonymous.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     CHECK(!anonymous.contains("Set-Cookie:"));
-    CHECK(anonymous.ends_with("\r\n\r\n"));
+    CHECK(anonymous.ends_with("{\"error\":\"csrf_validation_failed\"}"));
     CHECK(!repeated.contains("session-0"));
     CHECK(!anonymous.contains("session-0"));
 }

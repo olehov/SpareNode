@@ -243,6 +243,7 @@ TEST_CASE("Authentication API applies secure cookie attributes and invalidates l
     CHECK(login_cookie == "spnode_session=session-0; Path=/; HttpOnly; SameSite=Strict; Secure");
 
     const std::string logout_source = "POST /api/auth/logout HTTP/1.1\r\nHost: localhost\r\n"
+                                      "X-SpareNode-CSRF: 1\r\n"
                                       "Cookie: spnode_session=session-0\r\n"
                                       "Content-Length: 0\r\n\r\n";
     auto logout_response = router.dispatch(parse_request(logout_source, true));

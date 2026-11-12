@@ -390,6 +390,7 @@ sparenode_enable_static_analysis(sparenode_session_sodium)
 
 add_library(sparenode_authentication_api STATIC
     src/authentication/api/authentication_api.cpp
+    src/authentication/api/origin_csrf_policy.cpp
     src/authentication/api/session_authentication_policy.cpp
 )
 

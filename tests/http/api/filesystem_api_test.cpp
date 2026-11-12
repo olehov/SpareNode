@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "sparenode/authentication/api/origin_csrf_policy.hpp"
 #include "sparenode/filesystem/location_permissions.hpp"
 #include "sparenode/filesystem/shared_root.hpp"
 #include "sparenode/http/api/filesystem_api.hpp"
@@ -457,10 +458,11 @@ TEST_CASE("Filesystem API maps paths to safe public errors", "[http][filesystem-
     CHECK(file.status_code() == sparenode::http::HttpStatusCode::ok);
     CHECK(file.is_streaming());
     CHECK(file.content_length() == 8);
-    REQUIRE(file.headers().size() == 3);
+    REQUIRE(file.headers().size() == 4);
     CHECK(header_value(file, "Content-Type") == "application/octet-stream");
     CHECK(header_value(file, "Content-Disposition") == "inline");
     CHECK(header_value(file, "X-Content-Type-Options") == "nosniff");
+    CHECK(header_value(file, "Content-Security-Policy") == "sandbox");
     const auto traversal = dispatch_get(router.value(), "/api/Documents/../outside");
     CHECK(traversal.status_code() == sparenode::http::HttpStatusCode::not_found);
     CHECK(body_text(traversal) == "{\"error\":\"not_found\"}");
@@ -493,6 +495,7 @@ TEST_CASE("Filesystem API selects conservative inline content types",
     CHECK(header_value(text, "Content-Type") == "text/plain");
     CHECK(header_value(text, "Content-Disposition") == "inline");
     CHECK(header_value(text, "X-Content-Type-Options") == "nosniff");
+    CHECK(header_value(text, "Content-Security-Policy") == "sandbox");
 
     const auto json = dispatch_get(router.value(), "/api/Documents/data%2Ejson");
     CHECK(header_value(json, "Content-Type") == "application/json");
@@ -621,6 +624,46 @@ TEST_CASE("Filesystem API registers every operation as protected", "[http][files
         CHECK(dispatch_delete(router.value(), target).status_code() ==
               sparenode::http::HttpStatusCode::forbidden);
     }
+}
+
+TEST_CASE("Filesystem mutations reject cross-site browser requests before their handlers",
+          "[http][filesystem-api][policy][csrf]")
+{
+    const sparenode::test::TemporaryDirectory directory("sparenode-files-api-csrf");
+    const auto retained = directory.path() / "retained.txt";
+    REQUIRE(std::ofstream(retained, std::ios::binary) << "retained");
+
+    sparenode::http::api::ProtectedRoutePolicies policies;
+    policies.origin_csrf = sparenode::authentication::api::make_origin_csrf_policy();
+    auto router = sparenode::http::make_filesystem_api_router(
+        make_server(directory, true, {}, true, true),
+        sparenode::http::api::make_protected_route_decorator(std::move(policies)));
+    REQUIRE(router);
+
+    const auto dispatch_cross_site = [&router](const std::string_view method,
+                                               const std::string_view target,
+                                               const std::string_view body = {})
+    {
+        const std::string request = std::string(method) + " " + std::string(target) +
+                                    " HTTP/1.1\r\nHost: localhost\r\nX-SpareNode-CSRF: 1\r\n"
+                                    "Origin: https://cross-site.example\r\nContent-Length: " +
+                                    std::to_string(body.size()) + "\r\n\r\n" + std::string(body);
+        auto response = router->dispatch(parse_request(request));
+        REQUIRE(response);
+        return std::move(response).value();
+    };
+
+    for (const auto &response :
+         {dispatch_cross_site("POST", "/api/Documents/created"),
+          dispatch_cross_site("PUT", "/api/Documents/uploaded.txt", "payload"),
+          dispatch_cross_site("DELETE", "/api/Documents/retained.txt")})
+    {
+        CHECK(response.status_code() == sparenode::http::HttpStatusCode::forbidden);
+        CHECK(body_text(response) == R"({"error":"csrf_validation_failed"})");
+    }
+    CHECK(!std::filesystem::exists(directory.path() / "created"));
+    CHECK(!std::filesystem::exists(directory.path() / "uploaded.txt"));
+    CHECK(read_file(retained) == "retained");
 }
 
 TEST_CASE("Filesystem API maps an active resource conflict to 423 Locked",

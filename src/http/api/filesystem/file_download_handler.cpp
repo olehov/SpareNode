@@ -39,7 +39,8 @@ make_file_response(application::FilesystemFileRead stream, const std::string_vie
         HttpStatusCode::ok, std::string(http_reason_phrase(HttpStatusCode::ok)),
         {{"Content-Type", std::string(content_type)},
          {"Content-Disposition", "inline"},
-         {"X-Content-Type-Options", "nosniff"}},
+         {"X-Content-Type-Options", "nosniff"},
+         {"Content-Security-Policy", "sandbox"}},
         content_length, std::move(reader));
     if (!response)
     {

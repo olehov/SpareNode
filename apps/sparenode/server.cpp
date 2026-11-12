@@ -10,6 +10,7 @@
 #include "sparenode/adapters/network_logging.hpp"
 #include "sparenode/application/running_application.hpp"
 #include "sparenode/authentication/api/authentication_api.hpp"
+#include "sparenode/authentication/api/origin_csrf_policy.hpp"
 #include "sparenode/authentication/api/session_authentication_policy.hpp"
 #include "sparenode/bootstrap/runtime_bootstrap.hpp"
 #include "sparenode/configuration/config_loader.hpp"
@@ -68,6 +69,7 @@ void write_startup_failure(const std::string &diagnostic)
     http::api::ProtectedRoutePolicies policies;
     policies.session_authentication =
         authentication::api::make_session_authentication_policy(session_authentication->sessions());
+    policies.origin_csrf = authentication::api::make_origin_csrf_policy();
     http::api::ApiRouterBuilder builder(
         http::api::make_protected_route_decorator(std::move(policies)));
     if (auto authentication = authentication::api::register_authentication_api_routes(
