@@ -241,9 +241,11 @@ credential or logged.
 When a browser supplies `Origin`, its scheme, host, and effective port must exactly match the
 validated request scheme and `Host`. HTTP port 80 and HTTPS port 443 are normalized as their
 respective defaults. `null`, malformed, duplicate, cross-scheme, and cross-authority origins are
-rejected. When `Sec-Fetch-Site` is present, it must be the unique value `same-origin`. A missing
-`Origin` remains usable by non-browser clients only when the explicit CSRF marker is present; this
-is the CLI/API fallback and does not weaken browser form protection.
+rejected. In trusted-proxy mode, the proxy must preserve the client-facing `Host`, including a
+non-default external port, rather than replace it with the backend authority. When
+`Sec-Fetch-Site` is present, it must be the unique value `same-origin`. A missing `Origin` remains
+usable by non-browser clients only when the explicit CSRF marker is present; this is the CLI/API
+fallback and does not weaken browser form protection.
 
 The policy runs after session authentication and before authorization, path decoding,
 coordination, or filesystem mutation. The session-aware public logout route uses the same

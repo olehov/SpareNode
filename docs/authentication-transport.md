@@ -38,6 +38,12 @@ Each request from the trusted peer must contain exactly one of each header:
 - `X-Forwarded-Proto: https`
 - `X-Forwarded-For: <one numeric IPv4 or IPv6 address>`
 
+The proxy must also preserve the client-facing `Host` authority, including any non-default
+external port. It must not replace `Host` with the backend authority or provide the public
+authority through `X-Forwarded-Host`; SpareNode deliberately does not trust that additional
+forwarded field. Browser Origin validation compares the submitted `Origin` with this preserved
+`Host` value.
+
 Missing, repeated, comma-separated, hostname, or otherwise malformed values are rejected. A
 forwarded scheme other than `https` is rejected with `403 Forbidden`; malformed proxy metadata is
 rejected with `400 Bad Request`. In direct modes these headers are ignored and cannot change the
@@ -113,7 +119,7 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $remote_addr;
     }
